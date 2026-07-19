@@ -1,0 +1,20 @@
+# Orion's OWN Neo4j — standalone, does not touch sentryV2's instance.
+# Host ports 7688 (Bolt) / 7475 (HTTP) so both can coexist. Community edition is
+# sufficient: Orion needs none of Enterprise's multi-DB / RBAC / Fabric features,
+# and Neo4j 5.x Community supports the native vector index used by the semantic layer.
+services:
+  orion-neo4j:
+    image: neo4j:5.26-community
+    container_name: orion-neo4j
+    ports:
+      - "7688:7687"
+      - "7475:7474"
+    environment:
+      NEO4J_AUTH: "neo4j/orion_dev_changeme"
+      NEO4J_server_memory_heap_max__size: "2G"
+      NEO4J_server_memory_pagecache_size: "1G"
+    volumes:
+      - orion_neo4j_data:/data
+
+volumes:
+  orion_neo4j_data:

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "orion": {
+      "command": "./.venv/bin/python",
+      "args": ["-m", "orion.mcp_server"]
+    }
+  }
+}

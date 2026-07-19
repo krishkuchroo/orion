@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# OS
+.DS_Store
+
+# Local environment and secrets (commit .env.example, never .env)
+.env
+
+# Orion run artifacts (per-scan progress logs and captured terminal output)
+.orion/
+*.log
+
+# Build-tooling state (superpowers workflow tracking)
+.superpowers/
+
+# Test fixtures: vendored vulnerable apps and generated Joern CPGs/exports.
+# These are large and/or externally sourced; see README (Setup) to provision them locally.
+fixtures/

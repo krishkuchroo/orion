@@ -1,0 +1,35 @@
+[project]
+name = "orion"
+version = "0.1.0"
+description = "Standalone GraphRAG code-security scanner: build a code graph, discover vulns by querying it, verify each independently."
+requires-python = ">=3.12"
+dependencies = [
+    "neo4j>=5.0",
+    "fastmcp>=2.0",
+]
+
+[project.optional-dependencies]
+# Semantic layer (Task E): local code embeddings + a vector store. Neo4j-native vector index is
+# the default backend; lancedb is the standalone fallback (both behind the semantic_search tool).
+semantic = ["sentence-transformers>=3.0", "lancedb>=0.13"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+orion = "orion.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["orion", "orion.graph"]
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: costs no Claude tokens but does real local compute (e.g. embedding-model download/inference); run explicitly.",
+]
+
+# Note: discovery and verification drive the headless `claude -p` CLI over real MCP tools, so there
+# is no Anthropic SDK dependency. The graph is built natively via Joern (~/joern/joern-cli), so
+# there is no sentryV2 dependency either. Install everything up front:
+#   pip install -e ".[semantic,dev]"
