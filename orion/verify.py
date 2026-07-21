@@ -18,11 +18,17 @@ Design (locked in task-d-brief.md):
     decision="ERROR" -- NEVER a silent CONFIRM. A verifier that genuinely can't decide says
     INCONCLUSIVE itself; ERROR is reserved for "the call itself broke."
 
-verify_all() runs leads SEQUENTIALLY (simple, robust, easy to reason about under the trust
-invariant) -- do not add concurrency here, it isn't needed at this scale.
+verify_all() verifies leads with BOUNDED CONCURRENCY (config.VERIFY_CONCURRENCY, default 4). Each
+lead is still its own fully isolated fresh session -- the trust invariant is per-lead and unaffected
+by running several at once -- but a semaphore caps how many verify in parallel so a large lead set
+does not spawn an unbounded number of claude -p processes or trip API rate limits. Verification is
+the run's wall-clock bottleneck (each lead is a whole session), so this is where parallelism pays
+off. Results are returned in lead order regardless of completion order; set concurrency=1 for the
+old strictly-sequential behavior.
 """
 from __future__ import annotations
 
+import asyncio
 import uuid
 
 from . import config
@@ -171,10 +177,36 @@ def verify_lead(scan_id: str, lead: Lead, repo_path: str, on_event: OnEvent, run
     return verdict
 
 
-def verify_all(scan_id: str, leads: list[Lead], repo_path: str, on_event: OnEvent) -> list[Verdict]:
-    """Verifies each lead in ITS OWN fresh claude -p session, sequentially. Deliberately not
-    concurrent: verification is the trust-bearing step, and sequential execution is simple,
-    robust, and easy to reason about at this scale (do not overengineer)."""
-    from .claude_cli import run_agent  # lazy: Task C owns claude_cli.py, built in parallel
+async def _verify_all_async(scan_id: str, leads: list[Lead], repo_path: str, on_event: OnEvent,
+                            run_agent, concurrency: int) -> list[Verdict]:
+    """Fan the per-lead verifiers out under a semaphore. Each verify_lead is a blocking subprocess
+    call, so it runs in a worker thread (asyncio.to_thread); the semaphore bounds how many are in
+    flight. asyncio.gather preserves input (lead) order in the returned list."""
+    sem = asyncio.Semaphore(max(1, concurrency))
 
-    return [verify_lead(scan_id, lead, repo_path, on_event, run_agent) for lead in leads]
+    async def _one(lead: Lead) -> Verdict:
+        async with sem:
+            return await asyncio.to_thread(
+                verify_lead, scan_id, lead, repo_path, on_event, run_agent)
+
+    return list(await asyncio.gather(*(_one(lead) for lead in leads)))
+
+
+def verify_all(scan_id: str, leads: list[Lead], repo_path: str, on_event: OnEvent,
+               *, run_agent=None, concurrency: int | None = None) -> list[Verdict]:
+    """Verifies each lead in ITS OWN fresh claude -p session, up to `concurrency` at a time
+    (defaults to config.VERIFY_CONCURRENCY). Every verifier is independent and isolated, so running
+    several concurrently does not weaken the trust invariant; the cap just avoids an unbounded
+    process/rate-limit spike. Verdicts are returned in lead order regardless of finish order.
+
+    `run_agent` is injectable (defaults to the lazy claude_cli import) so concurrency is testable
+    without a real subprocess; `concurrency=1` restores strictly-sequential verification."""
+    if not leads:
+        return []
+    if run_agent is None:
+        from .claude_cli import run_agent as _lazy_run_agent  # lazy: keeps import off the hot path
+        run_agent = _lazy_run_agent
+    if concurrency is None:
+        concurrency = config.VERIFY_CONCURRENCY
+    return asyncio.run(
+        _verify_all_async(scan_id, leads, repo_path, on_event, run_agent, concurrency))

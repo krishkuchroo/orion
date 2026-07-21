@@ -25,6 +25,10 @@ EFFORT = _env("ORION_EFFORT", "high")
 MAX_TURNS = int(_env("ORION_MAX_TURNS", "40"))
 VERIFY_MAX_TURNS = int(_env("ORION_VERIFY_MAX_TURNS", "10"))
 CALL_TIMEOUT = int(_env("ORION_CALL_TIMEOUT", "180"))
+# How many per-lead verifier sessions run at once. Verification is the wall-clock bottleneck (each
+# lead is an independent fresh claude -p session), so it fans out; the cap keeps a big lead set from
+# spawning an unbounded number of processes / tripping API rate limits. Set 1 for strictly sequential.
+VERIFY_CONCURRENCY = int(_env("ORION_VERIFY_CONCURRENCY", "4"))
 
 # --- MCP tool server the agents call (real tool-calling, not the old text protocol) ---
 MCP_CONFIG = _env("ORION_MCP_CONFIG", ".mcp/orion.json")
