@@ -65,20 +65,36 @@ def scan_id_for(repo_path: str) -> str:
 
 
 def build(repo_path: str, language: str | None = None,
-          on_event: OnEvent | None = None) -> str:
+          on_event: OnEvent | None = None, *,
+          stream: bool = False, queue_size: int = 64,
+          scan_id: str | None = None) -> str:
     """Build `repo_path` into Orion's graph and return its scan_id. Clears then loads that scan.
 
     `language` pins the Joern frontend (jssrc/pythonsrc/gosrc/javasrc), overriding auto-detection;
     when omitted the frontend is guessed from the repo's markers and -- if `on_event` is given and
-    the repo is polyglot -- a 'warn' event names the pick and the --language override."""
-    scan_id = scan_id_for(repo_path)
+    the repo is polyglot -- a 'warn' event names the pick and the --language override.
+
+    `stream=True` takes the streaming per-function build (parse/reuse cpg.bin, NO whole-graph export;
+    the per-function producer -> bounded consumer assembles the SAME envelope) instead of the legacy
+    joern-export blob; `queue_size` bounds how many function segments the consumer decodes at once.
+    `scan_id` overrides the deterministic identity so two builds of the SAME repo (e.g. a legacy vs a
+    stream parity check) persist into DISTINCT partitions instead of clobbering each other."""
+    scan_id = scan_id or scan_id_for(repo_path)
     frontend, display_language = joern_adapter.resolve_language(repo_path, language)
     if on_event is not None:
         warn = _ambiguity_warning(repo_path, language, frontend)
         if warn is not None:
             on_event(warn)
     profile = profiles.select_profile(repo_path, display_language)
-    envelope = joern_adapter.export_repo(repo_path, frontend, profile)
+    if stream:
+        import tempfile
+        from pathlib import Path
+        from .graph import stream_build
+        cpg_bin = joern_adapter.ensure_cpg(repo_path, frontend)   # parse or reuse cpg.bin, NO export
+        work = Path(tempfile.mkdtemp(prefix="orion_stream_"))
+        envelope = stream_build.build_envelope(str(cpg_bin), work, profile, queue_size=queue_size)
+    else:
+        envelope = joern_adapter.export_repo(repo_path, frontend, profile)
     dependencies = deps.parse_dependencies(repo_path)
     batch = joern_adapter.normalize(envelope, scan_id, language=display_language,
                                     dependencies=dependencies)

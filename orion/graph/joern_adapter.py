@@ -640,6 +640,30 @@ def resolve_language(repo_path: str | Path, language: str | None = None) -> tupl
     return frontend, _DISPLAY_LANG.get(frontend, frontend)
 
 
+def ensure_cpg(repo_path: str | Path, language: str | None = None) -> Path:
+    """Parse `repo` to a cpg.bin and return its path WITHOUT exporting -- the streaming producer reads
+    cpg.bin directly, so the whole-graph joern-export (the 85x GraphSON blob) is skipped entirely.
+    Reuses a prebuilt `<repo>/cpg.bin` when present (the eval fixtures ship one); otherwise runs
+    joern-parse into a temp dir. This is the parse half of `export_repo`, with `_run_export` removed."""
+    repo = Path(repo_path).resolve()
+    cpg_bin = repo / "cpg.bin"
+    if cpg_bin.exists():
+        return cpg_bin
+    env = _ensure_greadlink(dict(os.environ))
+    env.setdefault("JAVA_HOME", os.environ.get("JAVA_HOME", ""))
+    parse = _joern_bin("joern-parse")
+    if not parse.exists():
+        raise RuntimeError(f"joern-parse not found under {config.JOERN_HOME} (set JOERN_HOME)")
+    out_cpg = Path(tempfile.mkdtemp(prefix="orion_cpg_")) / "cpg.bin"
+    r = subprocess.run(
+        [str(parse), *_jvm_flags(), str(repo),
+         "--language", language or _guess_language(repo), "--output", str(out_cpg)],
+        capture_output=True, text=True, env=env)
+    if r.returncode != 0 or not out_cpg.exists():
+        raise RuntimeError(f"joern-parse failed (rc={r.returncode}):\n{r.stdout}\n{r.stderr}")
+    return out_cpg
+
+
 def export_repo(repo_path: str | Path, language: str | None = None, profile=None) -> dict:
     """Produce the compact Joern envelope for `repo`. Reuses a prebuilt `cpg.bin` when present
     (joern-export only, ~3s — honest re-export, never a stale cached json); otherwise runs

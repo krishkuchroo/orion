@@ -35,6 +35,7 @@
 //   inside a nested lambda stops at the lambda METHOD, never leaking into the outer method.
 import io.shiftleft.codepropertygraph.cpgloading.CpgLoader
 import io.shiftleft.codepropertygraph.generated.nodes.Expression
+import io.shiftleft.codepropertygraph.generated.nodes.Method
 import java.io.PrintWriter
 import scala.collection.mutable
 import scala.jdk.CollectionConverters._
@@ -104,7 +105,16 @@ import scala.jdk.CollectionConverters._
   })
 
   // ── bucket vertices (as JSON) by owning method (INCLUDING the METHOD vertex itself) ──
+  // flatgraph's propertiesMap OMITS a property sitting at its schema default; joern-export's GraphSON
+  // KEEPS it. Re-add the default-omitted props the envelope's node comparison reads, from the SAME
+  // typed accessors GraphSON serializes (so the value is byte-identical to the oracle):
+  //   Expression.ARGUMENT_INDEX (default -1)  — Task 5 (taint summaries read it)
+  //   Method.IS_EXTERNAL (default false)      — Task 8 gate A (140 internal methods omit it)
+  //   Method.FILENAME (default "<empty>")     — Task 8 gate A (141 methods omit it)
+  // serializeProps only adds an extra when propertiesMap LACKS the key, so a method with a real
+  // filename / a true IS_EXTERNAL keeps its stored value (no double-add, no override).
   def vExtra(n: Any): List[(String, String)] = n match {
+    case m: Method     => List(("IS_EXTERNAL", m.isExternal.toString), ("FILENAME", jsonStr(m.filename)))
     case e: Expression => List(("ARGUMENT_INDEX", e.argumentIndex.toString))   // -1 default kept
     case _             => Nil
   }

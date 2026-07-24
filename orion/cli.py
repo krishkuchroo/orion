@@ -74,7 +74,8 @@ def _run_scan(args: argparse.Namespace) -> int:
 
     if needs_build:
         on_event(_event("build", "start", detail=f"building graph for {args.repo}"))
-        graph_build.build(args.repo, args.language, on_event)
+        graph_build.build(args.repo, args.language, on_event,
+                          stream=args.stream, queue_size=args.queue_size)
         on_event(_event("build", "done", detail="graph build complete"))
     else:
         on_event(_event("build", "done", detail=f"using existing scan_id {scan_id}"))
@@ -162,6 +163,12 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--quiet", action="store_true", help="suppress per-event progress prints (still logs to file)")
     scan.add_argument("--language", dest="language", metavar="FRONTEND",
                       help="Joern frontend id (jssrc/pythonsrc/golang/javasrc); overrides repo auto-detection")
+    scan.add_argument("--stream", dest="stream", action="store_true",
+                      help="use the streaming per-function build (avoids the 85x export blob)")
+    scan.add_argument("--no-stream", dest="stream", action="store_false")
+    scan.set_defaults(stream=False)
+    scan.add_argument("--queue-size", dest="queue_size", type=int, default=64,
+                      help="functions held in flight by the streaming build (default 64)")
 
     args = parser.parse_args(argv)
 

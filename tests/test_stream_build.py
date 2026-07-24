@@ -174,3 +174,74 @@ def test_stream_flows_parity(tmp_path):
     # C.3 fix: entry_methods are full_names (not sorted summary ids) and match legacy exactly.
     legacy = J.project_graphson(_export(cpg), profile=prof)
     assert env["entry_methods"] == legacy["entry_methods"]
+
+
+# ─────────────────────────── Task 8: envelope + two-partition persist parity (delta D.3) ───────────────────────────
+def _nodeset(env):
+    return {(n["label"], n["id"], frozenset(n["props"].items())) for n in env["nodes"]}
+
+
+def _edgemulti(env):
+    return Counter((e["label"], e["out"], e["in"], e.get("arg_index"), e.get("provenance"))
+                   for e in env["edges"])
+
+
+@pytest.mark.slow
+def test_stream_envelope_parity_nodegoat(tmp_path):
+    cpg = "fixtures/NodeGoat/cpg.bin"
+    if not Path(cpg).exists():
+        pytest.skip("NodeGoat cpg.bin not present")
+    from orion.graph import joern_adapter as J, profiles
+    prof = profiles.select_profile("fixtures/NodeGoat")
+    legacy = J.project_graphson(_export(cpg), profile=prof)
+    stream = S.build_envelope(str(cpg), tmp_path, prof)
+    # (A) full node set (labels+ids+props) and edge multiset (structural + FLOWS_TO w/ provenance)
+    assert _nodeset(stream) == _nodeset(legacy)
+    assert _edgemulti(stream) == _edgemulti(legacy)
+    assert stream["entry_methods"] == legacy["entry_methods"]
+    # (D) structural-edge counts explicitly (subsumed by A, asserted for a sharper failure message)
+    def _struct(env):
+        return Counter(e["label"] for e in env["edges"] if e["label"] != "FLOWS_TO")
+    assert _struct(stream) == _struct(legacy)
+
+
+@pytest.mark.slow
+def test_stream_two_partition_persist_parity():
+    cpg = "fixtures/NodeGoat/cpg.bin"
+    if not Path(cpg).exists():
+        pytest.skip("NodeGoat cpg.bin not present")
+    from orion import graph_build
+    from orion.graph import persist
+    from neo4j import GraphDatabase
+    from orion import config
+    legacy_id = graph_build.build("fixtures/NodeGoat", None, None, stream=False, scan_id="parity-legacy")
+    stream_id = graph_build.build("fixtures/NodeGoat", None, None, stream=True, scan_id="parity-stream")
+
+    def _counts(sid):
+        drv = GraphDatabase.driver(config.NEO4J_URI, auth=config.NEO4J_AUTH)
+        try:
+            with drv.session(database=config.NEO4J_DATABASE) as s:
+                nodes = {r["l"]: r["n"] for r in s.run(
+                    "MATCH (x {scan_id:$sid}) UNWIND labels(x) AS l RETURN l, count(*) AS n", sid=sid)}
+                edges = {r["t"]: r["n"] for r in s.run(
+                    "MATCH ({scan_id:$sid})-[r]->() RETURN type(r) AS t, count(r) AS n", sid=sid)}
+            return nodes, edges
+        finally:
+            drv.close()
+
+    assert persist.flows_count(stream_id) == persist.flows_count(legacy_id) == 217
+    assert _counts(stream_id) == _counts(legacy_id)   # per-label node + per-type edge parity (incl. D)
+
+
+@pytest.mark.slow
+def test_stream_envelope_parity_pygoat(tmp_path):
+    cpg = "fixtures/pygoat/cpg.bin"
+    if not Path(cpg).exists():
+        pytest.skip("PyGoat cpg.bin not present")
+    from orion.graph import joern_adapter as J, profiles
+    prof = profiles.select_profile("fixtures/pygoat")   # GENERIC: exercises entry_taint
+    legacy = J.project_graphson(_export(cpg), profile=prof)
+    stream = S.build_envelope(str(cpg), tmp_path, prof)
+    assert _nodeset(stream) == _nodeset(legacy)
+    assert _edgemulti(stream) == _edgemulti(legacy)
+    assert stream["entry_methods"] == legacy["entry_methods"]

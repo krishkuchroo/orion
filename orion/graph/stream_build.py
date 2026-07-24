@@ -168,16 +168,18 @@ def build_envelope(cpg_bin: str, work, profile, *, queue_size: int = 64,
         mid = seg["method_id"]
         method_fullname[mid] = _method_fullname(seg)
         method_vertices[mid] = next(v for v in seg["vertices"] if v["id"] == mid)
-        for cs in seg["callsites"]:
-            if cs["callee_id"] is not None:
-                callee_edges[cs["call_id"]] = cs["callee_id"]
-                callgraph[mid].add(cs["callee_id"])
-        # `called` must mirror the whole-graph _entry_method_ids: EVERY CALL to METHOD callee, not
-        # only the taint `callsites` subset. A method reached solely via an operator call or an extra
-        # multi-callee site would otherwise be absent from `called` and misread as an entry point,
-        # which on a GENERIC repo (entry params are taint sources) changes FLOWS_TO. Use call_edges.
+        # Cross-function callee map + call graph + the `called` set (entry detection), ALL from
+        # `call_edges` -- EVERY CALL -> METHOD out-edge, last-write-wins. This is byte-identical to
+        # the oracle's callee relation (collapse_flows' `callee[o] = i` and taint_summary._attach_callees'
+        # cmap, both last-wins over ALL CALL edges). It is NOT the taint `callsites` subset, which
+        # keeps only real calls with their FIRST callee: that drops the <operator>.* callee edges AND
+        # mis-resolves a multi-callee real call to its first callee, so `stitch_target` hops to the
+        # wrong param and OVER-produces `inferred` FLOWS_TO on a GENERIC repo (PyGoat: 1078 vs 1075).
+        # `call_edges` last-wins reproduces the oracle cmap exactly (0 differing keys on both repos).
         for _call_id, callee_id in seg["call_edges"]:
             if callee_id is not None:
+                callee_edges[_call_id] = callee_id     # last-wins == collapse_flows' callee[o] = i
+                callgraph[mid].add(callee_id)
                 called.add(callee_id)
         for v in seg["vertices"]:
             if v["label"] == "METHOD_REF":

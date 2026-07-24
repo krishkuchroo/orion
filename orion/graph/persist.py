@@ -64,6 +64,19 @@ def _write_tx(tx, batch: Batch) -> None:
         tx.run(_edge_write(rtype, fl, tl, fkeys, tkeys), rows=rows)
 
 
+def flows_count(scan_id: str) -> int:
+    """Count FLOWS_TO edges persisted for a scan partition. FLOWS_TO carries `scan_id` as a
+    relationship property (schema.emit_edge stamps it), so this scopes to exactly one build --
+    the read-side check that a stream vs legacy build persisted the same taint edge count."""
+    driver = GraphDatabase.driver(config.NEO4J_URI, auth=config.NEO4J_AUTH)
+    try:
+        with driver.session(database=config.NEO4J_DATABASE) as s:
+            return s.run("MATCH ()-[r:FLOWS_TO {scan_id:$sid}]->() RETURN count(r) AS n",
+                         sid=scan_id).single()["n"]
+    finally:
+        driver.close()
+
+
 def persist(batch: Batch) -> dict:
     """Clear the scan partition and load the batch (nodes then edges) in one atomic write
     transaction. Returns a small summary for the build log."""
