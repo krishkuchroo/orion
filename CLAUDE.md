@@ -98,14 +98,14 @@ this session (the earlier "nothing committed" rule lifted at Krish's request).
   `CONTAINS_CALL` gap (above) is a real graph limitation B3 routes around — keep reading real source.
 - Streaming taint's closure seam is load-bearing: `build_summary(mid, ..., None)` (or any path that
   drops `cross_rd`/`closure_targets`) yields 190 FLOWS_TO, not 217, because it loses the third
-  cross-edge family (cross-method REACHING_DEF closure captures). Keep the seam wired through BOTH
-  passes of `build_envelope`, and run `tests/test_stream_build.py::test_stream_flows_parity` (217) as
-  the tripwire.
-- The token-free suite is Orion's own `tests/` (run `pytest tests -m "not slow"`, 75 passing). The
-  bare `pytest -m "not slow"` recurses into the gitignored `fixtures/` scan targets (e.g. a Django
-  authentik checkout with hundreds of `django`-importing test files), whose own `tests/` package also
-  shadows Orion's top-level `tests` package and makes even Orion's tests fail to collect. Always scope
-  to `tests/`.
+  cross-edge family (cross-method REACHING_DEF closure captures). Keep the seam threaded into
+  `build_summary` in pass 2 (pass 1 accumulates the cross-method tables `stitch` needs), and run
+  `tests/test_stream_build.py::test_stream_flows_parity` (217) as the tripwire.
+- The token-free suite is Orion's own `tests/` (`pytest -m "not slow"`, 75 passing). `pyproject.toml`
+  sets `testpaths = ["tests"]` so bare pytest does NOT recurse into the gitignored `fixtures/` scan
+  targets (e.g. a Django authentik checkout with hundreds of `django`-importing test files whose own
+  `tests/` package would otherwise shadow Orion's top-level `tests` and break collection). Passing an
+  explicit path that reaches into `fixtures/` bypasses that scoping.
 
 ## Environment
 
