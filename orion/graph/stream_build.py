@@ -172,7 +172,13 @@ def build_envelope(cpg_bin: str, work, profile, *, queue_size: int = 64,
             if cs["callee_id"] is not None:
                 callee_edges[cs["call_id"]] = cs["callee_id"]
                 callgraph[mid].add(cs["callee_id"])
-                called.add(cs["callee_id"])
+        # `called` must mirror the whole-graph _entry_method_ids: EVERY CALL to METHOD callee, not
+        # only the taint `callsites` subset. A method reached solely via an operator call or an extra
+        # multi-callee site would otherwise be absent from `called` and misread as an entry point,
+        # which on a GENERIC repo (entry params are taint sources) changes FLOWS_TO. Use call_edges.
+        for _call_id, callee_id in seg["call_edges"]:
+            if callee_id is not None:
+                called.add(callee_id)
         for v in seg["vertices"]:
             if v["label"] == "METHOD_REF":
                 mfn = v["properties"].get("METHOD_FULL_NAME")
