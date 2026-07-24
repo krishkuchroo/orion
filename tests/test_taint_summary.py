@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from orion.graph import taint_summary as T
 from orion.graph import joern_adapter as J
+from orion.graph import profiles
 
 JOERN_EXPORT = Path.home() / "joern/joern-cli/joern-export"
 
@@ -52,3 +53,22 @@ def test_summary_direct_reach(nodegoat_graphson):
         for entry, targets in s.direct.items():
             for (rc, idx) in targets:
                 assert rc in s.real_calls
+
+
+def _flowset(flows):
+    return {(f["out"], f["in"], f["arg_index"], f["provenance"]) for f in flows}
+
+
+@pytest.mark.slow
+def test_oracle_parity_nodegoat(nodegoat_graphson):
+    g = nodegoat_graphson
+    prof = profiles.select_profile("fixtures/NodeGoat")
+    entry_ids = J._entry_method_ids(g["@value"] if "@type" in g else g)
+    entry_taint = frozenset(entry_ids) if prof.entrypoint_params_are_sources else None
+    oracle = J.collapse_flows(g["@value"] if "@type" in g else g,
+                              request_source_names=prof.request_source_names,
+                              entrypoint_method_ids=entry_taint)
+    got = T.flows_via_summaries(g, request_source_names=prof.request_source_names,
+                                entrypoint_method_ids=entry_taint)
+    assert len(oracle) == 217, "baseline changed; re-derive expectation"
+    assert _flowset(got) == _flowset(oracle)   # EXACT: edges + provenance
