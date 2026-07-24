@@ -159,3 +159,18 @@ def test_stream_structural_and_property_parity(tmp_path, repo):
         props = pn.get("properties", {})
         for key in _PROP_KEYS:
             assert _prod_prop(props, key) == J._prop(lv, key), (pn["id"], pn["label"], key)
+
+
+# ─────────────────────────── Task 7: two-pass envelope, FLOWS_TO == 217 end-to-end ───────────────────────────
+@pytest.mark.slow
+def test_stream_flows_parity(tmp_path):
+    cpg = "fixtures/NodeGoat/cpg.bin"
+    if not Path(cpg).exists():
+        pytest.skip("NodeGoat cpg.bin not present")
+    prof = profiles.select_profile("fixtures/NodeGoat")
+    env = S.build_envelope(str(cpg), tmp_path, prof)
+    flows = [e for e in env["edges"] if e["label"] == "FLOWS_TO"]
+    assert len(flows) == 217
+    # C.3 fix: entry_methods are full_names (not sorted summary ids) and match legacy exactly.
+    legacy = J.project_graphson(_export(cpg), profile=prof)
+    assert env["entry_methods"] == legacy["entry_methods"]

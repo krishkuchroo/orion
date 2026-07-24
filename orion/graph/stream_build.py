@@ -10,11 +10,12 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-from collections import Counter
+from collections import Counter, defaultdict
 from itertools import islice
 from pathlib import Path
 
 from .joern_adapter import _joern_bin, _jvm_flags, _ensure_greadlink, project_graphson
+from . import joern_adapter as J    # Task 7 reuses the split entry-point test (_entry_method_ids_from)
 from . import taint_summary as T  # noqa: F401  (pass 2 / Task 7 threads summaries through this)
 
 _SCRIPT = Path(__file__).parent / "joern_scripts" / "emit_segments.sc"
@@ -110,3 +111,94 @@ def collect_structural(cpg_bin: str, work, profile, *, queue_size: int = 64):
             node_set.update((n["label"], n["id"]) for n in nodes)
             edge_ctr.update((e["label"], e["out"], e["in"]) for e in edges)
     return node_set, edge_ctr
+
+
+# ─────────────────────── consumer pass 2: summary-stitch taint (FLOWS_TO) + full envelope ───────────────────────
+def _method_fullname(seg: dict):
+    """The FULL_NAME of a segment's own METHOD vertex (== joern_adapter._prop for a single-cardinality
+    property: the producer serializes propertiesMap as a plain scalar, no GraphSON type-tag)."""
+    mv = next(v for v in seg["vertices"] if v["id"] == seg["method_id"])
+    return mv["properties"].get("FULL_NAME")
+
+
+def _seg_cross_rd(seg: dict) -> dict:
+    """One segment's cross-method REACHING_DEF source->targets map (the closure seam `build_summary`
+    consults as `cross_rd`), rebuilt from the producer's flat `[[out,in],...]` pairs."""
+    d = defaultdict(list)
+    for (o, i) in seg["cross_rd"]:
+        d[o].append(i)
+    return dict(d)
+
+
+def build_envelope(cpg_bin: str, work, profile, *, queue_size: int = 64,
+                   resume: bool = False, simulate_crash_after: int = None) -> dict:
+    """Assemble the SAME `{"nodes","edges","entry_methods"}` envelope `project_graphson` returns for
+    the whole graph, but from the per-function stream. Two passes over `segments.jsonl`:
+
+      PASS 1 projects structural nodes/edges (Task 6) AND accumulates the cross-method tables the
+        stitch needs — `callee_edges` (call id -> callee METHOD id, straight off each callsite's single
+        taint callee), `callgraph`, `method_fullname` — plus the entry-point facts (`method_vertices`,
+        `called`, `has_param`, `callback_fulls`). Entry ids are then reconstructed via the SAME tested
+        `_entry_method_ids_from` the whole graph uses (delta C.3), and `entry_taint` restores the
+        GENERIC entry-point-param taint sources.
+      PASS 2 builds one `Summary` per segment WITH that segment's closure seam (`cross_rd`/
+        `closure_targets`) and the reconstructed `entry_taint`, sets `callee_edges` on each so
+        `_callee_map` resolves cross-function hops, then `stitch` produces FLOWS_TO.
+
+    Never `build_summary(mid, ..., None)`: that drops the closure seam and yields 190, not 217."""
+    work = Path(work); work.mkdir(parents=True, exist_ok=True)
+    out = work / "segments.jsonl"
+    if not (resume and out.exists()):
+        run_producer(cpg_bin, str(out))
+    src_names = profile.request_source_names if profile else T._REQUEST_PARAM_NAMES
+
+    # ---- PASS 1: project structural (Task 6) + accumulate cross-method tables + entry facts ----
+    nodes, edges = [], []                       # the normalized batch, held ONCE (Option 2 / §8)
+    callee_edges: dict = {}                      # call_id -> callee METHOD id (== _attach_callees cmap)
+    callgraph = defaultdict(set)                 # caller mid -> {callee mid}
+    method_fullname: dict = {}                   # method_id -> FULL_NAME
+    method_vertices: dict = {}                   # method_id -> its METHOD vertex (for the entry test)
+    called: set = set(); has_param: set = set(); callback_fulls: set = set()
+    for f in _read_preamble(str(out))["files"]:
+        nodes.append({"label": "FILE", "id": f["id"], "props": {"NAME": f["properties"].get("NAME")}})
+    start = 1                                    # Task 9 replaces this with _read_cursor(work) on resume
+    for i, seg in _iter_segments(str(out), start):
+        snodes, sedges = _structural(seg, profile)
+        nodes.extend(snodes); edges.extend(sedges)
+        mid = seg["method_id"]
+        method_fullname[mid] = _method_fullname(seg)
+        method_vertices[mid] = next(v for v in seg["vertices"] if v["id"] == mid)
+        for cs in seg["callsites"]:
+            if cs["callee_id"] is not None:
+                callee_edges[cs["call_id"]] = cs["callee_id"]
+                callgraph[mid].add(cs["callee_id"])
+                called.add(cs["callee_id"])
+        for v in seg["vertices"]:
+            if v["label"] == "METHOD_REF":
+                mfn = v["properties"].get("METHOD_FULL_NAME")
+                if isinstance(mfn, str) and mfn:
+                    callback_fulls.add(mfn)
+        if any(e["label"] == "AST" and e["outVLabel"] == "METHOD"
+               and e["inVLabel"] == "METHOD_PARAMETER_IN" for e in seg["edges"]):
+            has_param.add(mid)
+        # Task 9 hooks: persist pass-1 tables/summaries + cursor per batch, honor simulate_crash_after.
+
+    # entry-point reconstruction (C.3), reusing the refactored tested logic
+    entry_ids = J._entry_method_ids_from(method_vertices, called, has_param, callback_fulls)
+    entry_methods = sorted({method_fullname[e] for e in entry_ids
+                            if method_fullname.get(e) is not None})
+    entry_taint = (frozenset(entry_ids)
+                   if (profile is not None and profile.entrypoint_params_are_sources) else None)
+
+    # ---- PASS 2: build_summary per segment WITH the closure seam + entry_taint ----
+    summaries: dict = {}
+    for i, seg in _iter_segments(str(out), 1):
+        mid = seg["method_id"]
+        summaries[mid] = T.build_summary(mid, _seg_to_graphson(seg), src_names, entry_taint,
+                                         cross_rd=_seg_cross_rd(seg),
+                                         closure_targets=seg["closure_targets"])
+        summaries[mid].callee_edges = callee_edges     # _callee_map reads this off any summary
+    flows = T.stitch(summaries, dict(callgraph),
+                     request_source_names=src_names, entrypoint_method_ids=entry_taint)
+    edges.extend(flows)
+    return {"nodes": nodes, "edges": edges, "entry_methods": entry_methods}

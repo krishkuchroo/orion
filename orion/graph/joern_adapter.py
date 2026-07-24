@@ -270,36 +270,22 @@ def _call_file_map(g: dict) -> dict:
     return file_map
 
 
-def _entry_method_ids(g: dict) -> set:
-    """Structural, framework-FREE entry-point detection: a first-party METHOD that nothing else in
-    the code calls (a call-graph root) and that takes parameters is an entry point — a request
-    handler, an exported API function, main(). Language-agnostic: it reads only the CALL and AST
-    structure Joern emits for every language, never a framework's naming convention. Over-includes
-    (some roots are just uncalled helpers), which is fine: EntryPoints are anchors/source hints the
-    verifier still checks, never findings on their own. Returns METHOD vertex ids."""
-    verts = {_unwrap(v["id"]): v for v in g.get("vertices", [])}
-    called: set = set()
-    has_param: set = set()
-    # Methods passed as CALLBACKS (referenced by a METHOD_REF): the universal "register a handler"
-    # pattern — Express/Koa/Fastify route callbacks, event handlers, etc. Framework-free, and it
-    # catches the arrow-function handlers the call-graph-root test alone misses.
-    callback_fulls: set = set()
-    for v in verts.values():
-        if v["label"] == "METHOD_REF":
-            mfn = _prop(v, "METHOD_FULL_NAME")
-            if isinstance(mfn, str) and mfn:
-                callback_fulls.add(mfn)
-    for e in g.get("edges", []):
-        o, i = _unwrap(e["outV"]), _unwrap(e["inV"])
-        lbl = e["label"]
-        if lbl == "CALL" and verts.get(i, {}).get("label") == "METHOD":
-            called.add(i)                      # something first-party resolves a call to it
-        elif (lbl == "AST" and verts.get(o, {}).get("label") == "METHOD"
-              and verts.get(i, {}).get("label") == "METHOD_PARAMETER_IN"):
-            has_param.add(o)
+def _entry_method_ids_from(method_vertices: dict, called: set, has_param: set,
+                           callback_fulls: set) -> set:
+    """The pure structural entry-point test over accumulated inputs (see `_entry_method_ids`).
+
+    Framework-FREE entry-point detection: a first-party METHOD that nothing else in the code calls
+    (a call-graph root) and that takes parameters is an entry point — a request handler, an exported
+    API function, main(). Language-agnostic: it reads only the CALL and AST structure Joern emits for
+    every language, never a framework's naming convention. Over-includes (some roots are just uncalled
+    helpers), which is fine: EntryPoints are anchors/source hints the verifier still checks, never
+    findings on their own. Returns METHOD vertex ids.
+
+    Used by BOTH the whole-graph `_entry_method_ids` wrapper below and the streaming consumer
+    (`stream_build.build_envelope`), so there is ONE entry logic, never a re-implementation."""
     entries: set = set()
-    for vid, v in verts.items():
-        if v["label"] != "METHOD" or bool(_prop(v, "IS_EXTERNAL")):
+    for vid, v in method_vertices.items():
+        if bool(_prop(v, "IS_EXTERNAL")):
             continue
         if _clean(_prop(v, "FILENAME")) is None or vid not in has_param:
             continue
@@ -311,6 +297,30 @@ def _entry_method_ids(g: dict) -> set:
             continue        # called by first-party code and not registered as a handler -> not an entry
         entries.add(vid)
     return entries
+
+
+def _entry_method_ids(g: dict) -> set:
+    """Whole-graph wrapper: build the four accumulated inputs from a raw GraphSON graph, then defer to
+    the pure `_entry_method_ids_from` test. Behavior-preserving split (delta C.3): the stream builds
+    the identical four inputs from its per-segment accumulators."""
+    verts = {_unwrap(v["id"]): v for v in g.get("vertices", [])}
+    method_vertices = {vid: v for vid, v in verts.items() if v["label"] == "METHOD"}
+    # Methods passed as CALLBACKS (referenced by a METHOD_REF): the universal "register a handler"
+    # pattern — Express/Koa/Fastify route callbacks, event handlers, etc. Framework-free, and it
+    # catches the arrow-function handlers the call-graph-root test alone misses.
+    callback_fulls: set = {mfn for v in verts.values() if v["label"] == "METHOD_REF"
+                           and isinstance((mfn := _prop(v, "METHOD_FULL_NAME")), str) and mfn}
+    called: set = set()
+    has_param: set = set()
+    for e in g.get("edges", []):
+        o, i = _unwrap(e["outV"]), _unwrap(e["inV"])
+        lbl = e["label"]
+        if lbl == "CALL" and verts.get(i, {}).get("label") == "METHOD":
+            called.add(i)                      # something first-party resolves a call to it
+        elif (lbl == "AST" and verts.get(o, {}).get("label") == "METHOD"
+              and verts.get(i, {}).get("label") == "METHOD_PARAMETER_IN"):
+            has_param.add(o)
+    return _entry_method_ids_from(method_vertices, called, has_param, callback_fulls)
 
 
 def project_graphson(graphson: dict, profile=None) -> dict:
