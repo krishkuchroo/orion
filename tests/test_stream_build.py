@@ -263,6 +263,12 @@ def test_resume_equals_uninterrupted(tmp_path):
     fa = sorted((e["out"], e["in"], e["arg_index"]) for e in full["edges"] if e["label"] == "FLOWS_TO")
     fb = sorted((e["out"], e["in"], e["arg_index"]) for e in resumed["edges"] if e["label"] == "FLOWS_TO")
     assert fa == fb
+    # Full-envelope parity: the atomic checkpoint (cursor folded into tables.json) must keep the whole
+    # node set and the whole structural+FLOWS_TO edge multiset identical, not just FLOWS_TO. This is the
+    # regression test for the torn-write bug: a non-atomic cursor-lags-tables checkpoint would re-consume
+    # the last completed batch on resume and double-append its structural nodes/edges.
+    assert _nodeset(full) == _nodeset(resumed)
+    assert _edgemulti(full) == _edgemulti(resumed)
 
 
 @pytest.mark.slow

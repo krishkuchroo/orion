@@ -13,6 +13,7 @@ import subprocess
 from collections import Counter, defaultdict
 from itertools import islice
 from pathlib import Path
+from typing import Optional
 
 from .joern_adapter import _joern_bin, _jvm_flags, _ensure_greadlink, project_graphson
 from . import joern_adapter as J    # Task 7 reuses the split entry-point test (_entry_method_ids_from)
@@ -139,9 +140,13 @@ def _seg_cross_rd(seg: dict) -> dict:
 # ─────────────────────── Task 9: durable resume (cursor + persisted pass-1 tables) ───────────────────────
 def _read_cursor(work) -> int:
     """The pass-1 resume cursor: the line index of the NEXT unconsumed per-function record. Line 1 is
-    the first per-function record (line 0 is the seg=-1 preamble), so the default is 1 (start fresh)."""
-    p = Path(work) / "cursor"
-    return int(p.read_text()) if p.exists() else 1
+    the first per-function record (line 0 is the seg=-1 preamble), so the default is 1 (start fresh).
+    The cursor lives INSIDE tables.json (a single atomic checkpoint), so it can never lag or lead the
+    persisted tables. When no checkpoint exists yet, return the fresh default of 1."""
+    p = Path(work) / "tables.json"
+    if not p.exists():
+        return 1
+    return int(json.loads(p.read_text())["cursor"])
 
 
 # The pass-1 state a resume reloads. `nodes`/`edges` are the structural batch built so far (Option-2
@@ -150,9 +155,16 @@ def _read_cursor(work) -> int:
 # set -> sorted list (callgraph values, called, has_param, callback_fulls) and int dict keys -> str
 # (callee_edges, callgraph, method_fullname, method_vertices); both are reversed on reload so the
 # rehydrated tables EQUAL the uninterrupted build's exactly.
-def _write_tables(work, nodes, edges, callee_edges, callgraph, method_fullname,
+def _write_tables(work, next_line, nodes, edges, callee_edges, callgraph, method_fullname,
                   method_vertices, called, has_param, callback_fulls) -> None:
+    # `next_line` (== last_line_index + 1) is folded INTO this payload so the cursor and the tables are
+    # one file that always reflects the SAME set of completed batches: there is no window where a torn
+    # write leaves the cursor pointing before or after the persisted nodes/edges. The write is atomic
+    # (temp file in the same dir, then os.replace), so a crash mid-write leaves EITHER the old complete
+    # file OR the new complete file, never a truncated one (no re-consumed batch double-appending
+    # nodes/edges, no JSONDecodeError on resume).
     payload = {
+        "cursor": next_line,
         "nodes": nodes,
         "edges": edges,
         "callee_edges": {str(k): v for k, v in callee_edges.items()},
@@ -163,7 +175,10 @@ def _write_tables(work, nodes, edges, callee_edges, callgraph, method_fullname,
         "has_param": sorted(has_param),
         "callback_fulls": sorted(callback_fulls),
     }
-    (Path(work) / "tables.json").write_text(json.dumps(payload))
+    dest = Path(work) / "tables.json"
+    tmp = Path(work) / "tables.json.tmp"
+    tmp.write_text(json.dumps(payload))
+    os.replace(tmp, dest)   # atomic rename on the same filesystem
 
 
 def _read_tables(work) -> tuple:
@@ -184,7 +199,7 @@ def _read_tables(work) -> tuple:
 
 
 def build_envelope(cpg_bin: str, work, profile, *, queue_size: int = 64,
-                   resume: bool = False, simulate_crash_after: int = None) -> dict:
+                   resume: bool = False, simulate_crash_after: Optional[int] = None) -> dict:
     """Assemble the SAME `{"nodes","edges","entry_methods"}` envelope `project_graphson` returns for
     the whole graph, but from the per-function stream. Two passes over `segments.jsonl`:
 
@@ -265,15 +280,15 @@ def build_envelope(cpg_bin: str, work, profile, *, queue_size: int = 64,
             if any(e["label"] == "AST" and e["outVLabel"] == "METHOD"
                    and e["inVLabel"] == "METHOD_PARAMETER_IN" for e in seg["edges"]):
                 has_param.add(mid)
-        # Durable checkpoint at the bounded-window boundary (Task 9): persist the pass-1 tables THEN
-        # advance the cursor to the next unconsumed line, so cursor and tables always reflect the SAME
-        # set of completed batches. A crash before the single end-of-build persist (Option 2) loses only
-        # the DB write; resume replays pass 1 from here and re-runs the cheap, deterministic pass 2.
+        # Durable checkpoint at the bounded-window boundary (Task 9): persist the pass-1 tables AND the
+        # cursor (next unconsumed line) as ONE atomic file, so cursor and tables always reflect the SAME
+        # set of completed batches (a torn write can never re-consume a batch and double-append its
+        # nodes/edges). A crash before the single end-of-build persist (Option 2) loses only the DB write;
+        # resume replays pass 1 from here and re-runs the cheap, deterministic pass 2.
         last_line_index = batch[-1][0]
         processed += len(batch)
-        _write_tables(work, nodes, edges, callee_edges, callgraph, method_fullname,
-                      method_vertices, called, has_param, callback_fulls)
-        (Path(work) / "cursor").write_text(str(last_line_index + 1))
+        _write_tables(work, last_line_index + 1, nodes, edges, callee_edges, callgraph,
+                      method_fullname, method_vertices, called, has_param, callback_fulls)
         if simulate_crash_after is not None and processed >= simulate_crash_after:
             raise SimulatedCrash(f"stop after {processed} segments (cursor at {last_line_index + 1})")
 
