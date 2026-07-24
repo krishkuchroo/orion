@@ -41,3 +41,14 @@ def test_partition_covers_graph(nodegoat_graphson):
     # Cross-method edges (dropped from every slice) match the measured 12531.
     inside = sum(len(m["edges"]) for m in methods.values())
     assert len(inner["edges"]) - inside == 12531
+
+@pytest.mark.slow
+def test_summary_direct_reach(nodegoat_graphson):
+    methods, _ = T.partition(nodegoat_graphson)
+    # Every function's summary builds without error and every direct target is a real call
+    # that lives in that same function (intra-function invariant).
+    for mid, sub in methods.items():
+        s = T.build_summary(mid, sub, frozenset({"req", "request"}), None)
+        for entry, targets in s.direct.items():
+            for (rc, idx) in targets:
+                assert rc in s.real_calls
