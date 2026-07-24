@@ -166,7 +166,7 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--stream", dest="stream", action="store_true",
                       help="use the streaming per-function build (avoids the 85x export blob)")
     scan.add_argument("--no-stream", dest="stream", action="store_false")
-    scan.set_defaults(stream=False)
+    scan.set_defaults(stream=True)
     scan.add_argument("--queue-size", dest="queue_size", type=int, default=64,
                       help="functions held in flight by the streaming build (default 64)")
 
