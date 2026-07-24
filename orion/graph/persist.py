@@ -25,6 +25,26 @@ from .. import config
 from .schema import NODE_KEY, Batch
 
 
+def _index_name(label: str) -> str:
+    """Deterministic name for the NODE_KEY range index of a label (so SHOW INDEXES / DROP can target it)."""
+    return f"orion_nodekey_{label}"
+
+
+def _ensure_indexes(session) -> None:
+    """Create one RANGE index per node label on its NODE_KEY properties, idempotently (IF NOT EXISTS).
+    Without these, persist's per-label `MERGE (n:Label {keyprops})` and the edge-endpoint MATCHes do a
+    full label scan per row -- quadratic on large repos (sharpemu's 38,662 CpgCall nodes hung persist
+    ~25 min). RANGE indexes are correctness-neutral (they only change lookup speed). DDL is auto-committed,
+    so this runs on the session BEFORE the data-write transaction (mirrors embed._ensure_vector_index)."""
+    for label, keys in NODE_KEY.items():
+        props = ", ".join(f"n.`{k}`" for k in keys)
+        session.run(f"CREATE RANGE INDEX `{_index_name(label)}` IF NOT EXISTS "
+                    f"FOR (n:`{label}`) ON ({props})")
+    # Block until the freshly-created indexes are ONLINE so the very next MERGE is index-backed. Cheap
+    # when they already exist (returns immediately). Timeout is seconds.
+    session.run("CALL db.awaitIndexes(300)")
+
+
 def _node_merge(label: str) -> str:
     keypat = ", ".join(f"`{k}`: row.key.`{k}`" for k in NODE_KEY[label])
     return f"UNWIND $rows AS row MERGE (n:`{label}` {{{keypat}}}) SET n += row.props"
@@ -83,6 +103,7 @@ def persist(batch: Batch) -> dict:
     driver = GraphDatabase.driver(config.NEO4J_URI, auth=config.NEO4J_AUTH)
     try:
         with driver.session(database=config.NEO4J_DATABASE) as s:
+            _ensure_indexes(s)                    # idempotent NODE_KEY range indexes, before the load
             s.execute_write(_write_tx, batch)
     finally:
         driver.close()
