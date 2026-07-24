@@ -88,4 +88,5 @@ def test_oracle_parity_pygoat():
                               entrypoint_method_ids=entry_taint)
     got = T.flows_via_summaries(g, request_source_names=prof.request_source_names,
                                 entrypoint_method_ids=entry_taint)
-    assert _flowset(got) == _flowset(oracle)
+    assert len(oracle) > 0, "vacuous parity: oracle produced no flows"  # GENERIC path is only covered here
+    assert _flowset(got) == _flowset(oracle)   # EXACT: edges + provenance
