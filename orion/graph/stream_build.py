@@ -21,6 +21,25 @@ from . import taint_summary as T  # noqa: F401  (pass 2 / Task 7 threads summari
 
 _SCRIPT = Path(__file__).parent / "joern_scripts" / "emit_segments.sc"
 
+# Task 10 (delta consumer F5): a documented FIXED estimate for the Neo4j Python driver's resident
+# overhead. It is NOT repo-scaled (the driver is created by persist.persist AFTER build_envelope
+# returns, so it is never resident inside this function) -- it is folded into the breakdown only so
+# the report accounts for it. Labeled an estimate, not a measurement.
+_DRIVER_MB_ESTIMATE = 25.0
+
+
+def _approx_bytes(obj) -> int:
+    """Task 10 memory PROXY (not a true object-graph size): the JSON-encoding byte length of `obj`,
+    with sets/other non-JSON values coerced via `list`, and a `repr()`-length fallback for structures
+    JSON cannot key (e.g. tuple-keyed dicts, the `Summary` dataclass). Rough but honest and robust --
+    it never raises -- and the breakdown labels every term a proxy. Used to size the held batch, the
+    bounded decode window, and the cross-method accumulators so the O(repo) terms are MEASURED rather
+    than assumed."""
+    try:
+        return len(json.dumps(obj, default=list).encode())
+    except TypeError:
+        return len(repr(obj).encode())
+
 
 class SimulatedCrash(RuntimeError):
     """Test-only: raised by `build_envelope(simulate_crash_after=N)` to stop pass 1 after N
@@ -199,7 +218,8 @@ def _read_tables(work) -> tuple:
 
 
 def build_envelope(cpg_bin: str, work, profile, *, queue_size: int = 64,
-                   resume: bool = False, simulate_crash_after: Optional[int] = None) -> dict:
+                   resume: bool = False, simulate_crash_after: Optional[int] = None,
+                   mem_stats_path: Optional[str] = None) -> dict:
     """Assemble the SAME `{"nodes","edges","entry_methods"}` envelope `project_graphson` returns for
     the whole graph, but from the per-function stream. Two passes over `segments.jsonl`:
 
@@ -213,7 +233,15 @@ def build_envelope(cpg_bin: str, work, profile, *, queue_size: int = 64,
         `closure_targets`) and the reconstructed `entry_taint`, sets `callee_edges` on each so
         `_callee_map` resolves cross-function hops, then `stitch` produces FLOWS_TO.
 
-    Never `build_summary(mid, ..., None)`: that drops the closure seam and yields 190, not 217."""
+    Never `build_summary(mid, ..., None)`: that drops the closure seam and yields 190, not 217.
+
+    `mem_stats_path` (Task 10 diagnostic hook, delta consumer F5): when given, a JSON peak-RSS
+    breakdown is written there near the end of the build -- `window_peak_mb` (max bounded decode
+    window), `accumulators_mb` (cross-method tables + pass-2 summaries), `batch_mb` (the held
+    normalized node/edge batch), `driver_mb` (a fixed Neo4j-driver estimate) -- so the O(repo) terms
+    are MEASURED, not assumed. All four are rough-but-honest `_approx_bytes` proxies. When it is None
+    (the production default and what every existing test exercises) NO measurement runs and behavior
+    is byte-for-byte unchanged."""
     work = Path(work); work.mkdir(parents=True, exist_ok=True)
     out = work / "segments.jsonl"
     if not (resume and out.exists()):
@@ -240,11 +268,18 @@ def build_envelope(cpg_bin: str, work, profile, *, queue_size: int = 64,
         for f in _read_preamble(str(out))["files"]:
             nodes.append({"label": "FILE", "id": f["id"], "props": {"NAME": f["properties"].get("NAME")}})
     processed = 0                                # per-function segments consumed THIS run
+    window_peak_bytes = 0                         # Task 10: max bounded-window bytes (measured iff mem_stats_path)
     it = _iter_segments(str(out), start)
     while True:
         batch = list(islice(it, queue_size))     # bounded window: <= queue_size decoded at once (§8)
         if not batch:
             break
+        if mem_stats_path is not None:
+            # PROXY for the resident decode-window term: the JSON size of the <=queue_size decoded
+            # segments held at once (this `batch` IS the `list(islice(...))` window). Bounded by
+            # queue_size, so this stays flat as the repo grows -- that is exactly the invariant we
+            # want to see. Only computed when the diagnostic hook is on, so the None path is untouched.
+            window_peak_bytes = max(window_peak_bytes, _approx_bytes(batch))
         for i, seg in batch:
             snodes, sedges = _structural(seg, profile)
             nodes.extend(snodes); edges.extend(sedges)
@@ -310,4 +345,27 @@ def build_envelope(cpg_bin: str, work, profile, *, queue_size: int = 64,
     flows = T.stitch(summaries, dict(callgraph),
                      request_source_names=src_names, entrypoint_method_ids=entry_taint)
     edges.extend(flows)
+
+    # ---- Task 10: measured peak-RSS breakdown (delta consumer F5), written iff a hook path is given ----
+    # The batch (nodes+edges) is now at its resident PEAK -- fully assembled, still held before the
+    # single end-of-build persist (Option 2). We size the O(repo) terms with `_approx_bytes` proxies so
+    # the report can show WHICH term dominates (expected: batch_mb) rather than assuming it. This block
+    # is a pure diagnostic side effect: it does not touch `nodes`/`edges`, so the returned envelope --
+    # and thus the None-default path -- is byte-for-byte identical.
+    if mem_stats_path is not None:
+        MB = 1024 * 1024
+        batch_bytes = _approx_bytes(nodes) + _approx_bytes(edges)
+        accumulators_bytes = (
+            _approx_bytes(callee_edges) + _approx_bytes(callgraph)
+            + _approx_bytes(method_fullname) + _approx_bytes(method_vertices)
+            + _approx_bytes(called) + _approx_bytes(has_param) + _approx_bytes(callback_fulls)
+            + _approx_bytes(summaries))          # summaries still resident -> falls to repr-length proxy
+        breakdown = {
+            "window_peak_mb": window_peak_bytes / MB,
+            "accumulators_mb": accumulators_bytes / MB,
+            "batch_mb": batch_bytes / MB,
+            "driver_mb": _DRIVER_MB_ESTIMATE,    # fixed estimate, not repo-scaled (see module constant)
+        }
+        Path(mem_stats_path).write_text(json.dumps(breakdown))
+
     return {"nodes": nodes, "edges": edges, "entry_methods": entry_methods}

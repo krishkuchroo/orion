@@ -1,5 +1,6 @@
 import json
 import random
+import resource
 from collections import Counter, defaultdict
 from itertools import islice
 from pathlib import Path
@@ -288,3 +289,21 @@ def test_stream_order_independence(tmp_path):
     def fs(env):
         return {(e["out"], e["in"], e["arg_index"]) for e in env["edges"] if e["label"] == "FLOWS_TO"}
     assert fs(base) == fs(shuffled)                              # keyed by method_id, not seg order
+
+
+# ─────────────────────────── Task 10: sharpemu scale smoke (peak-RSS bound + honest breakdown) ───────────────────────────
+@pytest.mark.slow
+def test_sharpemu_fits_memory(tmp_path):
+    repo = "fixtures/sharpemu"
+    if not Path(repo).exists():
+        pytest.skip("sharpemu not cloned")
+    from orion import graph_build
+    stats_path = tmp_path / "mem.json"
+    graph_build.build(repo, "csharpsrc", None, stream=True, queue_size=64,
+                      mem_stats_path=str(stats_path))
+    peak_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024 * 1024)  # bytes on macOS
+    assert peak_mb < 6000, f"stream build peaked at {peak_mb:.0f} MB"
+    br = json.loads(stats_path.read_text())
+    for k in ("window_peak_mb", "accumulators_mb", "batch_mb", "driver_mb"):
+        assert k in br, f"missing peak-RSS breakdown term: {k}"
+    print("peak-RSS breakdown (MB):", br, "total getrusage:", round(peak_mb))

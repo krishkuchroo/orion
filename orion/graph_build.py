@@ -67,7 +67,7 @@ def scan_id_for(repo_path: str) -> str:
 def build(repo_path: str, language: str | None = None,
           on_event: OnEvent | None = None, *,
           stream: bool = False, queue_size: int = 64,
-          scan_id: str | None = None) -> str:
+          scan_id: str | None = None, mem_stats_path: str | None = None) -> str:
     """Build `repo_path` into Orion's graph and return its scan_id. Clears then loads that scan.
 
     `language` pins the Joern frontend (jssrc/pythonsrc/gosrc/javasrc), overriding auto-detection;
@@ -78,7 +78,11 @@ def build(repo_path: str, language: str | None = None,
     the per-function producer -> bounded consumer assembles the SAME envelope) instead of the legacy
     joern-export blob; `queue_size` bounds how many function segments the consumer decodes at once.
     `scan_id` overrides the deterministic identity so two builds of the SAME repo (e.g. a legacy vs a
-    stream parity check) persist into DISTINCT partitions instead of clobbering each other."""
+    stream parity check) persist into DISTINCT partitions instead of clobbering each other.
+
+    `mem_stats_path` is a stream-only diagnostic hook (Task 10): when set, the stream branch's
+    `build_envelope` writes a measured peak-RSS breakdown JSON there. It is IGNORED on the legacy
+    path (which has no bounded consumer to measure); passing it never changes the returned scan_id."""
     scan_id = scan_id or scan_id_for(repo_path)
     frontend, display_language = joern_adapter.resolve_language(repo_path, language)
     if on_event is not None:
@@ -92,7 +96,8 @@ def build(repo_path: str, language: str | None = None,
         from .graph import stream_build
         cpg_bin = joern_adapter.ensure_cpg(repo_path, frontend)   # parse or reuse cpg.bin, NO export
         work = Path(tempfile.mkdtemp(prefix="orion_stream_"))
-        envelope = stream_build.build_envelope(str(cpg_bin), work, profile, queue_size=queue_size)
+        envelope = stream_build.build_envelope(str(cpg_bin), work, profile, queue_size=queue_size,
+                                               mem_stats_path=mem_stats_path)
     else:
         envelope = joern_adapter.export_repo(repo_path, frontend, profile)
     dependencies = deps.parse_dependencies(repo_path)
