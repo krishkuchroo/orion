@@ -21,6 +21,12 @@ from . import taint_summary as T  # noqa: F401  (pass 2 / Task 7 threads summari
 _SCRIPT = Path(__file__).parent / "joern_scripts" / "emit_segments.sc"
 
 
+class SimulatedCrash(RuntimeError):
+    """Test-only: raised by `build_envelope(simulate_crash_after=N)` to stop pass 1 after N
+    per-function segments have been consumed AND their cursor+tables persisted, so a resume can
+    replay from the durable state. Never raised in production (the parameter defaults to None)."""
+
+
 def run_producer(cpg_bin: str, out_jsonl: str) -> int:
     """Run the flatgraph producer over `cpg_bin`, writing one segment per line to `out_jsonl`;
     return the per-function segment count (total lines minus the one seg=-1 preamble line).
@@ -130,6 +136,53 @@ def _seg_cross_rd(seg: dict) -> dict:
     return dict(d)
 
 
+# ─────────────────────── Task 9: durable resume (cursor + persisted pass-1 tables) ───────────────────────
+def _read_cursor(work) -> int:
+    """The pass-1 resume cursor: the line index of the NEXT unconsumed per-function record. Line 1 is
+    the first per-function record (line 0 is the seg=-1 preamble), so the default is 1 (start fresh)."""
+    p = Path(work) / "cursor"
+    return int(p.read_text()) if p.exists() else 1
+
+
+# The pass-1 state a resume reloads. `nodes`/`edges` are the structural batch built so far (Option-2
+# holds it resident and persists ONCE at the end, so it must survive a crash to keep the envelope whole,
+# not just its FLOWS_TO). The rest are the seven cross-method tables the brief calls out. JSON coercions:
+# set -> sorted list (callgraph values, called, has_param, callback_fulls) and int dict keys -> str
+# (callee_edges, callgraph, method_fullname, method_vertices); both are reversed on reload so the
+# rehydrated tables EQUAL the uninterrupted build's exactly.
+def _write_tables(work, nodes, edges, callee_edges, callgraph, method_fullname,
+                  method_vertices, called, has_param, callback_fulls) -> None:
+    payload = {
+        "nodes": nodes,
+        "edges": edges,
+        "callee_edges": {str(k): v for k, v in callee_edges.items()},
+        "callgraph": {str(k): sorted(v) for k, v in callgraph.items()},
+        "method_fullname": {str(k): v for k, v in method_fullname.items()},
+        "method_vertices": {str(k): v for k, v in method_vertices.items()},
+        "called": sorted(called),
+        "has_param": sorted(has_param),
+        "callback_fulls": sorted(callback_fulls),
+    }
+    (Path(work) / "tables.json").write_text(json.dumps(payload))
+
+
+def _read_tables(work) -> tuple:
+    """Inverse of `_write_tables`: rehydrate the pass-1 state, restoring set types and int dict keys so
+    continued accumulation MERGES additively (dict update / set union) with the pre-crash tables."""
+    d = json.loads((Path(work) / "tables.json").read_text())
+    callgraph = defaultdict(set)
+    for k, v in d["callgraph"].items():
+        callgraph[int(k)] = set(v)
+    return (
+        d["nodes"], d["edges"],
+        {int(k): v for k, v in d["callee_edges"].items()},
+        callgraph,
+        {int(k): v for k, v in d["method_fullname"].items()},
+        {int(k): v for k, v in d["method_vertices"].items()},
+        set(d["called"]), set(d["has_param"]), set(d["callback_fulls"]),
+    )
+
+
 def build_envelope(cpg_bin: str, work, profile, *, queue_size: int = 64,
                    resume: bool = False, simulate_crash_after: int = None) -> dict:
     """Assemble the SAME `{"nodes","edges","entry_methods"}` envelope `project_graphson` returns for
@@ -159,37 +212,70 @@ def build_envelope(cpg_bin: str, work, profile, *, queue_size: int = 64,
     method_fullname: dict = {}                   # method_id -> FULL_NAME
     method_vertices: dict = {}                   # method_id -> its METHOD vertex (for the entry test)
     called: set = set(); has_param: set = set(); callback_fulls: set = set()
-    for f in _read_preamble(str(out))["files"]:
-        nodes.append({"label": "FILE", "id": f["id"], "props": {"NAME": f["properties"].get("NAME")}})
-    start = 1                                    # Task 9 replaces this with _read_cursor(work) on resume
-    for i, seg in _iter_segments(str(out), start):
-        snodes, sedges = _structural(seg, profile)
-        nodes.extend(snodes); edges.extend(sedges)
-        mid = seg["method_id"]
-        method_fullname[mid] = _method_fullname(seg)
-        method_vertices[mid] = next(v for v in seg["vertices"] if v["id"] == mid)
-        # Cross-function callee map + call graph + the `called` set (entry detection), ALL from
-        # `call_edges` -- EVERY CALL -> METHOD out-edge, last-write-wins. This is byte-identical to
-        # the oracle's callee relation (collapse_flows' `callee[o] = i` and taint_summary._attach_callees'
-        # cmap, both last-wins over ALL CALL edges). It is NOT the taint `callsites` subset, which
-        # keeps only real calls with their FIRST callee: that drops the <operator>.* callee edges AND
-        # mis-resolves a multi-callee real call to its first callee, so `stitch_target` hops to the
-        # wrong param and OVER-produces `inferred` FLOWS_TO on a GENERIC repo (PyGoat: 1078 vs 1075).
-        # `call_edges` last-wins reproduces the oracle cmap exactly (0 differing keys on both repos).
-        for _call_id, callee_id in seg["call_edges"]:
-            if callee_id is not None:
-                callee_edges[_call_id] = callee_id     # last-wins == collapse_flows' callee[o] = i
-                callgraph[mid].add(callee_id)
-                called.add(callee_id)
-        for v in seg["vertices"]:
-            if v["label"] == "METHOD_REF":
-                mfn = v["properties"].get("METHOD_FULL_NAME")
-                if isinstance(mfn, str) and mfn:
-                    callback_fulls.add(mfn)
-        if any(e["label"] == "AST" and e["outVLabel"] == "METHOD"
-               and e["inVLabel"] == "METHOD_PARAMETER_IN" for e in seg["edges"]):
-            has_param.add(mid)
-        # Task 9 hooks: persist pass-1 tables/summaries + cursor per batch, honor simulate_crash_after.
+    # Resume (Task 9): reload the durable cursor + pass-1 state and CONTINUE accumulating from there.
+    # dict update / set union are additive, so continuing the merge from the reloaded tables yields the
+    # same result as an uninterrupted run. A fresh run seeds the FILE nodes from the preamble; a resumed
+    # run already carries them inside the reloaded `nodes`, so it must NOT re-seed them.
+    start = 1
+    if resume and out.exists() and (Path(work) / "tables.json").exists():
+        start = _read_cursor(work)
+        (nodes, edges, callee_edges, callgraph, method_fullname,
+         method_vertices, called, has_param, callback_fulls) = _read_tables(work)
+    else:
+        for f in _read_preamble(str(out))["files"]:
+            nodes.append({"label": "FILE", "id": f["id"], "props": {"NAME": f["properties"].get("NAME")}})
+    processed = 0                                # per-function segments consumed THIS run
+    it = _iter_segments(str(out), start)
+    while True:
+        batch = list(islice(it, queue_size))     # bounded window: <= queue_size decoded at once (§8)
+        if not batch:
+            break
+        for i, seg in batch:
+            snodes, sedges = _structural(seg, profile)
+            nodes.extend(snodes); edges.extend(sedges)
+            mid = seg["method_id"]
+            method_fullname[mid] = _method_fullname(seg)
+            method_vertices[mid] = next(v for v in seg["vertices"] if v["id"] == mid)
+            # Cross-function callee map + call graph + the `called` set (entry detection), ALL from
+            # `call_edges` -- EVERY CALL -> METHOD out-edge, last-write-wins. This is byte-identical to
+            # the oracle's callee relation (collapse_flows' `callee[o] = i` and taint_summary._attach_callees'
+            # cmap, both last-wins over ALL CALL edges). It is NOT the taint `callsites` subset, which
+            # keeps only real calls with their FIRST callee: that drops the <operator>.* callee edges AND
+            # mis-resolves a multi-callee real call to its first callee, so `stitch_target` hops to the
+            # wrong param and OVER-produces `inferred` FLOWS_TO on a GENERIC repo (PyGoat: 1078 vs 1075).
+            # `call_edges` last-wins reproduces the oracle cmap exactly (0 differing keys on both repos).
+            #
+            # ORDER (Task 8 Minor-1, tie-break of record): every CALL -> METHOD edge for a given call lives
+            # in that call's OWNING segment, so `callee_edges` is order-independent ACROSS segments --
+            # shuffling the per-function segment lines cannot change any key's value (proven by
+            # test_stream_order_independence). WITHIN a segment, the last-wins over `seg['call_edges']` is
+            # the deterministic tie-break: that list is emitted in whole-graph GraphSON edge order by the
+            # producer (inherited from collapse_flows, which is equally order-dependent on the same order),
+            # so it must stay producer-deterministic. Segment order is free; within-segment order is not.
+            for _call_id, callee_id in seg["call_edges"]:
+                if callee_id is not None:
+                    callee_edges[_call_id] = callee_id     # last-wins == collapse_flows' callee[o] = i
+                    callgraph[mid].add(callee_id)
+                    called.add(callee_id)
+            for v in seg["vertices"]:
+                if v["label"] == "METHOD_REF":
+                    mfn = v["properties"].get("METHOD_FULL_NAME")
+                    if isinstance(mfn, str) and mfn:
+                        callback_fulls.add(mfn)
+            if any(e["label"] == "AST" and e["outVLabel"] == "METHOD"
+                   and e["inVLabel"] == "METHOD_PARAMETER_IN" for e in seg["edges"]):
+                has_param.add(mid)
+        # Durable checkpoint at the bounded-window boundary (Task 9): persist the pass-1 tables THEN
+        # advance the cursor to the next unconsumed line, so cursor and tables always reflect the SAME
+        # set of completed batches. A crash before the single end-of-build persist (Option 2) loses only
+        # the DB write; resume replays pass 1 from here and re-runs the cheap, deterministic pass 2.
+        last_line_index = batch[-1][0]
+        processed += len(batch)
+        _write_tables(work, nodes, edges, callee_edges, callgraph, method_fullname,
+                      method_vertices, called, has_param, callback_fulls)
+        (Path(work) / "cursor").write_text(str(last_line_index + 1))
+        if simulate_crash_after is not None and processed >= simulate_crash_after:
+            raise SimulatedCrash(f"stop after {processed} segments (cursor at {last_line_index + 1})")
 
     # entry-point reconstruction (C.3), reusing the refactored tested logic
     entry_ids = J._entry_method_ids_from(method_vertices, called, has_param, callback_fulls)

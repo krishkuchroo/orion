@@ -1,4 +1,5 @@
 import json
+import random
 from collections import Counter, defaultdict
 from itertools import islice
 from pathlib import Path
@@ -245,3 +246,39 @@ def test_stream_envelope_parity_pygoat(tmp_path):
     assert _nodeset(stream) == _nodeset(legacy)
     assert _edgemulti(stream) == _edgemulti(legacy)
     assert stream["entry_methods"] == legacy["entry_methods"]
+
+
+# ─────────────────────────── Task 9: resume from cursor + order-independence ───────────────────────────
+@pytest.mark.slow
+def test_resume_equals_uninterrupted(tmp_path):
+    cpg = "fixtures/NodeGoat/cpg.bin"
+    if not Path(cpg).exists():
+        pytest.skip("NodeGoat cpg.bin not present")
+    prof = profiles.select_profile("fixtures/NodeGoat")
+    full = S.build_envelope(str(cpg), tmp_path / "a", prof)
+    w = tmp_path / "b"
+    with pytest.raises(S.SimulatedCrash):
+        S.build_envelope(str(cpg), w, prof, simulate_crash_after=100)
+    resumed = S.build_envelope(str(cpg), w, prof, resume=True)   # reuses segments.jsonl + cursor + tables
+    fa = sorted((e["out"], e["in"], e["arg_index"]) for e in full["edges"] if e["label"] == "FLOWS_TO")
+    fb = sorted((e["out"], e["in"], e["arg_index"]) for e in resumed["edges"] if e["label"] == "FLOWS_TO")
+    assert fa == fb
+
+
+@pytest.mark.slow
+def test_stream_order_independence(tmp_path):
+    cpg = "fixtures/NodeGoat/cpg.bin"
+    if not Path(cpg).exists():
+        pytest.skip("NodeGoat cpg.bin not present")
+    prof = profiles.select_profile("fixtures/NodeGoat")
+    a, b = tmp_path / "a", tmp_path / "b"; b.mkdir(parents=True)
+    base = S.build_envelope(str(cpg), a, prof)                   # produces a/segments.jsonl once
+    lines = (a / "segments.jsonl").read_text().splitlines()
+    preamble = [l for l in lines if json.loads(l)["seg"] == -1]
+    perfunc = [l for l in lines if json.loads(l)["seg"] >= 0]
+    random.Random(1).shuffle(perfunc)                            # random per-function ordering
+    (b / "segments.jsonl").write_text("\n".join(preamble + perfunc) + "\n")
+    shuffled = S.build_envelope(str(cpg), b, prof, resume=True)  # reuse shuffled file, no producer
+    def fs(env):
+        return {(e["out"], e["in"], e["arg_index"]) for e in env["edges"] if e["label"] == "FLOWS_TO"}
+    assert fs(base) == fs(shuffled)                              # keyed by method_id, not seg order
