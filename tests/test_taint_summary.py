@@ -72,3 +72,20 @@ def test_oracle_parity_nodegoat(nodegoat_graphson):
                                 entrypoint_method_ids=entry_taint)
     assert len(oracle) == 217, "baseline changed; re-derive expectation"
     assert _flowset(got) == _flowset(oracle)   # EXACT: edges + provenance
+
+
+@pytest.mark.slow
+def test_oracle_parity_pygoat():
+    cpg = "fixtures/pygoat/cpg.bin"
+    if not Path(cpg).exists():
+        pytest.skip("PyGoat cpg.bin not present")
+    g = _export(cpg)
+    inner = g["@value"] if "@type" in g else g
+    prof = profiles.select_profile("fixtures/pygoat")
+    entry_ids = J._entry_method_ids(inner)
+    entry_taint = frozenset(entry_ids) if prof.entrypoint_params_are_sources else None
+    oracle = J.collapse_flows(inner, request_source_names=prof.request_source_names,
+                              entrypoint_method_ids=entry_taint)
+    got = T.flows_via_summaries(g, request_source_names=prof.request_source_names,
+                                entrypoint_method_ids=entry_taint)
+    assert _flowset(got) == _flowset(oracle)
