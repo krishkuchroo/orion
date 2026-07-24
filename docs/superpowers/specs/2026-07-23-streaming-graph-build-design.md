@@ -118,10 +118,11 @@ assertion.
       "outV": <int>, "inV": <int>, "outVLabel": "<L>", "inVLabel": "<L>"}
   ],
   "source_file": {"file_id": <int>},  // this method's SOURCE_FILE target FILE id (to DEFINED_IN)
-  "callsites": [                      // one per real CALL in the method
+  "callsites": [                      // TAINT shape: one per REAL call, single callee_id (see below)
      {"call_id": <int>, "callee_id": <int|null>, "callee_full_name": "<str>",
       "args": {"<idx>": <arg_node_id>}}
   ],
+  "call_edges": [[<call_id>, <callee_id>], ...],  // RESOLVES_TO source: EVERY CALL->METHOD out-edge
   "cross_rd": [[<src_id>, <dst_id>], ...],   // closure SOURCE side (see below)
   "closure_targets": [<dst_id>, ...],        // closure TARGET side (see below)
   "is_entry": <bool>                  // entry-point membership; this build reconstructs it in the
@@ -155,6 +156,18 @@ Field rules (frozen):
   mode (and the order-dependence in §9). A callee METHOD may be `IS_EXTERNAL`, which is still a valid id
   (`stitch_target` returns None for it, since external methods have no mapped params), so the producer
   must also visit external `cpg.method` stubs so RESOLVES_TO parity includes external callees.
+- **`call_edges` is the RESOLVES_TO source, a strict superset of the taint `callsites`.** Legacy
+  `project_graphson` persists a RESOLVES_TO for EVERY CALL->METHOD out-edge, including `<operator>.*`
+  calls and every callee of an over-approximated (multi-callee) call site. `callsites` deliberately
+  carries only REAL calls (not `<operator>.*`) with a SINGLE `callee_id` each (correct for taint, but a
+  strict subset for RESOLVES_TO: on NodeGoat it is 409 of the 2047 CALL->METHOD edges, short 1638). So
+  the producer emits a SEPARATE `call_edges` field, `[[call_id, callee_id], ...]`, one pair per
+  CALL->METHOD out-edge whose CALL node is owned by this method, with NO filtering (operator calls
+  included, every callee of a multi-callee site included). It is built from the same typed CALL
+  out-neighbor accessor as `callsites[].callee_id`, but without the real-call restriction and emitting
+  every callee, not just the first. `callsites` stays EXACTLY as is (the taint path depends on it being
+  byte-identical); `call_edges` is what the consumer reconstructs RESOLVES_TO from, and it reaches exact
+  structural parity (2047 on NodeGoat, 0 fabricated).
 
 **Reconstruction at consume time (replaces the old false claim).** The previous §5 said cross-function
 edges are "reconstructed at persist time from `method_full_name`, exactly as `normalize` already binds
@@ -162,7 +175,10 @@ calls to methods." That is false: `normalize` maps CALL to RESOLVES_TO and SOURC
 only from envelope edges present by node id (`joern_adapter.py:454-469`); it synthesizes nothing from
 `method_full_name`. The real reconstruction rules are:
 
-- **CALL to RESOLVES_TO** is rebuilt from `callsites[].callee_id` (CALL id to callee METHOD id).
+- **CALL to RESOLVES_TO** is rebuilt from `call_edges` (EVERY CALL->METHOD out-edge, one RESOLVES_TO
+  per pair), NOT from the taint `callsites[].callee_id` (a strict subset, short 1638 edges on
+  NodeGoat). `callsites` remains the taint call graph (real calls, single callee); `call_edges` is the
+  structural RESOLVES_TO source. Both come from the same CALL out-neighbor accessor.
 - **SOURCE_FILE to DEFINED_IN** is rebuilt from the FILE preamble plus each method's
   `source_file.file_id`.
 - **Cross-method REACHING_DEF closure edges are a THIRD cross-edge family**, carried in the segment

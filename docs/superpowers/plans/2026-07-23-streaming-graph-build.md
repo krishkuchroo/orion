@@ -557,7 +557,7 @@ git commit -m "test(taint): PyGoat (GENERIC profile) oracle parity"
 
 **Interfaces:**
 - Produces:
-  - `emit_segments.sc`: a Joern **flatgraph** script (Joern 4.0.569 / flatgraph-core 0.1.32 / codepropertygraph 1.7.70) that, given `cpg.bin` loaded, writes `segments.jsonl` in the frozen spec §5 schema: one preamble line (`seg=-1`, the `cpg.file` FILE nodes) then one line per `cpg.method` (including external stubs, so RESOLVES_TO parity covers external callees). Each per-function line carries `method_id`, `vertices` (INCLUDING the METHOD vertex, full property dump), `edges` (wholly-inside AST/REACHING_DEF/ARGUMENT/CONTAINS, WITH `outVLabel`/`inVLabel`), `source_file.file_id`, `callsites` (with `callee_id` direct from the CALL out-neighbor), `cross_rd`, `closure_targets`. Consumer normalizes producer JSON into the same `{label,id,properties}` shape `_unwrap`/`_prop` expect (plain scalars, no GraphSON type-tagging needed).
+  - `emit_segments.sc`: a Joern **flatgraph** script (Joern 4.0.569 / flatgraph-core 0.1.32 / codepropertygraph 1.7.70) that, given `cpg.bin` loaded, writes `segments.jsonl` in the frozen spec §5 schema: one preamble line (`seg=-1`, the `cpg.file` FILE nodes) then one line per `cpg.method` (including external stubs, so RESOLVES_TO parity covers external callees). Each per-function line carries `method_id`, `vertices` (INCLUDING the METHOD vertex, full property dump), `edges` (wholly-inside AST/REACHING_DEF/ARGUMENT/CONTAINS, WITH `outVLabel`/`inVLabel`), `source_file.file_id`, `callsites` (TAINT shape: real calls only, single `callee_id` direct from the CALL out-neighbor), `call_edges` (RESOLVES_TO source: EVERY CALL->METHOD out-edge, unfiltered, one `[call_id, callee_id]` pair per edge, from the same CALL out-neighbor accessor), `cross_rd`, `closure_targets`. Consumer normalizes producer JSON into the same `{label,id,properties}` shape `_unwrap`/`_prop` expect (plain scalars, no GraphSON type-tagging needed).
   - `stream_build.run_producer(cpg_bin: str, out_jsonl: str) -> int`: runs `joern --script emit_segments.sc`, returns the per-function segment count (total lines minus the one preamble). Uses `joern_adapter._jvm_flags()` and `_ensure_greadlink`.
 
 **flatgraph accessor warning (why Step 1 is a required live probe).** The old sketch used `propertiesMap.toString`, `outE.l`, and `e.inNode`/`e.outNode`. In flatgraph (this Joern) NONE of those exist. Neighbor traversal uses typed generated accessors (`_astOut`, `_reachingDefOut`, `_argumentOut`, `_containsOut`, `_fileViaSourceFileOut`, ...) and typed property accessors. The exact spellings are pinned by a live probe, not guessed. The design contract is the §5 schema plus the probe directive; do NOT invent final accessor names.
@@ -699,16 +699,20 @@ import java.io.PrintWriter
         s"""{"label":"${e.label}","outV":${e.outId},"inV":${e.inId},"outVLabel":"${e.outLabel}","inVLabel":"${e.inLabel}"}""").mkString(",")
       val fileId = sourceFileId(m)               // this method's SOURCE_FILE FILE id (Long or null)
       // callsites: one per REAL call; callee_id DIRECT from the CALL out-neighbor (may be external).
-      // If the RESOLVES_TO structural-count gate (Task 8 / D.3.D) later shows a shortfall, widen this
-      // to every CALL node carrying a resolved callee_id (operator calls too), since RESOLVES_TO is
-      // reconstructed SOLELY from callsites[].callee_id.
+      // This is the TAINT call graph and stays real-call / single-callee (byte-identical). RESOLVES_TO
+      // is NOT reconstructed from it (a strict subset); it is reconstructed from call_edges below.
       val csjson = realCalls(m).map(c =>
         s"""{"call_id":${c.id},"callee_id":${calleeId(c)},"callee_full_name":"${c.methodFullName}","args":${argMap(c)}}""").mkString(",")
+      // call_edges: EVERY CALL->METHOD out-edge owned by this method (RESOLVES_TO source), UNFILTERED
+      // (operator calls + all callees of a multi-callee site), one [call_id, callee_id] pair per edge,
+      // from the same CALL out-neighbor accessor as callsites. Recovers the 1638 edges (1576 operator +
+      // 62 multi-callee) callsites omits, reaching exact structural RESOLVES_TO parity (2047 on NodeGoat).
+      val cejson = callEdges(m.id).map { case (cid, calleeId) => s"[$cid,$calleeId]" }.mkString(",")
       val crossJson  = crossRd(m.id).map { case (o, i) => s"[$o,$i]" }.mkString(",")
       val targetJson = closureTargets(m.id).mkString(",")
       pw.println(
         s"""{"seg":$seg,"method_id":${m.id},"vertices":[$vjson],"edges":[$ejson],""" +
-        s""""source_file":{"file_id":${fileId}},"callsites":[$csjson],""" +
+        s""""source_file":{"file_id":${fileId}},"callsites":[$csjson],"call_edges":[$cejson],""" +
         s""""cross_rd":[$crossJson],"closure_targets":[$targetJson]}""")
       seg += 1
     }
@@ -764,7 +768,7 @@ git commit -m "feat(stream): flatgraph per-function producer emits §5 segments 
 
 **Interfaces:**
 - Consumes: `run_producer`, `joern_adapter.project_graphson` (structural node/edge projection).
-- Produces: the consumer's **pass 1** (delta C.1): read the preamble (project FILE nodes once), then iterate per-function records with a bounded window (`queue_size` decoded at once), projecting structural nodes/edges per segment and reconstructing the three cross-family structural edges (CONTAINS_CALL from the slice; CALL/RESOLVES_TO from `callsites[].callee_id`; SOURCE_FILE/DEFINED_IN from the FILE preamble + `source_file.file_id`). No per-method subgraph is held across passes; pass 2 (summaries) is added in Task 7. A test-only `collect_structural(cpg_bin, work, profile, *, queue_size=64) -> tuple[set, Counter]` returns the structural node set `{(label,id)}` and the structural edge multiset `Counter((label,out,in))`.
+- Produces: the consumer's **pass 1** (delta C.1): read the preamble (project FILE nodes once), then iterate per-function records with a bounded window (`queue_size` decoded at once), projecting structural nodes/edges per segment and reconstructing the three cross-family structural edges (CONTAINS_CALL from the slice; CALL/RESOLVES_TO from `call_edges`, EVERY CALL->METHOD out-edge, NOT the taint `callsites[].callee_id` subset; SOURCE_FILE/DEFINED_IN from the FILE preamble + `source_file.file_id`). No per-method subgraph is held across passes; pass 2 (summaries) is added in Task 7. A test-only `collect_structural(cpg_bin, work, profile, *, queue_size=64) -> tuple[set, Counter]` returns the structural node set `{(label,id)}` and the structural edge multiset `Counter((label,out,in))`.
 
 - [ ] **Step 1: Write the failing test (structural NODE + EDGE parity)**
 
@@ -823,15 +827,17 @@ def _seg_to_graphson(seg: dict) -> dict:
 
 def _structural(seg: dict, profile) -> tuple[list, list]:
     """Structural nodes + edges for ONE per-function segment. CONTAINS_CALL comes from the slice's own
-    intra CONTAINS edges; CALL (-> RESOLVES_TO) is synthesized from callsites[].callee_id; SOURCE_FILE
-    (-> DEFINED_IN) is synthesized from source_file.file_id. FLOWS_TO is excluded (Task 7 adds it)."""
+    intra CONTAINS edges; CALL (-> RESOLVES_TO) is reconstructed from seg['call_edges'] (EVERY
+    CALL->METHOD out-edge, operator calls + all multi-callee edges), matching what legacy
+    project_graphson persists; NOT from the taint callsites (a strict subset, short 1638 edges on
+    NodeGoat). SOURCE_FILE (-> DEFINED_IN) is synthesized from source_file.file_id. FLOWS_TO is
+    excluded (Task 7 adds it)."""
     proj = project_graphson(_seg_to_graphson(seg), profile=profile)
     nodes = list(proj["nodes"])
     edges = [e for e in proj["edges"] if e["label"] == "CONTAINS"]     # intra CONTAINS_CALL
-    for cs in seg["callsites"]:
-        if cs["callee_id"] is not None:
-            edges.append({"label": "CALL", "out": cs["call_id"], "in": cs["callee_id"],
-                          "out_label": "CALL", "in_label": "METHOD"})
+    for call_id, callee_id in seg["call_edges"]:
+        edges.append({"label": "CALL", "out": call_id, "in": callee_id,
+                      "out_label": "CALL", "in_label": "METHOD"})
     fid = seg["source_file"]["file_id"]
     if fid is not None:
         edges.append({"label": "SOURCE_FILE", "out": seg["method_id"], "in": fid,

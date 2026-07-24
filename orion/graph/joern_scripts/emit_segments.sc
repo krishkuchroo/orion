@@ -178,6 +178,24 @@ import scala.jdk.CollectionConverters._
     }
   }
 
+  // ── call_edges: EVERY CALL -> METHOD out-edge (RESOLVES_TO source), one pair per edge, bucketed
+  // by the CALL node's owner. UNLIKE `callsites` (which is taint-shaped: real calls only, a single
+  // callee_id), this is UNFILTERED: it includes <operator>.* calls AND every callee of a multi-callee
+  // (over-approximated) call site. Legacy `project_graphson` persists a RESOLVES_TO for EVERY
+  // CALL -> METHOD edge, so the consumer reconstructs RESOLVES_TO from THIS field, never from the
+  // taint `callsites` (a strict subset). Same typed `_callOut` accessor as callsites, but no
+  // real-call restriction and ALL callees, not just the first. The taint `callsites` field above is
+  // left EXACTLY as is (the taint path depends on it staying byte-identical).
+  val callEdgesByMethod = mutable.LongMap.empty[mutable.ArrayBuffer[String]]
+  cpg.call.foreach { c =>
+    val mo = owner(c.id)
+    if (mo != NONE) {
+      c._callOut.foreach { callee =>
+        callEdgesByMethod.getOrElseUpdate(mo, mutable.ArrayBuffer.empty) += s"[${c.id},${callee.id}]"
+      }
+    }
+  }
+
   // ── emit ──
   val pw = new PrintWriter(outPath)
   try {
@@ -192,11 +210,12 @@ import scala.jdk.CollectionConverters._
       val ejson     = edgesByMethod.getOrElse(mid, mutable.ArrayBuffer.empty).mkString(",")
       val fileId    = m._sourceFileOut.nextOption().map(_.id.toString).getOrElse("null")
       val csjson    = callsitesByMethod.getOrElse(mid, mutable.ArrayBuffer.empty).mkString(",")
+      val cejson    = callEdgesByMethod.getOrElse(mid, mutable.ArrayBuffer.empty).mkString(",")
       val crossJson = crossByMethod.getOrElse(mid, mutable.ArrayBuffer.empty).mkString(",")
       val tgtJson   = targetsByMethod.getOrElse(mid, mutable.LinkedHashSet.empty).mkString(",")
       pw.println(
         s"""{"seg":$seg,"method_id":$mid,"vertices":[$vjson],"edges":[$ejson],""" +
-        s""""source_file":{"file_id":$fileId},"callsites":[$csjson],""" +
+        s""""source_file":{"file_id":$fileId},"callsites":[$csjson],"call_edges":[$cejson],""" +
         s""""cross_rd":[$crossJson],"closure_targets":[$tgtJson]}""")
       seg += 1
     }
