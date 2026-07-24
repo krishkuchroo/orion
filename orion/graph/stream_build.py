@@ -17,7 +17,7 @@ from typing import Optional
 
 from .joern_adapter import _joern_bin, _jvm_flags, _ensure_greadlink, project_graphson
 from . import joern_adapter as J    # Task 7 reuses the split entry-point test (_entry_method_ids_from)
-from . import taint_summary as T  # noqa: F401  (pass 2 / Task 7 threads summaries through this)
+from . import taint_summary as T   # pass 2 threads summaries through this (T.build_summary / T.stitch)
 
 _SCRIPT = Path(__file__).parent / "joern_scripts" / "emit_segments.sc"
 

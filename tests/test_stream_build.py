@@ -57,7 +57,7 @@ def test_producer_matches_python_partition(tmp_path):
 
 @pytest.mark.slow
 def test_producer_closure_parity_pygoat(tmp_path):
-    cpg = "fixtures/PyGoat/cpg.bin"
+    cpg = "fixtures/pygoat/cpg.bin"
     if not Path(cpg).exists():
         pytest.skip("PyGoat cpg.bin not present")
     out = tmp_path / "segments.jsonl"
@@ -127,7 +127,7 @@ def test_stream_structural_parity(tmp_path):
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("repo", ["fixtures/NodeGoat", "fixtures/PyGoat"])
+@pytest.mark.parametrize("repo", ["fixtures/NodeGoat", "fixtures/pygoat"])
 def test_stream_structural_and_property_parity(tmp_path, repo):
     """Structural node+edge parity (both repos) AND property parity for every summary-read key.
     Runs the producer once per repo and drives the real consumer helpers on its output."""
