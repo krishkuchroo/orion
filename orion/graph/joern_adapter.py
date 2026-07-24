@@ -519,6 +519,22 @@ def _joern_bin(name: str) -> Path:
     return root if root.exists() else jc / "bin" / name
 
 
+def _jvm_flags() -> list[str]:
+    """JVM args for the joern subprocesses: G1GC plus a `-J-Xmx` sized to THIS machine instead of
+    the JVM's ~25%-of-RAM default. joern-export pretty-prints the whole CPG into a single in-memory
+    GraphSON string; on a large repo (paid for by a 427-file C# emulator on a 16GB Mac) the default
+    heap OOMs mid-serialize. Hand the JVM ~75% of physical RAM so big graphs fit where the RAM
+    allows, leaving headroom for the OS, the Neo4j container, and the post-export Python parse. If
+    RAM can't be read, keep only G1GC and let the JVM pick its default (never a hard failure)."""
+    flags = ["-J-XX:+UseG1GC"]
+    try:
+        total_gb = os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE") / 1024 ** 3
+    except (ValueError, OSError, AttributeError):
+        return flags
+    flags.append(f"-J-Xmx{max(2, int(total_gb * 0.75))}g")
+    return flags
+
+
 def _ensure_greadlink(env: dict) -> dict:
     """Joern's frontend wrappers call `greadlink -f` (GNU coreutils). On a stock Mac that is
     absent; shim greadlink -> readlink so drive_joern works without `brew install coreutils`."""
@@ -541,7 +557,7 @@ def _run_export(cpg_bin: Path, export_dir: Path, env: dict, profile=None) -> dic
     if export_dir.exists():
         shutil.rmtree(export_dir)
     r = subprocess.run(
-        [str(_joern_bin("joern-export")), "-J-XX:+UseG1GC", "--repr=all", "--format=graphson",
+        [str(_joern_bin("joern-export")), *_jvm_flags(), "--repr=all", "--format=graphson",
          "--out", str(export_dir), str(cpg_bin)],
         capture_output=True, text=True, env=env)
     export_json = export_dir / "export.json"
@@ -634,7 +650,7 @@ def export_repo(repo_path: str | Path, language: str | None = None, profile=None
             raise RuntimeError(f"joern-parse not found under {config.JOERN_HOME} (set JOERN_HOME)")
         out_cpg = tmp / "cpg.bin"
         r = subprocess.run(
-            [str(parse), "-J-XX:+UseG1GC", str(repo),
+            [str(parse), *_jvm_flags(), str(repo),
              "--language", language or _guess_language(repo), "--output", str(out_cpg)],
             capture_output=True, text=True, env=env)
         if r.returncode != 0 or not out_cpg.exists():
