@@ -529,19 +529,39 @@ def _joern_bin(name: str) -> Path:
     return root if root.exists() else jc / "bin" / name
 
 
+def _heap_gb() -> int | None:
+    """The `-Xmx` size in whole GB, or None to let the JVM pick its default (RAM unreadable).
+
+    An explicit `config.JOERN_HEAP_GB` (positive number) wins outright -- skip RAM detection so a
+    shared/constrained box can cap heap and a giant repo can push it past the fraction. Otherwise
+    size to `config.JOERN_HEAP_FRACTION` of physical RAM (default 0.75, the prior hard-coded value).
+    Pure and testable without a subprocess."""
+    override = config.JOERN_HEAP_GB
+    if override:
+        try:
+            gb = int(float(override))
+            if gb > 0:
+                return gb
+        except ValueError:
+            pass   # malformed override -> fall through to RAM-derived sizing (never a hard failure)
+    try:
+        total_gb = os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE") / 1024 ** 3
+    except (ValueError, OSError, AttributeError):
+        return None
+    return max(2, int(total_gb * config.JOERN_HEAP_FRACTION))
+
+
 def _jvm_flags() -> list[str]:
     """JVM args for the joern subprocesses: G1GC plus a `-J-Xmx` sized to THIS machine instead of
     the JVM's ~25%-of-RAM default. joern-export pretty-prints the whole CPG into a single in-memory
     GraphSON string; on a large repo (paid for by a 427-file C# emulator on a 16GB Mac) the default
-    heap OOMs mid-serialize. Hand the JVM ~75% of physical RAM so big graphs fit where the RAM
-    allows, leaving headroom for the OS, the Neo4j container, and the post-export Python parse. If
-    RAM can't be read, keep only G1GC and let the JVM pick its default (never a hard failure)."""
+    heap OOMs mid-serialize. Size via `_heap_gb` (fraction-of-RAM, or an exact GB override), leaving
+    headroom for the OS, the Neo4j container, and the post-export Python parse. If RAM can't be read
+    and no override is set, keep only G1GC and let the JVM pick its default (never a hard failure)."""
     flags = ["-J-XX:+UseG1GC"]
-    try:
-        total_gb = os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE") / 1024 ** 3
-    except (ValueError, OSError, AttributeError):
-        return flags
-    flags.append(f"-J-Xmx{max(2, int(total_gb * 0.75))}g")
+    gb = _heap_gb()
+    if gb is not None:
+        flags.append(f"-J-Xmx{gb}g")
     return flags
 
 

@@ -18,6 +18,13 @@ NEO4J_DATABASE = _env("NEO4J_DATABASE", "neo4j")  # Community edition = single d
 
 # --- Graph build (native Joern; no sentryV2 dependency) ---
 JOERN_HOME = os.path.expanduser(_env("JOERN_HOME", "~/joern/joern-cli"))
+# Joern JVM heap for the parse/producer subprocess. The JVM's ~25%-of-RAM default OOMs large graphs,
+# so _jvm_flags hands it `-J-Xmx` sized to THIS machine. Both knobs are tunable for a side-by-side or
+# a constrained/shared box: JOERN_HEAP_FRACTION is the fraction of physical RAM to claim (default
+# 0.75 == the prior hard-coded value, so the default is behavior-preserving); JOERN_HEAP_GB, when set
+# to a positive number, is an EXACT `-Xmx{N}g` that wins outright (skips RAM detection entirely).
+JOERN_HEAP_FRACTION = float(_env("ORION_JOERN_HEAP_FRACTION", "0.75"))
+JOERN_HEAP_GB = _env("ORION_JOERN_HEAP_GB", "").strip()   # "" -> derive from RAM*fraction; else exact GB
 
 # --- Headless `claude -p` settings for discovery and verification ---
 MODEL = _env("ORION_MODEL", "sonnet")
