@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import os
 import subprocess
+import time
 from datetime import datetime, timezone
 
 from .contracts import OnEvent, ProgressEvent
@@ -24,6 +25,22 @@ def _event(phase: str, event: str, *, detail: str = "") -> ProgressEvent:
     """One build-phase ProgressEvent dict (see contracts.ProgressEvent for the key contract)."""
     return {"ts": datetime.now(timezone.utc).isoformat(), "phase": phase, "shape": None,
             "lead": None, "turn": None, "event": event, "detail": detail}
+
+
+def _timed(on_event: OnEvent | None, label: str, fn):
+    """Run `fn`, emit a 'build'/'timing' event carrying its wall-clock, and return (result, seconds).
+
+    The build's parse/consume/normalize/persist split was invisible: the run log had one 'build
+    start' and one 'build done', so an 11-minute build gave no clue WHICH sub-phase dominated. These
+    timing events land in progress.jsonl, so a side-by-side run can diff exactly where the time goes
+    (this is the measurement that item 0 exists to provide). Monotonic clock so a wall-clock change
+    mid-build never yields a negative duration."""
+    t0 = time.monotonic()
+    result = fn()
+    dt = time.monotonic() - t0
+    if on_event is not None:
+        on_event(_event("build", "timing", detail=f"{label}: {dt:.1f}s"))
+    return result, dt
 
 
 def _ambiguity_warning(repo_path: str, language: str | None,
@@ -90,18 +107,36 @@ def build(repo_path: str, language: str | None = None,
         if warn is not None:
             on_event(warn)
     profile = profiles.select_profile(repo_path, display_language)
+    t_build0 = time.monotonic()
     if stream:
         import tempfile
         from pathlib import Path
         from .graph import stream_build
-        cpg_bin = joern_adapter.ensure_cpg(repo_path, frontend)   # parse or reuse cpg.bin, NO export
+        # parse or reuse cpg.bin, NO export
+        cpg_bin, _ = _timed(on_event, "parse (cpg.bin)",
+                            lambda: joern_adapter.ensure_cpg(repo_path, frontend))
         work = Path(tempfile.mkdtemp(prefix="orion_stream_"))
-        envelope = stream_build.build_envelope(str(cpg_bin), work, profile, queue_size=queue_size,
-                                               mem_stats_path=mem_stats_path)
+        envelope, _ = _timed(
+            on_event, "consume (stream envelope)",
+            lambda: stream_build.build_envelope(str(cpg_bin), work, profile, queue_size=queue_size,
+                                                mem_stats_path=mem_stats_path))
     else:
-        envelope = joern_adapter.export_repo(repo_path, frontend, profile)
+        envelope, _ = _timed(on_event, "parse+export (legacy)",
+                             lambda: joern_adapter.export_repo(repo_path, frontend, profile))
     dependencies = deps.parse_dependencies(repo_path)
-    batch = joern_adapter.normalize(envelope, scan_id, language=display_language,
-                                    dependencies=dependencies)
-    persist.persist(batch)
+    batch, _ = _timed(
+        on_event, "normalize",
+        lambda: joern_adapter.normalize(envelope, scan_id, language=display_language,
+                                        dependencies=dependencies))
+    summary, _ = _timed(on_event, "persist", lambda: persist.persist(batch))
+    if on_event is not None:
+        # Surface persist's own clear/nodes/edges split when the persist layer reports it (it does
+        # once the chunked/parallel persister lands); harmless no-op until then.
+        timings = summary.get("timings") if isinstance(summary, dict) else None
+        if timings:
+            on_event(_event("build", "timing", detail="persist split -- "
+                            + ", ".join(f"{k} {v:.1f}s" for k, v in timings.items())))
+        on_event(_event("build", "timing",
+                        detail=f"TOTAL graph build: {time.monotonic() - t_build0:.1f}s "
+                               f"({len(batch.nodes)} nodes, {len(batch.edges)} edges)"))
     return scan_id
