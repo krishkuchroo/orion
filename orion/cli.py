@@ -52,13 +52,21 @@ def _run_dir(scan_id: str) -> str:
 
 
 def _run_scan(args: argparse.Namespace) -> int:
-    # Deferred on purpose -- see module docstring.
-    from . import config, discover, embed, graph_build, graphdb, report, verify
-    from .monitor import run_logger, tail
-
+    # Cheap arg validation BEFORE the heavy lazy imports below, so a typo'd path fails instantly
+    # instead of after loading the embedding model / Neo4j driver.
     if not args.scan_id and not args.repo:
         print("orion scan: provide a repo path or --scan-id", file=sys.stderr)
         return 2
+    # A missing repo path must fail here with a clear message -- otherwise it reaches joern-parse,
+    # which dies with a Java AssertionError stack trace ("Input path does not exist") that reads like
+    # an Orion crash. This also catches the aftermath of a failed `git clone` (empty/absent dir).
+    if args.repo and not Path(args.repo).is_dir():
+        print(f"orion scan: repo path not found or not a directory: {args.repo}", file=sys.stderr)
+        return 2
+
+    # Deferred on purpose -- see module docstring.
+    from . import config, discover, embed, graph_build, graphdb, report, verify
+    from .monitor import run_logger, tail
 
     needs_build = not args.scan_id
     scan_id = args.scan_id or graph_build.scan_id_for(args.repo)
