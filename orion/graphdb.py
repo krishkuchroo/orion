@@ -51,6 +51,15 @@ class GraphDB:
             )
             return [r["p"] for r in rows]
 
+    def node_count(self, scan_id: str) -> int:
+        """Total nodes persisted for this scan. Used to size the discovery timeout to graph size
+        (see config.discover_timeout). Returns 0 for an unknown/empty scan rather than raising."""
+        with self._driver.session(database=config.NEO4J_DATABASE) as s:
+            rec = s.run(
+                "MATCH (n {scan_id:$scan_id}) RETURN count(n) AS c", scan_id=scan_id
+            ).single()
+            return int(rec["c"]) if rec else 0
+
     def clear_scan(self, scan_id: str) -> None:
         """Single-scan lifecycle: remove everything for this scan before a reload (idempotent).
 

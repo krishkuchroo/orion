@@ -158,7 +158,7 @@ def verify_lead(scan_id: str, lead: Lead, repo_path: str, on_event: OnEvent, run
         extra_allowed=("Read", "Grep", "Glob", "Task", "Skill"),
         on_event=on_event,
         max_turns=config.VERIFY_MAX_TURNS,
-        timeout=config.CALL_TIMEOUT,
+        timeout=config.VERIFY_TIMEOUT,
         # fp-check spawns subagents and intermittently hits transient API overload under a heavy
         # back-to-back batch; retry so a blip doesn't silently degrade to an ERROR verdict.
         retries=2,

@@ -53,7 +53,7 @@ def _run_dir(scan_id: str) -> str:
 
 def _run_scan(args: argparse.Namespace) -> int:
     # Deferred on purpose -- see module docstring.
-    from . import discover, embed, graph_build, report, verify
+    from . import config, discover, embed, graph_build, graphdb, report, verify
     from .monitor import run_logger, tail
 
     if not args.scan_id and not args.repo:
@@ -102,8 +102,23 @@ def _run_scan(args: argparse.Namespace) -> int:
         profile = profiles.select_profile(args.repo)
 
     def _pipeline():
-        on_event(_event("discover", "start", detail="discovery fleet starting"))
-        leads = discover.discover(scan_id, on_event, profile)
+        # Size the per-shape discovery timeout to the graph: a bigger graph is a bigger search space
+        # and needs longer sweeps (see config.discover_timeout). Sizing is best-effort -- if the
+        # count query fails we fall back to the reality-based floor, never abort the scan.
+        node_count = 0
+        try:
+            db = graphdb.GraphDB()
+            try:
+                node_count = db.node_count(scan_id)
+            finally:
+                db.close()
+        except Exception as exc:  # noqa: BLE001 -- best-effort sizing; the floor is a safe default
+            on_event(_event("discover", "warn",
+                            detail=f"graph node count unavailable, using base discovery timeout: {exc}"))
+        d_timeout = config.discover_timeout(node_count)
+        on_event(_event("discover", "start",
+                        detail=f"discovery fleet starting ({node_count} nodes, per-shape timeout {d_timeout}s)"))
+        leads = discover.discover(scan_id, on_event, profile, timeout=d_timeout)
         on_event(_event("discover", "done", detail=f"{len(leads)} candidate leads"))
 
         on_event(_event("verify", "start", detail=f"verifying {len(leads)} leads"))
