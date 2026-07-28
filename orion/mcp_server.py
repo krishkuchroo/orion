@@ -1,5 +1,6 @@
 """The MCP tool server: the ONLY way a discovery or verifier agent touches the graph or the
-semantic index. Three tools, all read-only.
+semantic index. Four read-only tools (`exploit_search` is verifier-only, gated by the allowlist in
+claude_cli.py, not here).
 
 `run_cypher` delegates straight to GraphDB (write-keyword guard and scan_id binding live there,
 not here). `semantic_search` imports `orion.embed` lazily and tolerates it being unimplemented
@@ -55,10 +56,33 @@ def semantic_search_impl(query: str, scan_id: str, k: int = 5) -> list[dict]:
         return [{"_note": f"semantic index unavailable: {exc.__class__.__name__}: {exc}"}]
 
 
+def exploit_search_impl(query: str, k: int = 5) -> list[dict]:
+    """Nearest exploit-reference modules for `query` from the GLOBAL Metasploit corpus (not
+    scan-scoped), or a one-element `_note` list if the corpus isn't indexed yet. ADVISORY -- a real
+    published exploit reference, never proof the target is vulnerable. Never crashes the server."""
+    try:
+        from . import embed  # lazy: embed pulls the driver + (on demand) the embedding model
+        results = embed.exploit_search(query, k)
+        if not results:
+            return [{"_note": "exploit corpus unavailable: not indexed (run `orion index-exploits`)"}]
+        return results
+    except (NotImplementedError, ImportError, TypeError) as exc:
+        return [{"_note": f"exploit corpus unavailable: {exc}"}]
+    except Exception as exc:  # noqa: BLE001 — any other embed failure must not crash the server
+        return [{"_note": f"exploit corpus unavailable: {exc.__class__.__name__}: {exc}"}]
+
+
 @mcp.tool()
 def run_cypher(query: str, scan_id: str) -> dict:
     """Run a read-only Cypher query scoped to one scan_id. Write keywords are blocked."""
     return run_cypher_impl(query, scan_id)
+
+
+@mcp.tool()
+def exploit_search(query: str, k: int = 5) -> list[dict]:
+    """Search the global Metasploit exploit-reference corpus by meaning. ADVISORY: a real published
+    exploit reference, NEVER proof the target is vulnerable. Not scan-scoped."""
+    return exploit_search_impl(query, k)
 
 
 @mcp.tool()

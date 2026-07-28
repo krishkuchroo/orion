@@ -34,6 +34,11 @@ VECTOR_INDEX_NAME = "chunk_embedding_index"
 METHOD_LINE_WINDOW = 40
 FALLBACK_BLOCK_LINES = 60
 
+# The GLOBAL exploit-reference corpus (not scan_id-scoped, like get_schema): a dedicated label +
+# vector index so it never mixes with per-scan Chunk nodes. See orion/exploit_corpus.py.
+EXPLOIT_LABEL = "ExploitChunk"
+EXPLOIT_VECTOR_INDEX_NAME = "exploit_embedding_index"
+
 _model = None
 _model_lock = threading.Lock()
 
@@ -284,6 +289,135 @@ def index(repo_path: str, scan_id: str) -> None:
                 "text: row.text, embedding: row.embedding})",
                 scan_id=scan_id, rows=rows,
             )
+    finally:
+        driver.close()
+
+
+def _ensure_exploit_vector_index(session) -> None:
+    session.run(
+        f"""
+        CREATE VECTOR INDEX {EXPLOIT_VECTOR_INDEX_NAME} IF NOT EXISTS
+        FOR (c:{EXPLOIT_LABEL}) ON (c.embedding)
+        OPTIONS {{indexConfig: {{
+            `vector.dimensions`: $dims,
+            `vector.similarity_function`: 'cosine'
+        }}}}
+        """,
+        dims=EMBED_DIM,
+    )
+
+
+def exploit_index_ready() -> bool:
+    """True if the exploit-reference vector index exists AND has at least one ExploitChunk node."""
+    _require_neo4j_backend()
+    driver = _driver()
+    try:
+        with driver.session(database=config.NEO4J_DATABASE) as session:
+            has_index = session.run(
+                "SHOW INDEXES YIELD name WHERE name = $name RETURN count(*) AS c",
+                name=EXPLOIT_VECTOR_INDEX_NAME,
+            ).single()["c"]
+            if not has_index:
+                return False
+            n = session.run(f"MATCH (c:{EXPLOIT_LABEL}) RETURN count(c) AS c").single()["c"]
+            return n > 0
+    finally:
+        driver.close()
+
+
+def index_exploits(metadata_path: str | None = None, *, metadata: dict | None = None,
+                   model=None) -> int:
+    """Build the GLOBAL exploit-reference corpus: distill MSF module records into ExploitChunk nodes
+    with embeddings, behind a dedicated vector index. NOT scan_id-scoped. Idempotent: clears any
+    existing ExploitChunk nodes first, then writes fresh ones. Returns the number of docs indexed.
+
+    `metadata` (in-memory dict) takes precedence over `metadata_path` (defaults to the gitignored
+    fixtures file); `model` is injectable for tests. Raises FileNotFoundError if neither is available.
+    """
+    from . import exploit_corpus
+
+    _require_neo4j_backend()
+    if metadata is None:
+        path = metadata_path or exploit_corpus.DEFAULT_METADATA_PATH
+        if not os.path.exists(path):
+            raise FileNotFoundError(
+                f"exploit metadata not found at {path!r}; run `orion index-exploits` "
+                "(it fetches the Metasploit index first) or call exploit_corpus.fetch_metadata()"
+            )
+        metadata = exploit_corpus.load_metadata(path)
+
+    docs = exploit_corpus.to_documents(metadata)
+    model = model or _get_model()
+    driver = _driver()
+    try:
+        with driver.session(database=config.NEO4J_DATABASE) as session:
+            _ensure_exploit_vector_index(session)
+            session.run(f"MATCH (c:{EXPLOIT_LABEL}) DETACH DELETE c")
+        if not docs:
+            return 0
+        vectors = model.encode([d.text for d in docs], batch_size=16,
+                               show_progress_bar=False, convert_to_numpy=True)
+        rows = [
+            {"module": d.module, "name": d.name, "cves": list(d.cves), "rank": d.rank,
+             "mtype": d.mtype, "disclosure_date": d.disclosure_date, "path": d.path,
+             "text": d.text, "embedding": vec.tolist()}
+            for d, vec in zip(docs, vectors)
+        ]
+        with driver.session(database=config.NEO4J_DATABASE) as session:
+            session.run(
+                f"UNWIND $rows AS row CREATE (c:{EXPLOIT_LABEL} {{"
+                "module: row.module, name: row.name, cves: row.cves, rank: row.rank, "
+                "mtype: row.mtype, disclosure_date: row.disclosure_date, path: row.path, "
+                "text: row.text, embedding: row.embedding})",
+                rows=rows,
+            )
+            # Wait for the vector index to finish populating so the very next exploit_search sees
+            # the freshly written nodes (same discipline as persist.py's range indexes).
+            session.run("CALL db.awaitIndexes(60)")
+        return len(rows)
+    finally:
+        driver.close()
+
+
+def ensure_exploit_index(metadata_path: str | None = None) -> bool:
+    """Build the exploit corpus ONLY if it isn't already indexed AND the metadata file is present
+    locally (never triggers a surprise download inside a scan). Returns True if the corpus is ready
+    for exploit_search afterwards, else False. Intended as a best-effort caller wrapper."""
+    from . import exploit_corpus
+    if exploit_index_ready():
+        return True
+    path = metadata_path or exploit_corpus.DEFAULT_METADATA_PATH
+    if not os.path.exists(path):
+        return False
+    index_exploits(path)
+    return True
+
+
+def exploit_search(query: str, k: int = 5, model=None) -> list[dict]:
+    """Nearest exploit-reference modules to `query` from the GLOBAL corpus (NOT scan-scoped), best
+    first. Returns [] if the corpus has never been indexed (not an error). Each result carries
+    module, name, cves, rank, disclosure_date, text, score. `model` is injectable for tests."""
+    _require_neo4j_backend()
+    driver = _driver()
+    try:
+        with driver.session(database=config.NEO4J_DATABASE) as session:
+            has_index = session.run(
+                "SHOW INDEXES YIELD name WHERE name = $name RETURN count(*) AS c",
+                name=EXPLOIT_VECTOR_INDEX_NAME,
+            ).single()["c"]
+            if not has_index:
+                return []
+            model = model or _get_model()
+            query_vector = model.encode(query, convert_to_numpy=True).tolist()
+            result = session.run(
+                f"CALL db.index.vector.queryNodes('{EXPLOIT_VECTOR_INDEX_NAME}', $k, $query_vector) "
+                "YIELD node, score "
+                "RETURN node.module AS module, node.name AS name, node.cves AS cves, "
+                "node.rank AS rank, node.disclosure_date AS disclosure_date, "
+                "node.text AS text, score ORDER BY score DESC LIMIT $k",
+                k=k, query_vector=query_vector,
+            )
+            return [dict(r) for r in result]
     finally:
         driver.close()
 

@@ -33,6 +33,7 @@ import uuid
 
 from . import config
 from .contracts import Lead, OnEvent, Verdict
+from .exploit_corpus import EXPLOIT_SEARCH_GUIDANCE
 
 _DECISIONS = {"CONFIRM", "REJECT", "INCONCLUSIVE", "ERROR"}
 
@@ -143,7 +144,10 @@ def verify_lead(scan_id: str, lead: Lead, repo_path: str, on_event: OnEvent, run
     imported at module scope) so this stays testable without claude_cli, and so verify_all is the
     single place that does the lazy import."""
     session_id = str(uuid.uuid4())
-    system = VERIFY_SYSTEM.format(schema=_SCHEMA_BLOCK, scan_id=scan_id)
+    system = (
+        VERIFY_SYSTEM.format(schema=_SCHEMA_BLOCK, scan_id=scan_id)
+        + "\n\n" + EXPLOIT_SEARCH_GUIDANCE
+    )
     message = _lead_message(scan_id, lead)
 
     on_event({
@@ -155,7 +159,9 @@ def verify_lead(scan_id: str, lead: Lead, repo_path: str, on_event: OnEvent, run
         session_id, system, message,
         json_schema=VERDICT_SCHEMA,
         add_dir=repo_path,
-        extra_allowed=("Read", "Grep", "Glob", "Task", "Skill"),
+        # exploit_search is verifier-only (not in claude_cli._ALLOWED_BASE) -- discovery never gets
+        # it; the verifier uses it advisorily for severity/version calibration per EXPLOIT_SEARCH_GUIDANCE.
+        extra_allowed=("Read", "Grep", "Glob", "Task", "Skill", "mcp__orion__exploit_search"),
         on_event=on_event,
         max_turns=config.VERIFY_MAX_TURNS,
         timeout=config.VERIFY_TIMEOUT,

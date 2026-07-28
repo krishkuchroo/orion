@@ -99,6 +99,18 @@ def _run_scan(args: argparse.Namespace) -> int:
                 detail=f"semantic index failed, continuing graph-only: {exc}",
             ))
 
+    # Best-effort: ensure the GLOBAL exploit-reference corpus is indexed (once) so the verifier's
+    # exploit_search tool works. Builds ONLY if the metadata file is present locally -- never
+    # downloads mid-scan, never fatal. Run `orion index-exploits` to fetch + build it explicitly.
+    try:
+        if embed.ensure_exploit_index():
+            on_event(_event("build", "done", detail="exploit-reference corpus ready"))
+        else:
+            on_event(_event("build", "done",
+                            detail="exploit corpus not indexed (run `orion index-exploits` to enable)"))
+    except Exception as exc:  # noqa: BLE001 -- corpus is advisory; never break a scan over it
+        on_event(_event("build", "error", detail=f"exploit corpus index skipped: {exc}"))
+
     # fp-check (the verifier's source-reading step) sandboxes to this path via --add-dir; fall
     # back to "." when only --scan-id was given and no repo checkout is known.
     repo_for_verify = args.repo or "."
@@ -193,10 +205,31 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--queue-size", dest="queue_size", type=int, default=64,
                       help="functions held in flight by the streaming build (default 64)")
 
+    idx = sub.add_parser("index-exploits",
+                         help="build/refresh the global Metasploit exploit-reference corpus (one-time)")
+    idx.add_argument("--refresh", action="store_true",
+                     help="re-download the Metasploit metadata index before building")
+
     args = parser.parse_args(argv)
 
     if args.cmd == "scan":
         return _run_scan(args)
+    if args.cmd == "index-exploits":
+        return _run_index_exploits(args)
+    return 0
+
+
+def _run_index_exploits(args: argparse.Namespace) -> int:
+    """Fetch (if missing/--refresh) and index the global exploit-reference corpus."""
+    from . import embed, exploit_corpus
+
+    path = exploit_corpus.DEFAULT_METADATA_PATH
+    if args.refresh or not Path(path).exists():
+        print(f"fetching Metasploit metadata index -> {path}")
+        exploit_corpus.fetch_metadata(path)
+    print("indexing exploit-reference corpus (embedding a few thousand modules, one-time)...")
+    n = embed.index_exploits(path)
+    print(f"indexed {n} exploit-reference documents into the '{embed.EXPLOIT_LABEL}' corpus")
     return 0
 
 
