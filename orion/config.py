@@ -26,6 +26,14 @@ JOERN_HOME = os.path.expanduser(_env("JOERN_HOME", "~/joern/joern-cli"))
 JOERN_HEAP_FRACTION = float(_env("ORION_JOERN_HEAP_FRACTION", "0.75"))
 JOERN_HEAP_GB = _env("ORION_JOERN_HEAP_GB", "").strip()   # "" -> derive from RAM*fraction; else exact GB
 
+# --- Graph persist (chunked, parallel writer; items 3 + 5) ---
+# The old persist wrote the WHOLE graph (all ~80k nodes+edges) in ONE transaction: unbounded tx state
+# and no commit until the very end. Chunk the CREATEs into bounded transactions (incremental commit,
+# O(chunk) tx memory) and fan disjoint chunks across a small session pool. Both tunable for a
+# side-by-side. PERSIST_CONCURRENCY <= 1 keeps the old sequential behavior (one session).
+PERSIST_CHUNK_SIZE = int(_env("ORION_PERSIST_CHUNK_SIZE", "5000"))   # rows per write transaction
+PERSIST_CONCURRENCY = int(_env("ORION_PERSIST_CONCURRENCY", "4"))    # concurrent write sessions
+
 # --- Headless `claude -p` settings for discovery and verification ---
 MODEL = _env("ORION_MODEL", "sonnet")
 EFFORT = _env("ORION_EFFORT", "high")

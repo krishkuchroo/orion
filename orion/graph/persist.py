@@ -1,10 +1,11 @@
 """Persist a `schema.Batch` into Orion's own Neo4j: single-scan clear-and-load.
 
-The one write path in the build layer. In ONE write transaction it clears the scan partition,
-then CREATEs all nodes and all edges (endpoints MATCHed by NODE_KEY), UNWIND-batched per label so a
-full NodeGoat graph lands in a handful of round-trips. Doing the clear and the load atomically means
-a crash leaves the previous scan intact rather than a half-empty partition. Idempotent: a re-build
-of the same scan_id clears then reloads identical data.
+The one write path in the build layer. It clears the scan partition (label-scoped -- see `_clear`),
+then CREATEs all nodes and all edges (endpoints MATCHed by NODE_KEY) as bounded UNWIND CHUNKS fanned
+across a small session pool (items 3 + 5): O(chunk) per-transaction state, incremental commits, and
+disjoint chunks written in parallel, instead of the old single whole-graph transaction. Idempotent:
+a re-build of the same scan_id clears then reloads identical data. The chunk/parallel split trades
+the old atomic clear-and-load (see `persist` for the crash-window tradeoff).
 
 CREATE, not MERGE (item 1): the partition is DETACH DELETEd first, so every node and edge in the
 batch is brand-new -- MERGE's MATCH-then-CREATE is pure wasted work on guaranteed-new data, and
@@ -21,7 +22,9 @@ build step calls this.
 """
 from __future__ import annotations
 
+import time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 
 from neo4j import GraphDatabase
 
@@ -117,17 +120,67 @@ def _edge_rows(edges) -> dict[tuple, list[dict]]:
     return out
 
 
-def _write_tx(tx, batch: Batch) -> None:
-    # Clear this scan first, in the same transaction as the load (atomic clear-and-load).
-    tx.run("MATCH (n {scan_id:$sid}) DETACH DELETE n", sid=batch.scan_id)
+def _clear(driver, scan_id: str) -> None:
+    """Clear ONLY this scan's graph-label nodes (the NODE_KEY labels), not every node carrying the
+    scan_id. This deliberately SPARES the semantic-index `:Chunk` nodes (same scan_id): once the
+    clear is label-scoped, the embed step can run CONCURRENTLY with persist (item 4) without persist
+    wiping the chunks embed just wrote. One managed transaction; DETACH removes their edges too."""
+    labels = list(NODE_KEY.keys())
+    with driver.session(database=config.NEO4J_DATABASE) as s:
+        s.execute_write(lambda tx: tx.run(
+            "MATCH (n {scan_id:$sid}) WHERE any(l IN labels(n) WHERE l IN $labels) DETACH DELETE n",
+            sid=scan_id, labels=labels))
 
-    # Nodes first (so edge endpoints exist to MATCH), deduped + grouped per label for UNWIND CREATE.
-    for label, rows in _node_rows(batch.nodes).items():
-        tx.run(_node_create(label), rows=rows)
 
-    # Edges: deduped (non-FLOWS_TO) + grouped by (rtype, endpoints, key-shape) for UNWIND CREATE.
-    for (rtype, fl, tl, fkeys, tkeys), rows in _edge_rows(batch.edges).items():
-        tx.run(_edge_create(rtype, fl, tl, fkeys, tkeys), rows=rows)
+def _chunks(rows: list, size: int):
+    """Split `rows` into <= `size`-length chunks (size floored at 1). Each chunk becomes one bounded
+    write transaction, so per-tx state is O(chunk) instead of O(whole graph)."""
+    step = max(1, size)
+    for i in range(0, len(rows), step):
+        yield rows[i:i + step]
+
+
+def _run_write(tx, cypher: str, rows: list) -> None:
+    tx.run(cypher, rows=rows)
+
+
+def _node_jobs(nodes) -> list[tuple[str, list]]:
+    """(cypher, rows) chunks for every node label -- deduped by NODE_KEY, then split to chunk size."""
+    return [(_node_create(label), chunk)
+            for label, rows in _node_rows(nodes).items()
+            for chunk in _chunks(rows, config.PERSIST_CHUNK_SIZE)]
+
+
+def _edge_jobs(edges) -> list[tuple[str, list]]:
+    """(cypher, rows) chunks for every edge group -- non-FLOWS_TO deduped, then split to chunk size."""
+    return [(_edge_create(*sig), chunk)
+            for sig, rows in _edge_rows(edges).items()
+            for chunk in _chunks(rows, config.PERSIST_CHUNK_SIZE)]
+
+
+def _run_jobs(driver, jobs: list[tuple[str, list]], concurrency: int) -> None:
+    """Run each (cypher, rows) job as its own managed write transaction -- bounded per-tx state and
+    incremental commits (item 3). With concurrency > 1, jobs fan across a bounded thread pool, each
+    on its OWN session (item 5): node jobs are disjoint (distinct brand-new nodes, no lock overlap),
+    and edge jobs use managed transactions that auto-retry a transient deadlock (concurrent CREATEs
+    touching a shared endpoint's relationships). A job that raises propagates -- never a silent
+    partial load. concurrency <= 1 keeps the old single-session sequential behavior."""
+    if not jobs:
+        return
+    if concurrency <= 1:
+        with driver.session(database=config.NEO4J_DATABASE) as s:
+            for cypher, rows in jobs:
+                s.execute_write(_run_write, cypher, rows)
+        return
+
+    def _one(job: tuple[str, list]) -> None:
+        cypher, rows = job
+        with driver.session(database=config.NEO4J_DATABASE) as s:
+            s.execute_write(_run_write, cypher, rows)
+
+    with ThreadPoolExecutor(max_workers=concurrency) as ex:
+        for _ in ex.map(_one, jobs):   # forces completion + re-raises the first job's exception
+            pass
 
 
 def flows_count(scan_id: str) -> int:
@@ -144,13 +197,34 @@ def flows_count(scan_id: str) -> int:
 
 
 def persist(batch: Batch) -> dict:
-    """Clear the scan partition and load the batch (nodes then edges) in one atomic write
-    transaction. Returns a small summary for the build log."""
+    """Clear the scan partition and load the batch (nodes then edges) as CHUNKED, optionally PARALLEL
+    writes: bounded per-transaction state + incremental commits (item 3), fanned across a session
+    pool of `config.PERSIST_CONCURRENCY` (item 5). Nodes are loaded before edges (edges MATCH their
+    endpoints).
+
+    TRADEOFF vs the old single atomic clear-and-load: the clear and the per-chunk loads are now
+    SEPARATE transactions, so a crash mid-persist can leave a PARTIAL partition. This is self-healing
+    -- the next build of the same scan_id clears then reloads -- and within one `orion scan` a persist
+    crash raises and aborts the scan before discovery runs, so discovery never sees a half-loaded
+    graph. The narrow exposure is querying a crashed partition via --scan-id before rebuilding.
+
+    Returns a summary incl. a `timings` split (clear/nodes/edges seconds) the build log surfaces."""
     driver = GraphDatabase.driver(config.NEO4J_URI, auth=config.NEO4J_AUTH)
+    timings: dict[str, float] = {}
+    conc = config.PERSIST_CONCURRENCY
     try:
         with driver.session(database=config.NEO4J_DATABASE) as s:
             _ensure_indexes(s)                    # idempotent NODE_KEY range indexes, before the load
-            s.execute_write(_write_tx, batch)
+        t = time.monotonic()
+        _clear(driver, batch.scan_id)
+        timings["clear"] = time.monotonic() - t
+        t = time.monotonic()
+        _run_jobs(driver, _node_jobs(batch.nodes), conc)    # nodes first (edge endpoints must exist)
+        timings["nodes"] = time.monotonic() - t
+        t = time.monotonic()
+        _run_jobs(driver, _edge_jobs(batch.edges), conc)
+        timings["edges"] = time.monotonic() - t
     finally:
         driver.close()
-    return {"scan_id": batch.scan_id, "nodes": len(batch.nodes), "edges": len(batch.edges)}
+    return {"scan_id": batch.scan_id, "nodes": len(batch.nodes), "edges": len(batch.edges),
+            "timings": timings}
