@@ -44,9 +44,11 @@ def test_malformed_or_nonpositive_override_falls_through(monkeypatch):
         return {"SC_PHYS_PAGES": 2 * 1024 * 1024, "SC_PAGE_SIZE": 4096}[name]
 
     monkeypatch.setattr(J.os, "sysconf", _sysconf)
-    for bad in ("abc", "0", "-4"):
+    # "inf"/"-inf" raise OverflowError from int(float(...)), not ValueError -- must also fall through
+    # (regression guard: an uncaught OverflowError would crash the build).
+    for bad in ("abc", "0", "-4", "inf", "-inf", "nan"):
         monkeypatch.setattr(config, "JOERN_HEAP_GB", bad)
-        assert J._heap_gb() == 6    # RAM-derived, not the bad value
+        assert J._heap_gb() == 6    # RAM-derived, not the bad value, never a crash
 
 
 def test_no_ram_no_override_is_g1gc_only(monkeypatch):

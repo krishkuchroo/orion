@@ -542,8 +542,8 @@ def _heap_gb() -> int | None:
             gb = int(float(override))
             if gb > 0:
                 return gb
-        except ValueError:
-            pass   # malformed override -> fall through to RAM-derived sizing (never a hard failure)
+        except (ValueError, OverflowError):
+            pass   # malformed override (incl. "inf"/"-inf") -> RAM-derived sizing (never a hard failure)
     try:
         total_gb = os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE") / 1024 ** 3
     except (ValueError, OSError, AttributeError):

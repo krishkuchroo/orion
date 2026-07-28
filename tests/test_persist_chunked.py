@@ -103,6 +103,31 @@ def test_chunked_persist_parity_seq_and_parallel(monkeypatch, concurrency):
         drv.close()
 
 
+def test_persist_unions_node_props_end_to_end():
+    """Regression for the review's finding #1: two CpgMethod rows share a NODE_KEY (full_name) but
+    only the FIRST carries file_path/line. MERGE ... SET n += props would union them; the persisted
+    node MUST retain file_path/line (a plain last-row replace would drop them)."""
+    sid = "test-chunk-union"
+    drv = _drv_or_skip()
+    try:
+        b = schema.Batch(sid)
+        b.emit_node("CpgMethod", {"full_name": "foo", "name": "foo", "file_path": "a.js", "line": 7})
+        b.emit_node("CpgMethod", {"full_name": "foo", "name": "foo", "is_external": True})  # no span
+        persist.persist(b)
+        with drv.session(database=config.NEO4J_DATABASE) as s:
+            rec = s.run("MATCH (m:CpgMethod {scan_id:$s, full_name:'foo'}) "
+                        "RETURN m.file_path AS fp, m.line AS ln, m.is_external AS ext",
+                        s=sid).single()
+            n = s.run("MATCH (m:CpgMethod {scan_id:$s}) RETURN count(m) AS n", s=sid).single()["n"]
+        assert n == 1, "the two same-full_name rows must collapse to one node"
+        assert rec["fp"] == "a.js" and rec["ln"] == 7, "unioned span props must survive the collapse"
+        assert rec["ext"] is True, "props from the later row must also be present (union)"
+    finally:
+        with drv.session(database=config.NEO4J_DATABASE) as s:
+            s.run("MATCH (n {scan_id:$s}) DETACH DELETE n", s=sid)
+        drv.close()
+
+
 def test_clear_is_label_scoped_and_spares_chunk_nodes():
     """persist's clear must delete only the graph-label nodes, leaving a :Chunk with the same
     scan_id intact -- the property that lets embed run concurrently with persist (item 4)."""

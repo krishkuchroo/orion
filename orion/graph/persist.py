@@ -47,9 +47,12 @@ def _ensure_indexes(session) -> None:
         props = ", ".join(f"n.`{k}`" for k in keys)
         session.run(f"CREATE RANGE INDEX `{_index_name(label)}` IF NOT EXISTS "
                     f"FOR (n:`{label}`) ON ({props})")
-    # Block until the freshly-created indexes are ONLINE so the very next MERGE is index-backed. Cheap
-    # when they already exist (returns immediately). Timeout is seconds.
-    session.run("CALL db.awaitIndexes(300)")
+    # Block until OUR indexes are ONLINE so the very next CREATE's edge-endpoint MATCH is index-backed.
+    # Await each NODE_KEY index BY NAME rather than db.awaitIndexes (ALL): under the item-4 overlap the
+    # embed step may be concurrently building its own vector index, and db.awaitIndexes would make
+    # persist block on that too. Cheap when an index already exists (returns immediately); seconds unit.
+    for label in NODE_KEY:
+        session.run("CALL db.awaitIndex($name, 300)", name=_index_name(label))
 
 
 def _node_create(label: str) -> str:
@@ -75,45 +78,51 @@ def _edge_create(rtype: str, from_label: str, to_label: str,
 
 
 def _node_rows(nodes) -> dict[str, list[dict]]:
-    """label -> CREATE rows ({"props": props}), deduped by NODE_KEY with last-write-wins.
+    """label -> CREATE rows ({"props": props}), deduped by NODE_KEY, UNIONing props across duplicates.
 
     DETACH DELETE clears the partition first, so CREATE is safe -- but two batch rows can share a
-    NODE_KEY (the old per-label MERGE silently collapsed them, the last SET winning). CREATE would
-    instead make TWO nodes with the same key, which both duplicates the node and makes an
-    edge-endpoint MATCH ambiguous (it would create the edge against an arbitrary one, or two edges).
-    So we reproduce MERGE's collapse here: last row wins, exactly like `MERGE ... SET n += props`.
-    Pure -- unit-tested without Neo4j."""
+    NODE_KEY (the old per-label MERGE silently collapsed them). CREATE would instead make TWO nodes
+    with the same key, which both duplicates the node and makes an edge-endpoint MATCH ambiguous. So
+    we reproduce MERGE's collapse here EXACTLY: `MERGE (n {key}) SET n += props` over duplicate rows
+    ACCUMULATES the union of their property keys (last-wins per key, but a key set by an earlier row
+    is never dropped by a later row that omits it). We therefore merge dicts (`{**prev, **props}`),
+    not replace -- a plain replace would drop a key an earlier row set (e.g. a CpgMethod row carrying
+    file_path/line collapsed against a later external-stub row without them, which would then vanish
+    from the semantic index's non-null-span filter). Pure -- unit-tested without Neo4j."""
     by_label: dict[str, dict[tuple, dict]] = defaultdict(dict)
     for label, props in nodes:
         key = tuple(props[k] for k in NODE_KEY[label])
-        by_label[label][key] = props            # last-wins == MERGE ... SET n += props
+        by_label[label][key] = {**by_label[label].get(key, {}), **props}   # union == MERGE SET n += props
     return {label: [{"props": p} for p in keyed.values()] for label, keyed in by_label.items()}
 
 
 def _edge_rows(edges) -> dict[tuple, list[dict]]:
     """(rtype, from_label, to_label, from_keys, to_keys) -> CREATE rows ({"fk","tk","props"}).
 
-    Non-FLOWS_TO edges are deduped to ONE row per (endpoint values), last-write-wins -- reproducing
-    a relationship MERGE's pattern identity (`MERGE (a)-[:T]->(b)` matches on the pattern; props are
-    not in it), so switching them to CREATE yields the identical single edge. FLOWS_TO keeps EVERY
-    row: `collapse_flows` can legitimately emit two flows between the same call pair differing only
-    by arg_index (e.g. `sink(x, x)`), and both must survive (see module docstring). First-seen order
-    is preserved for determinism. Pure -- unit-tested without Neo4j."""
+    Non-FLOWS_TO edges are deduped to ONE row per (endpoint values), UNIONing props -- reproducing a
+    relationship MERGE's pattern identity (`MERGE (a)-[:T]->(b) SET r += props` matches on the
+    pattern; props accumulate across duplicate rows), so switching them to CREATE yields the identical
+    single edge with the same accumulated props. (Non-FLOWS_TO edges carry only {scan_id} today, so
+    union and replace coincide -- the merge keeps it byte-for-byte correct if edge props ever grow.)
+    FLOWS_TO keeps EVERY row: `collapse_flows` can legitimately emit two flows between the same call
+    pair differing only by arg_index (e.g. `sink(x, x)`), and both must survive (see module
+    docstring). First-seen order is preserved for determinism. Pure -- unit-tested without Neo4j."""
     flows: dict[tuple, list[dict]] = defaultdict(list)      # FLOWS_TO sigs: append every row
-    struct: dict[tuple, dict[tuple, dict]] = defaultdict(dict)  # other sigs: {endpoint-values: row}, last-wins
+    struct: dict[tuple, dict[tuple, dict]] = defaultdict(dict)  # other sigs: {endpoint-values: row}, union props
     order: list[tuple] = []
     for rtype, fl, fk, tl, tk, props in edges:
         sig = (rtype, fl, tl, tuple(fk.keys()), tuple(tk.keys()))
-        row = {"fk": fk, "tk": tk, "props": props}
         if rtype == "FLOWS_TO":
             if sig not in flows:
                 order.append(sig)
-            flows[sig].append(row)
+            flows[sig].append({"fk": fk, "tk": tk, "props": props})
         else:
             if sig not in struct:
                 order.append(sig)
             endpoint = (tuple(fk.values()), tuple(tk.values()))
-            struct[sig][endpoint] = row        # last-wins == MERGE (a)-[:T]->(b) SET r += props
+            prev = struct[sig].get(endpoint)
+            merged = {**(prev["props"] if prev else {}), **props}   # union == MERGE (a)-[:T]->(b) SET r += props
+            struct[sig][endpoint] = {"fk": fk, "tk": tk, "props": merged}
     out: dict[tuple, list[dict]] = {}
     for sig in order:
         out[sig] = flows[sig] if sig[0] == "FLOWS_TO" else list(struct[sig].values())

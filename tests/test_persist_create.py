@@ -28,6 +28,23 @@ def test_node_rows_dedup_by_node_key_last_wins():
     assert a["file_path"] == "new.js"                        # last-write-wins, like MERGE's SET
 
 
+def test_node_rows_unions_props_across_duplicate_keys():
+    """MERGE ... SET n += props ACCUMULATES keys across duplicate rows -- a key set by an earlier row
+    is not dropped by a later row that omits it. _node_rows must union, not replace, or a CpgMethod
+    that appears once with file_path/line and once as an external stub without them would lose its
+    span and vanish from the semantic index."""
+    nodes = [
+        ("CpgMethod", {"scan_id": "s", "full_name": "foo", "name": "foo",
+                       "file_path": "x.js", "line": 5}),
+        ("CpgMethod", {"scan_id": "s", "full_name": "foo", "name": "foo",
+                       "is_external": True}),                       # later row omits file_path/line
+    ]
+    (row,) = persist._node_rows(nodes)["CpgMethod"]
+    # union: file_path/line from the first row survive AND is_external from the second is added
+    assert row["props"]["file_path"] == "x.js" and row["props"]["line"] == 5
+    assert row["props"]["is_external"] is True
+
+
 def test_node_rows_groups_per_label():
     nodes = [
         ("CpgFile", {"scan_id": "s", "uid": "f"}),
@@ -59,6 +76,20 @@ def test_edge_rows_dedup_non_flows_last_wins():
     assert len(rows) == 2                                    # (a->b) collapsed, (a->c) kept
     ab = next(r for r in rows if r["tk"]["uid"] == "b")
     assert ab["props"]["v"] == 2                             # last-write-wins
+
+
+def test_edge_rows_unions_non_flows_props():
+    """Like nodes, a relationship MERGE ... SET r += props accumulates keys across duplicate rows.
+    _edge_rows must union non-FLOWS_TO props, not replace (keeps it correct if edge props ever grow
+    beyond {scan_id})."""
+    edges = [
+        _edge("RESOLVES_TO", {"scan_id": "s", "uid": "a"}, {"scan_id": "s", "uid": "b"}, {"p": 1}),
+        _edge("RESOLVES_TO", {"scan_id": "s", "uid": "a"}, {"scan_id": "s", "uid": "b"}, {"q": 2}),
+    ]
+    out = persist._edge_rows(edges)
+    (sig,) = list(out.keys())
+    (row,) = out[sig]
+    assert row["props"] == {"p": 1, "q": 2}      # union, not replace
 
 
 def test_edge_rows_flows_to_keeps_parallel_arg_index():

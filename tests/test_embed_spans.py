@@ -61,3 +61,42 @@ def test_spans_from_batch_matches_graph_query():
         drv.close()
     batch_spans = embed._spans_from_batch(captured["batch"])
     assert batch_spans == graph_spans, "batch-derived spans must match the persisted-graph query"
+
+
+def test_build_with_concurrent_index_overlap():
+    """Review finding #2 coverage: exercise the real item-4 overlap -- build with the semantic index
+    running as on_batch CONCURRENTLY with persist (both issuing schema DDL to the same DB). Assert it
+    does not error, and that BOTH the graph nodes and the :Chunk nodes land for the scan."""
+    from neo4j import GraphDatabase
+    from orion import config, graph_build
+    from orion.graphdb import GraphDB
+    try:
+        db = GraphDB()
+        if not db.ping():
+            pytest.skip("Neo4j not reachable")
+        db.close()
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"Neo4j not reachable: {exc}")
+
+    sid = "test-overlap-index"
+    errors: list = []
+
+    def _index(batch):
+        try:
+            embed.index("fixtures/NodeGoat", sid, batch=batch)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    drv = GraphDatabase.driver(config.NEO4J_URI, auth=config.NEO4J_AUTH)
+    try:
+        graph_build.build("fixtures/NodeGoat", None, None, scan_id=sid, on_batch=_index)
+        assert not errors, f"concurrent semantic index errored during persist: {errors}"
+        with drv.session(database=config.NEO4J_DATABASE) as s:
+            files = s.run("MATCH (f:CpgFile {scan_id:$s}) RETURN count(f) AS n", s=sid).single()["n"]
+            chunks = s.run("MATCH (c:Chunk {scan_id:$s}) RETURN count(c) AS n", s=sid).single()["n"]
+        assert files > 0, "graph nodes must be persisted"
+        assert chunks > 0, "semantic Chunk nodes must be written by the concurrent index"
+    finally:
+        with drv.session(database=config.NEO4J_DATABASE) as s:
+            s.run("MATCH (n {scan_id:$s}) DETACH DELETE n", s=sid)
+        drv.close()
