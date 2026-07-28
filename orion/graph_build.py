@@ -84,7 +84,8 @@ def scan_id_for(repo_path: str) -> str:
 def build(repo_path: str, language: str | None = None,
           on_event: OnEvent | None = None, *,
           stream: bool = False, queue_size: int = 64,
-          scan_id: str | None = None, mem_stats_path: str | None = None) -> str:
+          scan_id: str | None = None, mem_stats_path: str | None = None,
+          on_batch=None) -> str:
     """Build `repo_path` into Orion's graph and return its scan_id. Clears then loads that scan.
 
     `language` pins the Joern frontend (jssrc/pythonsrc/gosrc/javasrc), overriding auto-detection;
@@ -99,7 +100,14 @@ def build(repo_path: str, language: str | None = None,
 
     `mem_stats_path` is a stream-only diagnostic hook (Task 10): when set, the stream branch's
     `build_envelope` writes a measured peak-RSS breakdown JSON there. It is IGNORED on the legacy
-    path (which has no bounded consumer to measure); passing it never changes the returned scan_id."""
+    path (which has no bounded consumer to measure); passing it never changes the returned scan_id.
+
+    `on_batch` (item 4) is an optional `Callable[[schema.Batch], None]` run CONCURRENTLY with persist
+    on the freshly-normalized batch, so an independent batch consumer (the semantic index) overlaps
+    the persist write and wall-clock trends toward max(persist, on_batch) instead of the sum. It must
+    read the in-memory batch (not the persisted graph) and must not need persist to finish; persist's
+    clear is label-scoped so it won't wipe what on_batch writes. It is best-effort: an exception in
+    on_batch is reported via on_event and never aborts the build."""
     scan_id = scan_id or scan_id_for(repo_path)
     frontend, display_language = joern_adapter.resolve_language(repo_path, language)
     if on_event is not None:
@@ -128,7 +136,26 @@ def build(repo_path: str, language: str | None = None,
         on_event, "normalize",
         lambda: joern_adapter.normalize(envelope, scan_id, language=display_language,
                                         dependencies=dependencies))
-    summary, _ = _timed(on_event, "persist", lambda: persist.persist(batch))
+    if on_batch is not None:
+        # Overlap the batch consumer (semantic index) with persist (item 4). on_batch reads the
+        # in-memory batch, so it does not wait on persist; persist's label-scoped clear won't wipe
+        # its writes. Best-effort: a consumer failure is reported, never fatal to the build.
+        import threading
+
+        def _run_on_batch() -> None:
+            try:
+                on_batch(batch)
+            except Exception as exc:  # noqa: BLE001 -- concurrent consumer must never crash the build
+                if on_event is not None:
+                    on_event(_event("build", "error",
+                                    detail=f"concurrent batch consumer failed, continuing: {exc}"))
+
+        th = threading.Thread(target=_run_on_batch, name="orion-on-batch", daemon=True)
+        th.start()
+        summary, _ = _timed(on_event, "persist", lambda: persist.persist(batch))
+        th.join()
+    else:
+        summary, _ = _timed(on_event, "persist", lambda: persist.persist(batch))
     if on_event is not None:
         # Surface persist's own clear/nodes/edges split when the persist layer reports it (it does
         # once the chunked/parallel persister lands); harmless no-op until then.

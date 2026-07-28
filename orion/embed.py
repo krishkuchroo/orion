@@ -239,10 +239,63 @@ def _build_chunks(repo_path: str, methods: list[dict], all_files: list[str]) -> 
     return chunks
 
 
-def index(repo_path: str, scan_id: str) -> None:
-    """Chunk `repo_path`'s code (per the loaded graph for `scan_id`), embed each chunk locally,
-    and store the vectors as Chunk nodes so `search` can retrieve them for this scan. Idempotent:
-    clears this scan's existing Chunk nodes first, then writes fresh ones."""
+def _spans_from_graph(session, scan_id: str) -> tuple[list[dict], list[str]]:
+    """The (methods, all_files) span inputs `index` needs, read from the PERSISTED graph. Methods:
+    CpgMethod with a non-null file_path AND line, (full_name, file_path, line) ordered by
+    (file_path, line). Files: distinct CpgFile.file_path, ordered. Used when no in-memory batch is
+    supplied (the --scan-id path, where the graph already exists)."""
+    methods = [
+        dict(r) for r in session.run(
+            "MATCH (m:CpgMethod {scan_id: $scan_id}) "
+            "WHERE m.file_path IS NOT NULL AND m.line IS NOT NULL "
+            "RETURN m.full_name AS full_name, m.file_path AS file_path, m.line AS line "
+            "ORDER BY m.file_path, m.line",
+            scan_id=scan_id,
+        )
+    ]
+    all_files = [
+        r["file_path"] for r in session.run(
+            "MATCH (f:CpgFile {scan_id: $scan_id}) "
+            "RETURN f.file_path AS file_path ORDER BY file_path",
+            scan_id=scan_id,
+        )
+    ]
+    return methods, all_files
+
+
+def _spans_from_batch(batch) -> tuple[list[dict], list[str]]:
+    """The same (methods, all_files) inputs, derived from the IN-MEMORY `schema.Batch` instead of a
+    graph query -- so indexing does NOT depend on persist having finished and can run concurrently
+    with it (item 4). Reproduces `_spans_from_graph` on the batch persist would write: CpgMethod is
+    deduped by full_name (NODE_KEY, last-wins == persist), then filtered to non-null file_path AND
+    line, projected, and ordered by (file_path, line); CpgFile is distinct file_path, ordered."""
+    by_fullname: dict = {}                          # last-wins dedup, mirroring persist's NODE_KEY
+    files: set = set()
+    for label, props in batch.nodes:
+        if label == "CpgMethod":
+            by_fullname[props.get("full_name")] = props
+        elif label == "CpgFile":
+            fp = props.get("file_path")
+            if fp is not None:
+                files.add(fp)
+    methods = [
+        {"full_name": p.get("full_name"), "file_path": p.get("file_path"), "line": p.get("line")}
+        for p in by_fullname.values()
+        if p.get("file_path") is not None and p.get("line") is not None
+    ]
+    methods.sort(key=lambda m: (m["file_path"], m["line"]))
+    return methods, sorted(files)
+
+
+def index(repo_path: str, scan_id: str, *, batch=None) -> None:
+    """Chunk `repo_path`'s code (per the graph for `scan_id`), embed each chunk locally, and store
+    the vectors as Chunk nodes so `search` can retrieve them for this scan. Idempotent: clears this
+    scan's existing Chunk nodes first, then writes fresh ones.
+
+    `batch` (a `schema.Batch`) is the item-4 overlap hook: when given, the code spans come from the
+    in-memory batch (`_spans_from_batch`) rather than a graph query, so indexing does not wait on
+    persist and can run concurrently with it. When None (the --scan-id path), spans are read from the
+    already-persisted graph."""
     _require_neo4j_backend()
     if not os.path.isdir(repo_path):
         raise ValueError(f"repo_path does not exist or is not a directory: {repo_path}")
@@ -253,23 +306,10 @@ def index(repo_path: str, scan_id: str) -> None:
         with driver.session(database=config.NEO4J_DATABASE) as session:
             _ensure_vector_index(session)
             session.run("MATCH (c:Chunk {scan_id: $scan_id}) DETACH DELETE c", scan_id=scan_id)
-
-            methods = [
-                dict(r) for r in session.run(
-                    "MATCH (m:CpgMethod {scan_id: $scan_id}) "
-                    "WHERE m.file_path IS NOT NULL AND m.line IS NOT NULL "
-                    "RETURN m.full_name AS full_name, m.file_path AS file_path, m.line AS line "
-                    "ORDER BY m.file_path, m.line",
-                    scan_id=scan_id,
-                )
-            ]
-            all_files = [
-                r["file_path"] for r in session.run(
-                    "MATCH (f:CpgFile {scan_id: $scan_id}) "
-                    "RETURN f.file_path AS file_path ORDER BY file_path",
-                    scan_id=scan_id,
-                )
-            ]
+            if batch is None:
+                methods, all_files = _spans_from_graph(session, scan_id)
+            else:
+                methods, all_files = _spans_from_batch(batch)
 
         chunks = _build_chunks(repo_path, methods, all_files)
         if not chunks:

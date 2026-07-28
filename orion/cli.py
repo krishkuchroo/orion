@@ -80,24 +80,34 @@ def _run_scan(args: argparse.Namespace) -> int:
     print(f"scan_id: {scan_id}")
     print(f"run log: {run_dir}/progress.jsonl")
 
-    if needs_build:
-        on_event(_event("build", "start", detail=f"building graph for {args.repo}"))
-        graph_build.build(args.repo, args.language, on_event,
-                          stream=args.stream, queue_size=args.queue_size)
-        on_event(_event("build", "done", detail="graph build complete"))
-    else:
-        on_event(_event("build", "done", detail=f"using existing scan_id {scan_id}"))
-
-    if args.repo:
-        on_event(_event("build", "start", detail="indexing semantic embeddings"))
+    def _index_semantic(batch=None) -> None:
+        # Best-effort semantic index. When `batch` is given it runs CONCURRENTLY with persist (item
+        # 4, via build's on_batch hook) reading spans from the in-memory batch; otherwise it reads
+        # the already-persisted graph (the --scan-id path). Embedding is never fatal to a scan.
+        concurrent = batch is not None
+        on_event(_event("build", "start", detail="indexing semantic embeddings"
+                        + (" (concurrent with persist)" if concurrent else "")))
         try:
-            embed.index(args.repo, scan_id)
+            embed.index(args.repo, scan_id, batch=batch)
             on_event(_event("build", "done", detail="semantic index complete"))
         except Exception as exc:  # noqa: BLE001 -- embedding is best-effort, never fatal
             on_event(_event(
                 "build", "error",
                 detail=f"semantic index failed, continuing graph-only: {exc}",
             ))
+
+    if needs_build:
+        on_event(_event("build", "start", detail=f"building graph for {args.repo}"))
+        # Overlap the semantic index with persist: build runs _index_semantic(batch) concurrently
+        # with the persist write (item 4), so the two independent costs no longer serialize.
+        graph_build.build(args.repo, args.language, on_event,
+                          stream=args.stream, queue_size=args.queue_size,
+                          on_batch=_index_semantic)
+        on_event(_event("build", "done", detail="graph build complete"))
+    else:
+        on_event(_event("build", "done", detail=f"using existing scan_id {scan_id}"))
+        if args.repo:
+            _index_semantic()   # --scan-id path: read spans from the already-persisted graph
 
     # Best-effort: ensure the GLOBAL exploit-reference corpus is indexed (once) so the verifier's
     # exploit_search tool works. Builds ONLY if the metadata file is present locally -- never
