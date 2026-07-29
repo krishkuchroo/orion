@@ -1,0 +1,4 @@
+# Generated on the remote by setup.sh / scan.sh — not committed.
+env.sh
+runs/
+__pycache__/
