@@ -25,6 +25,10 @@ build-backend = "setuptools.build_meta"
 packages = ["orion", "orion.graph"]
 
 [tool.pytest.ini_options]
+# Scope bare `pytest` to Orion's own suite so it never recurses into the gitignored `fixtures/` scan
+# targets (a Django authentik checkout, etc.) whose own `tests/` package would shadow this one and
+# break collection. An explicit path arg (e.g. `pytest fixtures/...`) bypasses this, as intended.
+testpaths = ["tests"]
 markers = [
     "slow: costs no Claude tokens but does real local compute (e.g. embedding-model download/inference); run explicitly.",
 ]

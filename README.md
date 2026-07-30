@@ -32,7 +32,7 @@ Three layers:
    B absent-control, C disabled or reverted fix, D pattern and dependency). Each shape is a single
    `claude -p` session that calls the read-only MCP tools `run_cypher`, `semantic_search`, and
    `get_schema`. Leads are deduplicated, then `verify.verify_all` verifies each in its own fresh
-   session.
+   session, several at a time under a concurrency cap.
 3. **Harness.** `cli.py` wires it end to end with a live, stoppable progress monitor. `report.py`
    renders a ranked, evidence-cited report, and `scripts/run_nodegoat_eval.py` scores recall.
 
@@ -63,41 +63,91 @@ in the same repository, including remote code execution, insecure deserializatio
 request forgery, server-side template injection, and six known-vulnerable dependencies, with no
 framework-specific tuning.
 
-## Setup
+## Getting started on your machine
 
-Prerequisites:
+A full run has four prerequisites. Install them once, then any scan is a single command.
 
-- **Neo4j.** Orion runs its own Neo4j Community instance via `docker-compose.yml` (host ports 7688
-  for Bolt and 7475 for HTTP). Docker Desktop must be running.
-- **Joern** CLI at `~/joern/joern-cli` (`joern-parse`, `joern-export`). Set `JOERN_HOME` if it lives
-  elsewhere.
-- **`claude` CLI** version 2.1.210 or newer on `PATH`, running headless (supports `--mcp-config`,
-  `--json-schema`, `--add-dir`).
-- **Python** 3.11 or newer, with a virtual environment.
+### 1. Install the prerequisites
 
-```bash
-docker compose up -d                                      # Neo4j on 7688 and 7475
-python -m venv .venv && ./.venv/bin/pip install -e ".[semantic,dev]"
-cp .env.example .env                                      # optional: defaults already work
-```
+- **Docker Desktop**, for the graph database. Install it (https://docs.docker.com/get-docker/) and
+  make sure it is running. Orion brings up its own Neo4j container, so you do not install Neo4j
+  yourself.
+- **Python 3.12 or newer.** Check with `python3 --version`.
+- **Joern**, the code-analysis engine that produces the CPG. Install it from
+  https://docs.joern.io/installation. Orion looks for `joern-parse` and `joern-export` under
+  `~/joern/joern-cli`; if yours lives elsewhere, set `JOERN_HOME` to point at it.
+- **The Claude Code CLI**, which Orion drives headlessly to do the discovery and verification
+  reasoning. Install it with `npm install -g @anthropic-ai/claude-code` (version 2.1.210 or newer),
+  then sign in once by running `claude` and following the prompt. A Claude subscription or an API key
+  both work.
 
-Test fixtures (the NodeGoat sample app and its prebuilt CPG) are not committed; place a repository
-with a prebuilt `cpg.bin` under `fixtures/NodeGoat/` to run the build and evaluation tests locally.
-
-## Run
+### 2. Clone Orion
 
 ```bash
-orion scan ./path/to/repo                  # build, discover, verify, report
-orion scan ./repo --watch                  # follow live progress (stoppable with Ctrl-C)
-orion scan ./repo --json findings.json     # also write verdicts as JSON
-orion scan ./repo --language golang        # override language detection
-orion scan --scan-id <id>                  # re-run against an already-built scan graph
-orion scan ./repo --quiet                  # suppress per-event prints (still logs to file)
+git clone https://github.com/krishkuchroo/orion.git
+cd orion
 ```
 
-Every run logs its progress events to `.orion/runs/<scan_id>/<timestamp>/progress.jsonl`.
+### 3. Start the graph database
+
+```bash
+docker compose up -d
+```
+
+This starts Orion's own Neo4j Community instance on ports 7688 (Bolt) and 7475 (HTTP), already wired
+with a local development password. There is nothing to configure. Open http://localhost:7475 to
+confirm it is up.
+
+### 4. Install Orion
+
+```bash
+python3 -m venv .venv
+./.venv/bin/pip install -e ".[semantic,dev]"
+```
+
+Create the virtual environment as `.venv` in the project root exactly as shown: the agents' tool
+config (`.mcp/orion.json`) launches the MCP server via `./.venv/bin/python`, so that path has to
+exist. The `[semantic]` extra pulls the local embedding model used for semantic search.
+
+Copying the environment file is optional, because every setting already has a working localhost
+default:
+
+```bash
+cp .env.example .env      # optional
+```
+
+### 5. Scan a repository
+
+Point Orion at any local source tree and let it build, discover, verify, and report:
+
+```bash
+./.venv/bin/orion scan /path/to/some/repo --watch
+```
+
+`--watch` follows the live progress and is stoppable with Ctrl-C. The first scan also downloads the
+code-embedding model (a few hundred MB) the first time it indexes, so that step is slower once and is
+cached afterward. If you activate the environment with `source .venv/bin/activate`, you can drop the
+`./.venv/bin/` prefix and just run `orion scan ...`.
+
+When it finishes, the ranked, evidence-cited report prints to the terminal. Add `--json findings.json`
+to also write the verdicts as JSON, and every run records its progress events under
+`.orion/runs/<scan_id>/<timestamp>/progress.jsonl`.
+
+### Command reference
+
+```bash
+orion scan ./repo                    # build, discover, verify, report
+orion scan ./repo --watch            # follow live progress (stoppable with Ctrl-C)
+orion scan ./repo --json out.json    # also write verdicts as JSON
+orion scan ./repo --language golang  # override language auto-detection
+orion scan ./repo --quiet            # suppress per-event prints (still logs to file)
+orion scan --scan-id <id>            # re-run against an already-built scan graph
+```
 
 ### NodeGoat evaluation
+
+Test fixtures (the NodeGoat sample app and its prebuilt CPG) are not committed. Place a repository
+with a prebuilt `cpg.bin` under `fixtures/NodeGoat/` to run the build and evaluation locally, then:
 
 ```bash
 ./.venv/bin/python scripts/run_nodegoat_eval.py                  # build and score fixtures/NodeGoat
