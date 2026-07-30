@@ -61,6 +61,25 @@ this session (the earlier "nothing committed" rule lifted at Krish's request).
   exit (failures are never blind) and retries a TRANSIENT failure with exponential backoff on a
   FRESH `--session-id` (`verify` retries=2, `discover` retries=1). A crashed call is `ERROR`, never
   a silent `CONFIRM`. This cut a full-run's verifier ERRORs from 5 → 1 and recovered a lost vuln.
+- **Streaming build is the DEFAULT** (2026-07-23, `graph/stream_build.py`): `orion scan` now builds
+  the graph per-function via a bounded producer/consumer instead of the legacy whole-graph
+  joern-export. `--no-stream` reverts to the whole-graph export (the escape hatch stays), and
+  `--queue-size` (default 64) bounds how many function segments the consumer decodes at once. The win
+  is that streaming AVOIDS building/parsing the 85x pretty-JSON export blob that OOM'd large repos: it
+  reuses `cpg.bin` and never materializes the export. Memory is `O(window + compact accumulators +
+  normalized batch)`, roughly one graph size and about 85x below the blob. It is NOT flat in repo
+  size: the producer is bounded, but the consumer is bounded-window yet O(repo) in its cross-method
+  accumulators plus the normalized node/edge batch held once at the end (Option 2 / §8). True
+  incremental persist (Option 1, stream the batch out as it is built) is a future follow-on.
+  Empirical anchor: a 427-file C# repo (sharpemu) that OOM'd the legacy export streamed at 493 MB peak
+  RSS (Python consumer; Joern runs in a subprocess).
+- **Summary-stitch taint reproduces `collapse_flows` byte-for-byte** (the streaming build's taint
+  seam, `graph/taint_summary.py`): oracle-tested at 217 FLOWS_TO on NodeGoat and 1075 on PyGoat,
+  INCLUDING the third cross-edge family, cross-method REACHING_DEF closure captures. That family is
+  carried per-segment (`cross_rd` on the source side dropping method-less targets; `closure_targets`
+  on the target side keeping method-less sources) and threaded into `build_summary`'s
+  `cross_rd`/`closure_targets` args; `build_summary`/`_reach_full`/`stitch` are byte-for-byte the
+  Phase-1 code.
 
 ## Gotchas (paid for by the PoC — bake in)
 
@@ -77,6 +96,16 @@ this session (the earlier "nothing committed" rule lifted at Krish's request).
   (`schema.emit_edge` stamps it on both endpoints), no cross-scan contamination; **B3** — every
   `CpgCall` gets `file_path` via AST-ancestry (`joern_adapter._call_file_map`). The arrow-function
   `CONTAINS_CALL` gap (above) is a real graph limitation B3 routes around — keep reading real source.
+- Streaming taint's closure seam is load-bearing: `build_summary(mid, ..., None)` (or any path that
+  drops `cross_rd`/`closure_targets`) yields 190 FLOWS_TO, not 217, because it loses the third
+  cross-edge family (cross-method REACHING_DEF closure captures). Keep the seam threaded into
+  `build_summary` in pass 2 (pass 1 accumulates the cross-method tables `stitch` needs), and run
+  `tests/test_stream_build.py::test_stream_flows_parity` (217) as the tripwire.
+- The token-free suite is Orion's own `tests/` (`pytest -m "not slow"`, 75 passing). `pyproject.toml`
+  sets `testpaths = ["tests"]` so bare pytest does NOT recurse into the gitignored `fixtures/` scan
+  targets (e.g. a Django authentik checkout with hundreds of `django`-importing test files whose own
+  `tests/` package would otherwise shadow Orion's top-level `tests` and break collection). Passing an
+  explicit path that reaches into `fixtures/` bypasses that scoping.
 
 ## Environment
 

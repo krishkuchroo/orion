@@ -270,36 +270,22 @@ def _call_file_map(g: dict) -> dict:
     return file_map
 
 
-def _entry_method_ids(g: dict) -> set:
-    """Structural, framework-FREE entry-point detection: a first-party METHOD that nothing else in
-    the code calls (a call-graph root) and that takes parameters is an entry point — a request
-    handler, an exported API function, main(). Language-agnostic: it reads only the CALL and AST
-    structure Joern emits for every language, never a framework's naming convention. Over-includes
-    (some roots are just uncalled helpers), which is fine: EntryPoints are anchors/source hints the
-    verifier still checks, never findings on their own. Returns METHOD vertex ids."""
-    verts = {_unwrap(v["id"]): v for v in g.get("vertices", [])}
-    called: set = set()
-    has_param: set = set()
-    # Methods passed as CALLBACKS (referenced by a METHOD_REF): the universal "register a handler"
-    # pattern — Express/Koa/Fastify route callbacks, event handlers, etc. Framework-free, and it
-    # catches the arrow-function handlers the call-graph-root test alone misses.
-    callback_fulls: set = set()
-    for v in verts.values():
-        if v["label"] == "METHOD_REF":
-            mfn = _prop(v, "METHOD_FULL_NAME")
-            if isinstance(mfn, str) and mfn:
-                callback_fulls.add(mfn)
-    for e in g.get("edges", []):
-        o, i = _unwrap(e["outV"]), _unwrap(e["inV"])
-        lbl = e["label"]
-        if lbl == "CALL" and verts.get(i, {}).get("label") == "METHOD":
-            called.add(i)                      # something first-party resolves a call to it
-        elif (lbl == "AST" and verts.get(o, {}).get("label") == "METHOD"
-              and verts.get(i, {}).get("label") == "METHOD_PARAMETER_IN"):
-            has_param.add(o)
+def _entry_method_ids_from(method_vertices: dict, called: set, has_param: set,
+                           callback_fulls: set) -> set:
+    """The pure structural entry-point test over accumulated inputs (see `_entry_method_ids`).
+
+    Framework-FREE entry-point detection: a first-party METHOD that nothing else in the code calls
+    (a call-graph root) and that takes parameters is an entry point — a request handler, an exported
+    API function, main(). Language-agnostic: it reads only the CALL and AST structure Joern emits for
+    every language, never a framework's naming convention. Over-includes (some roots are just uncalled
+    helpers), which is fine: EntryPoints are anchors/source hints the verifier still checks, never
+    findings on their own. Returns METHOD vertex ids.
+
+    Used by BOTH the whole-graph `_entry_method_ids` wrapper below and the streaming consumer
+    (`stream_build.build_envelope`), so there is ONE entry logic, never a re-implementation."""
     entries: set = set()
-    for vid, v in verts.items():
-        if v["label"] != "METHOD" or bool(_prop(v, "IS_EXTERNAL")):
+    for vid, v in method_vertices.items():
+        if bool(_prop(v, "IS_EXTERNAL")):
             continue
         if _clean(_prop(v, "FILENAME")) is None or vid not in has_param:
             continue
@@ -311,6 +297,30 @@ def _entry_method_ids(g: dict) -> set:
             continue        # called by first-party code and not registered as a handler -> not an entry
         entries.add(vid)
     return entries
+
+
+def _entry_method_ids(g: dict) -> set:
+    """Whole-graph wrapper: build the four accumulated inputs from a raw GraphSON graph, then defer to
+    the pure `_entry_method_ids_from` test. Behavior-preserving split (delta C.3): the stream builds
+    the identical four inputs from its per-segment accumulators."""
+    verts = {_unwrap(v["id"]): v for v in g.get("vertices", [])}
+    method_vertices = {vid: v for vid, v in verts.items() if v["label"] == "METHOD"}
+    # Methods passed as CALLBACKS (referenced by a METHOD_REF): the universal "register a handler"
+    # pattern — Express/Koa/Fastify route callbacks, event handlers, etc. Framework-free, and it
+    # catches the arrow-function handlers the call-graph-root test alone misses.
+    callback_fulls: set = {mfn for v in verts.values() if v["label"] == "METHOD_REF"
+                           and isinstance((mfn := _prop(v, "METHOD_FULL_NAME")), str) and mfn}
+    called: set = set()
+    has_param: set = set()
+    for e in g.get("edges", []):
+        o, i = _unwrap(e["outV"]), _unwrap(e["inV"])
+        lbl = e["label"]
+        if lbl == "CALL" and verts.get(i, {}).get("label") == "METHOD":
+            called.add(i)                      # something first-party resolves a call to it
+        elif (lbl == "AST" and verts.get(o, {}).get("label") == "METHOD"
+              and verts.get(i, {}).get("label") == "METHOD_PARAMETER_IN"):
+            has_param.add(o)
+    return _entry_method_ids_from(method_vertices, called, has_param, callback_fulls)
 
 
 def project_graphson(graphson: dict, profile=None) -> dict:
@@ -519,6 +529,42 @@ def _joern_bin(name: str) -> Path:
     return root if root.exists() else jc / "bin" / name
 
 
+def _heap_gb() -> int | None:
+    """The `-Xmx` size in whole GB, or None to let the JVM pick its default (RAM unreadable).
+
+    An explicit `config.JOERN_HEAP_GB` (positive number) wins outright -- skip RAM detection so a
+    shared/constrained box can cap heap and a giant repo can push it past the fraction. Otherwise
+    size to `config.JOERN_HEAP_FRACTION` of physical RAM (default 0.75, the prior hard-coded value).
+    Pure and testable without a subprocess."""
+    override = config.JOERN_HEAP_GB
+    if override:
+        try:
+            gb = int(float(override))
+            if gb > 0:
+                return gb
+        except (ValueError, OverflowError):
+            pass   # malformed override (incl. "inf"/"-inf") -> RAM-derived sizing (never a hard failure)
+    try:
+        total_gb = os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE") / 1024 ** 3
+    except (ValueError, OSError, AttributeError):
+        return None
+    return max(2, int(total_gb * config.JOERN_HEAP_FRACTION))
+
+
+def _jvm_flags() -> list[str]:
+    """JVM args for the joern subprocesses: G1GC plus a `-J-Xmx` sized to THIS machine instead of
+    the JVM's ~25%-of-RAM default. joern-export pretty-prints the whole CPG into a single in-memory
+    GraphSON string; on a large repo (paid for by a 427-file C# emulator on a 16GB Mac) the default
+    heap OOMs mid-serialize. Size via `_heap_gb` (fraction-of-RAM, or an exact GB override), leaving
+    headroom for the OS, the Neo4j container, and the post-export Python parse. If RAM can't be read
+    and no override is set, keep only G1GC and let the JVM pick its default (never a hard failure)."""
+    flags = ["-J-XX:+UseG1GC"]
+    gb = _heap_gb()
+    if gb is not None:
+        flags.append(f"-J-Xmx{gb}g")
+    return flags
+
+
 def _ensure_greadlink(env: dict) -> dict:
     """Joern's frontend wrappers call `greadlink -f` (GNU coreutils). On a stock Mac that is
     absent; shim greadlink -> readlink so drive_joern works without `brew install coreutils`."""
@@ -541,7 +587,7 @@ def _run_export(cpg_bin: Path, export_dir: Path, env: dict, profile=None) -> dic
     if export_dir.exists():
         shutil.rmtree(export_dir)
     r = subprocess.run(
-        [str(_joern_bin("joern-export")), "-J-XX:+UseG1GC", "--repr=all", "--format=graphson",
+        [str(_joern_bin("joern-export")), *_jvm_flags(), "--repr=all", "--format=graphson",
          "--out", str(export_dir), str(cpg_bin)],
         capture_output=True, text=True, env=env)
     export_json = export_dir / "export.json"
@@ -614,6 +660,30 @@ def resolve_language(repo_path: str | Path, language: str | None = None) -> tupl
     return frontend, _DISPLAY_LANG.get(frontend, frontend)
 
 
+def ensure_cpg(repo_path: str | Path, language: str | None = None) -> Path:
+    """Parse `repo` to a cpg.bin and return its path WITHOUT exporting -- the streaming producer reads
+    cpg.bin directly, so the whole-graph joern-export (the 85x GraphSON blob) is skipped entirely.
+    Reuses a prebuilt `<repo>/cpg.bin` when present (the eval fixtures ship one); otherwise runs
+    joern-parse into a temp dir. This is the parse half of `export_repo`, with `_run_export` removed."""
+    repo = Path(repo_path).resolve()
+    cpg_bin = repo / "cpg.bin"
+    if cpg_bin.exists():
+        return cpg_bin
+    env = _ensure_greadlink(dict(os.environ))
+    env.setdefault("JAVA_HOME", os.environ.get("JAVA_HOME", ""))
+    parse = _joern_bin("joern-parse")
+    if not parse.exists():
+        raise RuntimeError(f"joern-parse not found under {config.JOERN_HOME} (set JOERN_HOME)")
+    out_cpg = Path(tempfile.mkdtemp(prefix="orion_cpg_")) / "cpg.bin"
+    r = subprocess.run(
+        [str(parse), *_jvm_flags(), str(repo),
+         "--language", language or _guess_language(repo), "--output", str(out_cpg)],
+        capture_output=True, text=True, env=env)
+    if r.returncode != 0 or not out_cpg.exists():
+        raise RuntimeError(f"joern-parse failed (rc={r.returncode}):\n{r.stdout}\n{r.stderr}")
+    return out_cpg
+
+
 def export_repo(repo_path: str | Path, language: str | None = None, profile=None) -> dict:
     """Produce the compact Joern envelope for `repo`. Reuses a prebuilt `cpg.bin` when present
     (joern-export only, ~3s — honest re-export, never a stale cached json); otherwise runs
@@ -634,7 +704,7 @@ def export_repo(repo_path: str | Path, language: str | None = None, profile=None
             raise RuntimeError(f"joern-parse not found under {config.JOERN_HOME} (set JOERN_HOME)")
         out_cpg = tmp / "cpg.bin"
         r = subprocess.run(
-            [str(parse), "-J-XX:+UseG1GC", str(repo),
+            [str(parse), *_jvm_flags(), str(repo),
              "--language", language or _guess_language(repo), "--output", str(out_cpg)],
             capture_output=True, text=True, env=env)
         if r.returncode != 0 or not out_cpg.exists():

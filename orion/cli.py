@@ -52,13 +52,21 @@ def _run_dir(scan_id: str) -> str:
 
 
 def _run_scan(args: argparse.Namespace) -> int:
-    # Deferred on purpose -- see module docstring.
-    from . import discover, embed, graph_build, report, verify
-    from .monitor import run_logger, tail
-
+    # Cheap arg validation BEFORE the heavy lazy imports below, so a typo'd path fails instantly
+    # instead of after loading the embedding model / Neo4j driver.
     if not args.scan_id and not args.repo:
         print("orion scan: provide a repo path or --scan-id", file=sys.stderr)
         return 2
+    # A missing repo path must fail here with a clear message -- otherwise it reaches joern-parse,
+    # which dies with a Java AssertionError stack trace ("Input path does not exist") that reads like
+    # an Orion crash. This also catches the aftermath of a failed `git clone` (empty/absent dir).
+    if args.repo and not Path(args.repo).is_dir():
+        print(f"orion scan: repo path not found or not a directory: {args.repo}", file=sys.stderr)
+        return 2
+
+    # Deferred on purpose -- see module docstring.
+    from . import config, discover, embed, graph_build, graphdb, report, verify
+    from .monitor import run_logger, tail
 
     needs_build = not args.scan_id
     scan_id = args.scan_id or graph_build.scan_id_for(args.repo)
@@ -72,23 +80,46 @@ def _run_scan(args: argparse.Namespace) -> int:
     print(f"scan_id: {scan_id}")
     print(f"run log: {run_dir}/progress.jsonl")
 
-    if needs_build:
-        on_event(_event("build", "start", detail=f"building graph for {args.repo}"))
-        graph_build.build(args.repo, args.language, on_event)
-        on_event(_event("build", "done", detail="graph build complete"))
-    else:
-        on_event(_event("build", "done", detail=f"using existing scan_id {scan_id}"))
-
-    if args.repo:
-        on_event(_event("build", "start", detail="indexing semantic embeddings"))
+    def _index_semantic(batch=None) -> None:
+        # Best-effort semantic index. When `batch` is given it runs CONCURRENTLY with persist (item
+        # 4, via build's on_batch hook) reading spans from the in-memory batch; otherwise it reads
+        # the already-persisted graph (the --scan-id path). Embedding is never fatal to a scan.
+        concurrent = batch is not None
+        on_event(_event("build", "start", detail="indexing semantic embeddings"
+                        + (" (concurrent with persist)" if concurrent else "")))
         try:
-            embed.index(args.repo, scan_id)
+            embed.index(args.repo, scan_id, batch=batch)
             on_event(_event("build", "done", detail="semantic index complete"))
         except Exception as exc:  # noqa: BLE001 -- embedding is best-effort, never fatal
             on_event(_event(
                 "build", "error",
                 detail=f"semantic index failed, continuing graph-only: {exc}",
             ))
+
+    if needs_build:
+        on_event(_event("build", "start", detail=f"building graph for {args.repo}"))
+        # Overlap the semantic index with persist: build runs _index_semantic(batch) concurrently
+        # with the persist write (item 4), so the two independent costs no longer serialize.
+        graph_build.build(args.repo, args.language, on_event,
+                          stream=args.stream, queue_size=args.queue_size,
+                          on_batch=_index_semantic)
+        on_event(_event("build", "done", detail="graph build complete"))
+    else:
+        on_event(_event("build", "done", detail=f"using existing scan_id {scan_id}"))
+        if args.repo:
+            _index_semantic()   # --scan-id path: read spans from the already-persisted graph
+
+    # Best-effort: ensure the GLOBAL exploit-reference corpus is indexed (once) so the verifier's
+    # exploit_search tool works. Builds ONLY if the metadata file is present locally -- never
+    # downloads mid-scan, never fatal. Run `orion index-exploits` to fetch + build it explicitly.
+    try:
+        if embed.ensure_exploit_index():
+            on_event(_event("build", "done", detail="exploit-reference corpus ready"))
+        else:
+            on_event(_event("build", "done",
+                            detail="exploit corpus not indexed (run `orion index-exploits` to enable)"))
+    except Exception as exc:  # noqa: BLE001 -- corpus is advisory; never break a scan over it
+        on_event(_event("build", "error", detail=f"exploit corpus index skipped: {exc}"))
 
     # fp-check (the verifier's source-reading step) sandboxes to this path via --add-dir; fall
     # back to "." when only --scan-id was given and no repo checkout is known.
@@ -101,8 +132,23 @@ def _run_scan(args: argparse.Namespace) -> int:
         profile = profiles.select_profile(args.repo)
 
     def _pipeline():
-        on_event(_event("discover", "start", detail="discovery fleet starting"))
-        leads = discover.discover(scan_id, on_event, profile)
+        # Size the per-shape discovery timeout to the graph: a bigger graph is a bigger search space
+        # and needs longer sweeps (see config.discover_timeout). Sizing is best-effort -- if the
+        # count query fails we fall back to the reality-based floor, never abort the scan.
+        node_count = 0
+        try:
+            db = graphdb.GraphDB()
+            try:
+                node_count = db.node_count(scan_id)
+            finally:
+                db.close()
+        except Exception as exc:  # noqa: BLE001 -- best-effort sizing; the floor is a safe default
+            on_event(_event("discover", "warn",
+                            detail=f"graph node count unavailable, using base discovery timeout: {exc}"))
+        d_timeout = config.discover_timeout(node_count)
+        on_event(_event("discover", "start",
+                        detail=f"discovery fleet starting ({node_count} nodes, per-shape timeout {d_timeout}s)"))
+        leads = discover.discover(scan_id, on_event, profile, timeout=d_timeout)
         on_event(_event("discover", "done", detail=f"{len(leads)} candidate leads"))
 
         on_event(_event("verify", "start", detail=f"verifying {len(leads)} leads"))
@@ -162,11 +208,38 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--quiet", action="store_true", help="suppress per-event progress prints (still logs to file)")
     scan.add_argument("--language", dest="language", metavar="FRONTEND",
                       help="Joern frontend id (jssrc/pythonsrc/golang/javasrc); overrides repo auto-detection")
+    scan.add_argument("--stream", dest="stream", action="store_true",
+                      help="use the streaming per-function build (avoids the 85x export blob)")
+    scan.add_argument("--no-stream", dest="stream", action="store_false")
+    scan.set_defaults(stream=True)
+    scan.add_argument("--queue-size", dest="queue_size", type=int, default=64,
+                      help="functions held in flight by the streaming build (default 64)")
+
+    idx = sub.add_parser("index-exploits",
+                         help="build/refresh the global Metasploit exploit-reference corpus (one-time)")
+    idx.add_argument("--refresh", action="store_true",
+                     help="re-download the Metasploit metadata index before building")
 
     args = parser.parse_args(argv)
 
     if args.cmd == "scan":
         return _run_scan(args)
+    if args.cmd == "index-exploits":
+        return _run_index_exploits(args)
+    return 0
+
+
+def _run_index_exploits(args: argparse.Namespace) -> int:
+    """Fetch (if missing/--refresh) and index the global exploit-reference corpus."""
+    from . import embed, exploit_corpus
+
+    path = exploit_corpus.DEFAULT_METADATA_PATH
+    if args.refresh or not Path(path).exists():
+        print(f"fetching Metasploit metadata index -> {path}")
+        exploit_corpus.fetch_metadata(path)
+    print("indexing exploit-reference corpus (embedding a few thousand modules, one-time)...")
+    n = embed.index_exploits(path)
+    print(f"indexed {n} exploit-reference documents into the '{embed.EXPLOIT_LABEL}' corpus")
     return 0
 
 

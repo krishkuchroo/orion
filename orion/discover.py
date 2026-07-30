@@ -78,7 +78,8 @@ def _dedup(leads: list[Lead]) -> list[Lead]:
     return [replace(lead, index=i) for i, lead in enumerate(kept)]
 
 
-async def _run_shape(scan_id: str, shape: str, on_event: OnEvent, profile=None) -> list[Lead]:
+async def _run_shape(scan_id: str, shape: str, on_event: OnEvent, profile=None,
+                     timeout: int | None = None) -> list[Lead]:
     on_event(_event(phase="discover", shape=shape, event="start", detail=f"shape {shape} sweep starting"))
 
     def shape_on_event(ev: dict) -> None:
@@ -99,7 +100,8 @@ async def _run_shape(scan_id: str, shape: str, on_event: OnEvent, profile=None) 
         result = await asyncio.to_thread(
             claude_cli.run_agent, session_id, system, message,
             json_schema=strategies.LEADS_JSON_SCHEMA, on_event=shape_on_event,
-            max_turns=config.MAX_TURNS, timeout=config.CALL_TIMEOUT,
+            max_turns=config.MAX_TURNS,
+            timeout=config.DISCOVER_TIMEOUT if timeout is None else timeout,
             # a transient claude -p crash on one shape shouldn't silently drop its whole lead set.
             retries=1,
         )
@@ -117,13 +119,15 @@ async def _run_shape(scan_id: str, shape: str, on_event: OnEvent, profile=None) 
     return leads
 
 
-async def _discover_async(scan_id: str, on_event: OnEvent, profile=None) -> list[Lead]:
-    results = await asyncio.gather(*(_run_shape(scan_id, shape, on_event, profile) for shape in SHAPES))
+async def _discover_async(scan_id: str, on_event: OnEvent, profile=None,
+                          timeout: int | None = None) -> list[Lead]:
+    results = await asyncio.gather(
+        *(_run_shape(scan_id, shape, on_event, profile, timeout) for shape in SHAPES))
     all_leads = [lead for shape_leads in results for lead in shape_leads]
     return _dedup(all_leads)
 
 
-def discover(scan_id: str, on_event: OnEvent, profile=None) -> list[Lead]:
+def discover(scan_id: str, on_event: OnEvent, profile=None, timeout: int | None = None) -> list[Lead]:
     """Fan out the 4 discovery shapes CONCURRENTLY (each a blocking `run_agent` subprocess call
     run in a thread), dedup, and return `list[Lead]`.
 
@@ -132,5 +136,9 @@ def discover(scan_id: str, on_event: OnEvent, profile=None) -> list[Lead]:
     the other shapes still complete and their leads survive.
 
     `profile` (graph/profiles.Profile) is optional per-stack prompt vocabulary; None keeps the
-    framework-agnostic default prompt (valid for any repo)."""
-    return asyncio.run(_discover_async(scan_id, on_event, profile))
+    framework-agnostic default prompt (valid for any repo).
+
+    `timeout` is the per-shape `claude -p` wall-clock budget in seconds; None uses the reality-based
+    floor `config.DISCOVER_TIMEOUT`. Callers that know the graph size pass a scaled value from
+    `config.discover_timeout(node_count)` so large repos get proportionally longer sweeps."""
+    return asyncio.run(_discover_async(scan_id, on_event, profile, timeout))
