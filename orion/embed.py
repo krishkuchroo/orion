@@ -267,13 +267,24 @@ def _spans_from_batch(batch) -> tuple[list[dict], list[str]]:
     """The same (methods, all_files) inputs, derived from the IN-MEMORY `schema.Batch` instead of a
     graph query -- so indexing does NOT depend on persist having finished and can run concurrently
     with it (item 4). Reproduces `_spans_from_graph` on the batch persist would write: CpgMethod is
-    deduped by full_name (NODE_KEY, last-wins == persist), then filtered to non-null file_path AND
-    line, projected, and ordered by (file_path, line); CpgFile is distinct file_path, ordered."""
-    by_fullname: dict = {}                          # last-wins dedup, mirroring persist's NODE_KEY
+    deduped by full_name (NODE_KEY) by UNIONING props across duplicate rows, then filtered to
+    non-null file_path AND line, projected, and ordered by (file_path, line); CpgFile is distinct
+    file_path, ordered.
+
+    The union (NOT a plain replace) is load-bearing and must track `persist._node_rows`: Joern emits
+    several CpgMethod rows sharing a full_name -- an internal definition carrying FILENAME/LINE_NUMBER
+    and an external stub carrying neither -- and `normalize` OMITS file_path/line rather than setting
+    them to None. Under a replace, a trailing stub row would erase the span the earlier row set, and
+    the non-null-span filter below would then drop the method from the semantic index entirely (a
+    silent recall loss: the function becomes invisible to `semantic_search`). Persist fixed exactly
+    this by unioning; this path is the mirror and has to agree, or the concurrent batch-fed index and
+    the persisted graph disagree about which methods exist."""
+    by_fullname: dict = {}                          # union dedup == persist._node_rows / MERGE SET n +=
     files: set = set()
     for label, props in batch.nodes:
         if label == "CpgMethod":
-            by_fullname[props.get("full_name")] = props
+            fn = props.get("full_name")
+            by_fullname[fn] = {**by_fullname.get(fn, {}), **props}
         elif label == "CpgFile":
             fp = props.get("file_path")
             if fp is not None:

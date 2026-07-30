@@ -16,7 +16,8 @@ from orion.graph import schema
 
 def test_spans_from_batch_dedup_filter_and_order():
     b = schema.Batch("s")
-    # duplicate full_name -> last-wins (mirrors persist's NODE_KEY collapse): (a.js, 5) survives
+    # duplicate full_name -> union on NODE_KEY (mirrors persist._node_rows); both rows carry a span
+    # here, so the later value wins on every overlapping key: (a.js, 5) survives
     b.emit_node("CpgMethod", {"full_name": "a.f", "name": "f", "file_path": "z.js", "line": 10})
     b.emit_node("CpgMethod", {"full_name": "a.f", "name": "f", "file_path": "a.js", "line": 5})
     # no file_path/line -> filtered out (matches the graph query's WHERE ... IS NOT NULL)
@@ -33,6 +34,29 @@ def test_spans_from_batch_dedup_filter_and_order():
         {"full_name": "a.f", "file_path": "a.js", "line": 5},   # deduped to last, ordered first
         {"full_name": "c.h", "file_path": "z.js", "line": 3},
     ]                                                           # b.g filtered (no span)
+
+
+def test_spans_from_batch_unions_props_like_persist():
+    """Regression: `_spans_from_batch` must UNION duplicate CpgMethod props, not replace them.
+
+    Joern emits an internal METHOD definition carrying FILENAME/LINE_NUMBER and an external stub
+    carrying neither, and `normalize` OMITS those keys rather than setting them to None. Under the
+    old replace, a trailing stub erased the span and the non-null filter then dropped the method
+    from the semantic index entirely -- a silent recall loss. `persist._node_rows` unions (commit
+    75515dd); this is the mirror of that guarantee. Stub LAST is the case replace got wrong.
+    """
+    b = schema.Batch("s")
+    b.emit_node("CpgMethod", {"full_name": "a.f", "name": "f", "file_path": "a.js", "line": 5})
+    b.emit_node("CpgMethod", {"full_name": "a.f", "name": "f", "is_external": True})   # stub, no span
+    methods, _ = embed._spans_from_batch(b)
+    assert methods == [{"full_name": "a.f", "file_path": "a.js", "line": 5}]
+
+    # ...and the reverse order must agree, since union is order-independent for disjoint keys.
+    b2 = schema.Batch("s")
+    b2.emit_node("CpgMethod", {"full_name": "a.f", "name": "f", "is_external": True})
+    b2.emit_node("CpgMethod", {"full_name": "a.f", "name": "f", "file_path": "a.js", "line": 5})
+    methods2, _ = embed._spans_from_batch(b2)
+    assert methods2 == methods
 
 
 def test_spans_from_batch_matches_graph_query():
