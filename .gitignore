@@ -20,3 +20,8 @@ venv/
 
 # Test fixtures (large / externally sourced)
 fixtures/
+
+# Curated scan evidence for reviewers — must survive `git clone`, so never ignore it
+# (overrides the *.log rule above for report logs kept under examples/).
+!examples/
+!examples/**

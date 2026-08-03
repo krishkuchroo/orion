@@ -10,6 +10,13 @@ false-positive flood. On the OWASP NodeGoat benchmark Orion finds 14 of 15 vulne
 false positives, where a deterministic catalog scanner finds none. (The 15th, "components with known
 vulnerabilities," needs a CVE feed the current graph does not carry.)
 
+It is not benchmark-only. Orion has been run end to end against **real third-party code it had never
+seen** — a full scan of the TypeScript project [`pensarai/apex`](https://github.com/pensarai/apex)
+(a 160,814-node / 339,405-edge graph) surfaced 5 confirmed vulnerabilities (including a HIGH shell
+command injection) and correctly rejected a false positive. **The complete, unedited output of that
+run is committed under [`examples/`](examples/) so the evidence survives a clone** — read
+`examples/apex/report.log` for the full build timings, live event stream, and ranked report.
+
 ## The one rule that makes it trustworthy
 
 Discovery and verification are different jobs, run by different `claude -p` sessions. The discovery
@@ -28,6 +35,10 @@ Three layers:
    8-node, 5-edge schema in Neo4j: `CpgFile`, `CpgMethod`, `CpgCall`, `CpgModule`, `CpgParameter`,
    `CpgReturn`, `EntryPoint`, `Dependency`, with `CONTAINS_CALL`, `RESOLVES_TO`, `DEFINED_IN`,
    `FLOWS_TO`, and `ENTERS_AT` edges. Every node and edge carries a `scan_id` for scan isolation.
+   The build is **streaming by default** (`graph/stream_build.py`): it assembles the graph per
+   function from `cpg.bin` instead of materializing Joern's whole-graph JSON export (which is ~85×
+   larger and OOMs on big repos), so it scales to large real-world codebases; `--no-stream` reverts
+   to the legacy export.
 2. **Orchestration.** `discover.discover` fans out four discovery "shapes" concurrently (A data-flow,
    B absent-control, C disabled or reverted fix, D pattern and dependency). Each shape is a single
    `claude -p` session that calls the read-only MCP tools `run_cypher`, `semantic_search`, and
@@ -84,7 +95,7 @@ A full run has four prerequisites. Install them once, then any scan is a single 
 ### 2. Clone Orion
 
 ```bash
-git clone https://github.com/krishkuchroo/orion.git
+git clone https://github.com/lutherleo/orion.git
 cd orion
 ```
 
@@ -169,7 +180,9 @@ orion/
     profiles.py       language and framework profiles: the one place framework knowledge lives
     deps.py           manifest to Dependency nodes (package.json, requirements, pom, go.mod)
     schema.py         canonical node and edge identity plus the batched writer
-    persist.py        atomic clear-and-load into Neo4j
+    persist.py        chunked, parallel clear-and-load into Neo4j
+    stream_build.py   streaming per-function graph build (default; avoids the 85x export blob)
+    taint_summary.py  summary-stitch taint that reproduces collapse_flows byte-for-byte
   graph_build.py   build orchestration to scan_id
   mcp_server.py    FastMCP server exposing run_cypher, semantic_search, get_schema (all read-only)
   claude_cli.py    headless claude -p driver (MCP, retries with backoff, diagnostics salvage)
@@ -181,6 +194,7 @@ orion/
   monitor.py       live progress log plus the --watch tail
   cli.py           orion scan <repo>
 scripts/run_nodegoat_eval.py   full-pipeline recall harness against the 15-vuln ground truth
+examples/        real, committed scan output (apex run: report.log, findings.json, reverify.json)
 ```
 
 ## Testing
