@@ -14,9 +14,9 @@ index + report/CLI/monitor + NodeGoat eval. Token-free suite 69 passing; `@slow`
 deliberately. Marker-based language detection (js/python/go/java) with a `--language` override and an
 ambiguity warning landed this session. Validated beyond NodeGoat: a full PyGoat (Django + Flask) run
 confirmed 20 findings incl. 6 known-vuln deps, no framework-specific tuning. First commit to `main`
-this session (the earlier "nothing committed" rule lifted at Krish's request).
+this session (the earlier "nothing committed" rule lifted at Love Kush's request).
 
-## Working agreement (how Krish wants to build)
+## Working agreement (how Love Kush wants to build)
 
 - Build in three layers, in order: **Build** (the graph) → **Orchestration** (the agents) →
   **Harness** (CLI / live monitor / eval).
