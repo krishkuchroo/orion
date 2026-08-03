@@ -181,11 +181,14 @@ def _fetch_evidence_subgraph(scan_id: str, source_uid: str, sink_uid: str) -> di
         nodes = db.run_cypher(
             scan_id,
             f"MATCH (c:CpgCall {{scan_id:$scan_id}}) WHERE c.uid IN [{uid_list}] "
-            f"RETURN c.uid AS uid, c.code AS code, c.file_path AS file_path, c.line AS line",
+            f"RETURN c.uid AS uid, c.code AS code, c.file_path AS file_path, c.line AS line, "
+            f"c.centrality AS centrality",
             limit=len(path_uids))
         detail = {r["uid"]: r for r in (nodes.get("rows") or [])} if isinstance(nodes, dict) else {}
         ordered = [detail.get(u, {"uid": u}) for u in path_uids]
-        return {"sink_category": rows[0].get("sink_category"), "path": ordered}
+        sink_centrality = float(detail.get(sink_uid, {}).get("centrality") or 0.0)
+        return {"sink_category": rows[0].get("sink_category"), "path": ordered,
+                "sink_centrality": sink_centrality}
     finally:
         db.close()
 
@@ -237,11 +240,13 @@ def verify_lead(scan_id: str, lead: Lead, repo_path: str, on_event: OnEvent, run
         + "\n\n" + EXPLOIT_SEARCH_GUIDANCE
     )
     evidence_subgraph = ""
+    sink_centrality = 0.0
     if lead.source_uid and lead.sink_uid and fetch_subgraph is not None:
         try:
             sub = fetch_subgraph(scan_id, lead.source_uid, lead.sink_uid)
             if sub:
                 evidence_subgraph = _format_evidence_subgraph(sub)
+                sink_centrality = float(sub.get("sink_centrality") or 0.0)
         except Exception:  # noqa: BLE001 -- the subgraph is advisory; never fail verify over it
             evidence_subgraph = ""
     message = _lead_message(scan_id, lead, evidence_subgraph)
@@ -267,6 +272,7 @@ def verify_lead(scan_id: str, lead: Lead, repo_path: str, on_event: OnEvent, run
     )
 
     verdict = _verdict_from_result(lead, result)
+    verdict.sink_centrality = sink_centrality   # blast-radius signal for report ranking (Item 3b)
     if verdict.decision == "ERROR":
         on_event({
             "phase": "verify", "shape": lead.shape, "lead": lead.index, "turn": None,

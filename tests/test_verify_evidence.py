@@ -87,6 +87,23 @@ def test_fetch_returning_none_omits_block():
     assert "PRECOMPUTED EVIDENCE SUBGRAPH" not in cap.message
 
 
+def test_sink_centrality_populated_on_verdict():
+    cap = _Capture()
+    sub = {"sink_category": "sql", "sink_centrality": 0.73,
+           "path": [{"uid": _SRC, "code": "x", "file_path": "a", "line": 1},
+                    {"uid": _SNK, "code": "y", "file_path": "b", "line": 2}]}
+    verdict = verify.verify_lead("scan", _lead(source_uid=_SRC, sink_uid=_SNK), "repo",
+                                 lambda ev: None, cap, fetch_subgraph=lambda *a: sub)
+    assert verdict.sink_centrality == 0.73
+
+
+def test_sink_centrality_defaults_zero_without_endpoints():
+    cap = _Capture()
+    verdict = verify.verify_lead("scan", _lead(), "repo", lambda ev: None, cap,
+                                 fetch_subgraph=lambda *a: _SUBGRAPH)
+    assert verdict.sink_centrality == 0.0
+
+
 def test_fetch_exception_is_swallowed():
     cap = _Capture()
 

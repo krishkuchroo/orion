@@ -38,6 +38,10 @@ class Verdict:
     decision: Decision
     reason: str
     evidence: str = ""  # what the verifier itself queried or read
+    # Betweenness centrality (0-1) of the lead's sink call, when the lead is anchored on a
+    # :CandidateFlow. A blast-radius signal: report ranking uses it to float a bug on a high-traffic
+    # chokepoint above an equally-decided one in a backwater. 0.0 when unknown.
+    sink_centrality: float = 0.0
 
 
 # A progress event is a plain dict appended one-per-line to the run's JSONL log, and also the
