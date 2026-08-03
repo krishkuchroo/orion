@@ -53,8 +53,8 @@ VERDICT_SCHEMA = {
 # orion/strategies.py, which Task C owns and is rewriting in parallel.
 _SCHEMA_BLOCK = """Schema (all nodes carry `scan_id`):
   (:CpgFile   {scan_id, uid, file_path})
-  (:CpgMethod {scan_id, full_name, name, is_external, file_path, line, reachable_from_entry, hop_distance})
-  (:CpgCall   {scan_id, uid, name, code, method_full_name, file_path, line, column, reachable_from_entry, hop_distance})
+  (:CpgMethod {scan_id, full_name, name, is_external, file_path, line, reachable_from_entry, hop_distance, centrality})
+  (:CpgCall   {scan_id, uid, name, code, method_full_name, file_path, line, column, reachable_from_entry, hop_distance, centrality})
   (:CpgModule {scan_id, import_name, language})
   (:CpgParameter {scan_id, uid, name, index})
   (:CpgReturn {scan_id, uid})

@@ -6,6 +6,10 @@ requires-python = ">=3.12"
 dependencies = [
     "neo4j>=5.0",
     "fastmcp>=2.0",
+    # Build-time graph analytics (reachability BFS is stdlib, but betweenness centrality and the
+    # structural-dedup clustering use networkx). Orion's Neo4j installs no APOC/GDS, so all graph
+    # algorithms run in Python over the in-memory batch. Present transitively today; pinned direct.
+    "networkx>=3.0",
 ]
 
 [project.optional-dependencies]

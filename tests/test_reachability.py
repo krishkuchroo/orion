@@ -99,6 +99,62 @@ def test_idempotent():
     assert once == twice
 
 
+def _chokepoint_batch(sid: str = "t") -> schema.Batch:
+    """Two entries funnel through one shared method, which fans out to two sinks. The shared method
+    (and its call) sit on every entry->sink path => high betweenness; the sink calls are leaves => 0.
+
+      entryA -CONTAINS_CALL-> cA -RESOLVES_TO-> shared
+      entryB -CONTAINS_CALL-> cB -RESOLVES_TO-> shared
+      shared -CONTAINS_CALL-> {s1, s2}   (leaf sink calls)
+      orphan(method) -CONTAINS_CALL-> c9  (unreachable)
+    """
+    b = schema.Batch(sid)
+    for full in ("entryA", "entryB", "shared", "orphan"):
+        b.emit_node("CpgMethod", {"full_name": full, "name": full, "is_external": False})
+    for uid in ("cA", "cB", "s1", "s2", "c9"):
+        b.emit_node("CpgCall", {"uid": uid, "name": uid, "code": uid, "method_full_name": "m",
+                                "file_path": "f.js", "line": 0, "column": 0})
+    for e, m in (("eA", "entryA"), ("eB", "entryB")):
+        b.emit_node("EntryPoint", {"uid": e, "method_full_name": m})
+        b.emit_edge("ENTERS_AT", "EntryPoint", {"uid": e}, "CpgMethod", {"full_name": m})
+    b.emit_edge("CONTAINS_CALL", "CpgMethod", {"full_name": "entryA"}, "CpgCall", {"uid": "cA"})
+    b.emit_edge("CONTAINS_CALL", "CpgMethod", {"full_name": "entryB"}, "CpgCall", {"uid": "cB"})
+    b.emit_edge("RESOLVES_TO", "CpgCall", {"uid": "cA"}, "CpgMethod", {"full_name": "shared"})
+    b.emit_edge("RESOLVES_TO", "CpgCall", {"uid": "cB"}, "CpgMethod", {"full_name": "shared"})
+    b.emit_edge("CONTAINS_CALL", "CpgMethod", {"full_name": "shared"}, "CpgCall", {"uid": "s1"})
+    b.emit_edge("CONTAINS_CALL", "CpgMethod", {"full_name": "shared"}, "CpgCall", {"uid": "s2"})
+    b.emit_edge("CONTAINS_CALL", "CpgMethod", {"full_name": "orphan"}, "CpgCall", {"uid": "c9"})
+    return b
+
+
+def test_centrality_chokepoint_beats_leaf():
+    b = _chokepoint_batch()
+    reachability.tag_reachability(b)
+    summary = reachability.tag_centrality(b)
+
+    shared = _props(b, "CpgMethod", "full_name", "shared")["centrality"]
+    leaf = _props(b, "CpgCall", "uid", "s1")["centrality"]
+    orphan = _props(b, "CpgMethod", "full_name", "orphan")["centrality"]
+
+    assert shared > 0.0            # a real chokepoint
+    assert leaf == 0.0             # a leaf sink is on no shortest path's interior
+    assert shared > leaf
+    assert orphan == 0.0           # unreachable -> centrality 0.0
+    assert summary["nodes"] == 7   # 3 reachable methods + 4 reachable calls (orphan/c9 excluded)
+
+
+def test_centrality_requires_reachability_and_is_idempotent():
+    b = _chokepoint_batch()
+    reachability.tag_reachability(b)
+    reachability.tag_centrality(b)
+    once = {(l, p.get("full_name") or p.get("uid")): p.get("centrality")
+            for l, p in b.nodes if l in ("CpgMethod", "CpgCall")}
+    reachability.tag_centrality(b)   # run again
+    twice = {(l, p.get("full_name") or p.get("uid")): p.get("centrality")
+             for l, p in b.nodes if l in ("CpgMethod", "CpgCall")}
+    assert once == twice
+
+
 def test_duplicate_node_key_all_stamped():
     """persist unions duplicate NODE_KEY rows; every duplicate props dict must carry the flag so the
     union is consistent regardless of which wins per-key."""

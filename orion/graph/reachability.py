@@ -132,3 +132,73 @@ def tag_reachability(batch: schema.Batch) -> dict:
         "total_methods": total_methods,
         "total_calls": total_calls,
     }
+
+
+# Above this node count, exact betweenness (O(V*E)) is too slow, so fall back to a k-sample
+# approximation (networkx samples `k` pivot sources). Seeded so a re-build is reproducible.
+_CENTRALITY_EXACT_MAX = 2000
+_CENTRALITY_SAMPLE_K = 500
+_CENTRALITY_SEED = 1
+
+
+def _kind_index(batch: schema.Batch) -> dict[tuple[str, str], list[dict]]:
+    """identity -> props dicts for CpgMethod/CpgCall, WITHOUT touching reachability props (unlike
+    `_node_props_index`, which defaults them). Used by centrality, which runs after reachability."""
+    index: dict[tuple[str, str], list[dict]] = {}
+    for label, props in batch.nodes:
+        if label == "CpgMethod":
+            key = (_METHOD, props.get("full_name"))
+        elif label == "CpgCall":
+            key = (_CALL, props.get("uid"))
+        else:
+            continue
+        if key[1] is None:
+            continue
+        index.setdefault(key, []).append(props)
+    return index
+
+
+def tag_centrality(batch: schema.Batch) -> dict:
+    """Stamp betweenness `centrality` (0-1) onto every CpgMethod/CpgCall, over the ATTACKER-REACHABLE
+    call graph. Must run AFTER `tag_reachability` (it reads `reachable_from_entry`).
+
+    High betweenness marks a chokepoint many flows pass through -- a shared sanitizer whose bypass
+    compromises everything downstream, or a shared sink wrapper -- which is exactly what we most want
+    surfaced. Computing it on the reachable subgraph (not the whole graph) keeps the score about real
+    attacker paths and bounds the cost. Unreachable nodes (and nodes off every shortest path) get 0.0.
+    Pure over the batch (mutates props in place) and idempotent. Uses networkx; no APOC/GDS."""
+    import networkx as nx
+
+    index = _kind_index(batch)
+    for plist in index.values():          # default first -> idempotent, and unreachable stays 0.0
+        for props in plist:
+            props["centrality"] = 0.0
+
+    reachable = {ident for ident, plist in index.items()
+                 if any(p.get("reachable_from_entry") for p in plist)}
+    adj, _sources = _adjacency_and_sources(batch)
+
+    g = nx.DiGraph()
+    g.add_nodes_from(reachable)
+    for src, nbrs in adj.items():
+        if src in reachable:
+            for dst in nbrs:
+                if dst in reachable:
+                    g.add_edge(src, dst)
+
+    n = g.number_of_nodes()
+    if n == 0:
+        return {"nodes": 0, "edges": 0, "max_centrality": 0.0}
+
+    if n > _CENTRALITY_EXACT_MAX:
+        centrality = nx.betweenness_centrality(
+            g, k=min(_CENTRALITY_SAMPLE_K, n), normalized=True, seed=_CENTRALITY_SEED)
+    else:
+        centrality = nx.betweenness_centrality(g, normalized=True)
+
+    for ident, c in centrality.items():
+        for props in index.get(ident, ()):
+            props["centrality"] = float(c)
+
+    return {"nodes": n, "edges": g.number_of_edges(),
+            "max_centrality": max(centrality.values(), default=0.0)}

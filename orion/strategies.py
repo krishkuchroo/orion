@@ -14,8 +14,8 @@ from __future__ import annotations
 # CpgCall.code for the raw source text of a call.
 SCHEMA = """Schema-of-record (every node and every relationship carries `scan_id`):
   (:CpgFile      {scan_id, uid, file_path})
-  (:CpgMethod    {scan_id, full_name, name, is_external, file_path, line, reachable_from_entry, hop_distance})
-  (:CpgCall      {scan_id, uid, name, code, method_full_name, file_path, line, column, reachable_from_entry, hop_distance})
+  (:CpgMethod    {scan_id, full_name, name, is_external, file_path, line, reachable_from_entry, hop_distance, centrality})
+  (:CpgCall      {scan_id, uid, name, code, method_full_name, file_path, line, column, reachable_from_entry, hop_distance, centrality})
   (:CpgModule    {scan_id, import_name, language})
   (:CpgParameter {scan_id, uid, name, index})
   (:CpgReturn    {scan_id, uid})
@@ -37,6 +37,9 @@ method itself, -1 = not reached) are stamped on every CpgMethod/CpgCall by a bui
 input. Treat this as a PRIORITY HINT, not a hard filter: the same arrow-function gap that breaks
 CONTAINS_CALL can leave a genuinely reachable call marked unreachable, so never discard a lead on
 `reachable_from_entry` alone.
+CENTRALITY (precomputed): `centrality` (float 0-1) is the betweenness of the node in the reachable
+call graph -- how many attacker paths funnel through it. A HIGH-centrality node is a chokepoint (a
+shared sanitizer or a shared sink wrapper): a bug there has a large blast radius, so prioritize it.
 
 ATTACKER-CONTROLLED SOURCES (framework-agnostic): a FLOWS_TO self-loop (src == dst) marks a call
 whose own argument is already tainted by an untrusted input -- this is the fast way to find sources

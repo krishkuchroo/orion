@@ -145,6 +145,14 @@ def build(repo_path: str, language: str | None = None,
         on_event(_event("build", "timing",
                         detail=f"reachability: {reach['reached_methods']}/{reach['total_methods']} methods, "
                                f"{reach['reached_calls']}/{reach['total_calls']} calls reachable from an entry point"))
+    # Item 3a: betweenness centrality over the reachable call graph (chokepoint / blast-radius score).
+    # Runs AFTER reachability (reads reachable_from_entry) and, like it, mutates batch props in place
+    # before the on_batch thread. networkx; never fatal.
+    cent, _ = _timed(on_event, "centrality", lambda: reachability.tag_centrality(batch))
+    if on_event is not None:
+        on_event(_event("build", "timing",
+                        detail=f"centrality: {cent['nodes']} reachable nodes, "
+                               f"max betweenness {cent['max_centrality']:.3f}"))
     if on_batch is not None:
         # Overlap the batch consumer (semantic index) with persist (item 4). on_batch reads the
         # in-memory batch, so it does not wait on persist; persist's label-scoped clear won't wipe

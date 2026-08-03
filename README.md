@@ -47,7 +47,9 @@ Three layers:
    to the legacy export. A final build-time pass (`graph/reachability.py`) runs a multi-source BFS
    from the `EntryPoint` methods and stamps `reachable_from_entry` and `hop_distance` onto every
    `CpgMethod` and `CpgCall`, so discovery can prioritize attacker-reachable code and the verifier
-   gets an exploitability signal (a sink no entry point can reach is usually not exploitable).
+   gets an exploitability signal (a sink no entry point can reach is usually not exploitable). The
+   same pass stamps `centrality` — betweenness over the reachable call graph — so chokepoint
+   functions (shared sanitizers, shared sink wrappers) with the largest blast radius surface first.
 2. **Orchestration.** `discover.discover` fans out four discovery "shapes" concurrently (A data-flow,
    B absent-control, C disabled or reverted fix, D pattern and dependency). Each shape is a single
    `claude -p` session that calls the read-only MCP tools `run_cypher`, `semantic_search`, and
