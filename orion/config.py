@@ -38,7 +38,14 @@ PERSIST_CONCURRENCY = int(_env("ORION_PERSIST_CONCURRENCY", "4"))    # concurren
 MODEL = _env("ORION_MODEL", "sonnet")
 EFFORT = _env("ORION_EFFORT", "high")
 MAX_TURNS = int(_env("ORION_MAX_TURNS", "40"))
-VERIFY_MAX_TURNS = int(_env("ORION_VERIFY_MAX_TURNS", "10"))
+# Verify budget default. Was 10, which was TOO LOW on the happy path: the apex run's flagship finding
+# (a 4-file shell-command-injection RCE) needed more than 10 turns to re-derive and returned ERROR
+# (terminal_reason: max_turns) on the default budget -- it only CONFIRMed after a manual re-run at 30.
+# A skeptical reviewer running the default therefore saw ERRORs on the headline bug. max_turns is a
+# CAP, not a fixed spend (simple leads finish in 3-4 turns and stop early), so raising it is nearly
+# free on easy leads and only lets complex leads finish. 25 matches FINDINGS-apex.md's own
+# recommendation; override with ORION_VERIFY_MAX_TURNS for a tighter/looser budget.
+VERIFY_MAX_TURNS = int(_env("ORION_VERIFY_MAX_TURNS", "25"))
 # Generic fallback timeout for any run_agent call that does NOT pass its own. Discovery and
 # verification below both pass explicit, purpose-sized timeouts, so this only bites a future caller.
 CALL_TIMEOUT = int(_env("ORION_CALL_TIMEOUT", "180"))
@@ -61,9 +68,11 @@ VERIFY_CONCURRENCY = int(_env("ORION_VERIFY_CONCURRENCY", "4"))
 DISCOVER_TIMEOUT = int(_env("ORION_DISCOVER_TIMEOUT", "420"))            # seconds; per-shape floor
 DISCOVER_TIMEOUT_PER_NODE = float(_env("ORION_DISCOVER_TIMEOUT_PER_NODE", "0.006"))  # +sec / graph node
 DISCOVER_TIMEOUT_CAP = int(_env("ORION_DISCOVER_TIMEOUT_CAP", "1200"))   # seconds; hard ceiling (20 min)
-# Verification is a focused re-derivation (VERIFY_MAX_TURNS=10) but fp-check spawns its own nested
-# subagents, so it gets its own headroom -- separate from discovery, which scales with graph size.
-VERIFY_TIMEOUT = int(_env("ORION_VERIFY_TIMEOUT", "300"))                # seconds per lead
+# Verification is a focused re-derivation but fp-check spawns its own nested subagents, so it gets its
+# own headroom -- separate from discovery, which scales with graph size. Raised from 300 to 600 in
+# lockstep with the VERIFY_MAX_TURNS bump above: a 25-turn budget is useless if the wall-clock kills
+# the call at 300s first, and the apex recovery run that CONFIRMed the RCE used 600s.
+VERIFY_TIMEOUT = int(_env("ORION_VERIFY_TIMEOUT", "600"))                # seconds per lead
 
 
 def discover_timeout(node_count: int | None) -> int:

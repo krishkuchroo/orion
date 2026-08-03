@@ -27,8 +27,12 @@ The first verification pass returned 3 of these as `ERROR`. That was **not** rat
 verdicts showed `terminal_reason: max_turns` — Orion's verifier is capped at `VERIFY_MAX_TURNS=10`,
 and the complex leads (the 4-file RCE especially) needed more turns. Re-verifying just those 3 with
 `ORION_VERIFY_MAX_TURNS=30 ORION_VERIFY_TIMEOUT=600` (via `bench/reverify.py`, which reuses the graph
-by scan_id — no Orion source changed) returned **all 3 → CONFIRM**. Recommendation for future
-large-repo scans: export `ORION_VERIFY_MAX_TURNS=25–30` up front.
+by scan_id — no Orion source changed) returned **all 3 → CONFIRM**.
+
+**Fixed in the tool, not just recommended:** the defaults are now `VERIFY_MAX_TURNS=25` /
+`VERIFY_TIMEOUT=600` (`orion/config.py`), so the happy path re-derives complex leads like this RCE
+without a hand-run rescue. `bench/reverify.py` remains as an escape hatch for pushing an individual
+lead even higher, but the flagship result no longer depends on it.
 
 ## Artifacts
 - `bench/runs/20260729T094502Z/findings.json` — original 6 verdicts (2 CONFIRM, 1 REJECT, 3 ERROR)

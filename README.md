@@ -7,8 +7,14 @@ from memory), and a separate verifier agent independently confirms each lead bef
 
 The goal is recall on an arbitrary codebase that a fixed rule catalog cannot reach, without the
 false-positive flood. On the OWASP NodeGoat benchmark Orion finds 14 of 15 vulnerabilities at zero
-false positives, where a deterministic catalog scanner finds none. (The 15th, "components with known
-vulnerabilities," needs a CVE feed the current graph does not carry.)
+false positives, scored by `scripts/run_nodegoat_eval.py` against the ground truth in
+`tests/ground_truth_nodegoat.py`. (The 15th, "components with known vulnerabilities," needs a CVE
+feed the current graph does not carry.)
+
+> **On comparisons:** a head-to-head against a deterministic scanner (Semgrep or CodeQL run on the
+> same NodeGoat checkout and scored through the same matcher) is the honest way to show Orion reaches
+> bugs a fixed rule catalog cannot. That baseline is **not committed yet**, so this README does not
+> claim a number for it — the claim above is only what Orion's own eval measures.
 
 It is not benchmark-only. Orion has been run end to end against **real third-party code it had never
 seen** — a full scan of the TypeScript project [`pensarai/apex`](https://github.com/pensarai/apex)
