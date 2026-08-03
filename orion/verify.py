@@ -60,6 +60,9 @@ _SCHEMA_BLOCK = """Schema (all nodes carry `scan_id`):
   (:CpgReturn {scan_id, uid})
   (:EntryPoint {scan_id, uid, method_full_name, exposure, kind})
   (:Dependency {scan_id, name, version})
+  (:CandidateFlow {scan_id, uid, source_uid, sink_uid, sink_category, path_uids, rank})
+     -- precomputed source->sink taint path; source_uid/sink_uid are CpgCall uids, path_uids a JSON
+        array of the CpgCall uids on the flow
 Edges (rel props carry scan_id):
   (:CpgMethod)-[:CONTAINS_CALL]->(:CpgCall)
   (:CpgCall)-[:RESOLVES_TO]->(:CpgMethod)

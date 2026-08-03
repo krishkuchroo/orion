@@ -21,6 +21,10 @@ SCHEMA = """Schema-of-record (every node and every relationship carries `scan_id
   (:CpgReturn    {scan_id, uid})
   (:EntryPoint   {scan_id, uid, method_full_name, exposure, kind})   -- attacker-reachable entry methods
   (:Dependency   {scan_id, name, version})                           -- declared third-party deps
+  (:CandidateFlow {scan_id, uid, source_uid, sink_uid, sink_category, path_uids, rank})
+     -- PRECOMPUTED source->sink taint paths, ranked (rank 0 = best). source_uid/sink_uid are CpgCall
+        uids; path_uids is a JSON array of the CpgCall uids along the flow; sink_category is the sink
+        kind (code_exec/sql/nosql/redirect/...). Triage these FIRST (see shape A).
 Edges (relationship properties also carry scan_id):
   (:CpgMethod)-[:CONTAINS_CALL]->(:CpgCall)
   (:CpgCall)-[:RESOLVES_TO]->(:CpgMethod)
@@ -67,10 +71,16 @@ never confirmed findings -- a separate, independent verifier (a different sessio
 transcript) will re-derive each lead from the graph and real source before anything is reported."""
 
 _SHAPE_TEXT: dict[str, str] = {
-    "A": """YOUR SHAPE: A -- DATA FLOW. Attacker input reaches a dangerous operation. Start from the
-attacker-controlled sources (the FLOWS_TO self-loops, and the parameters of :EntryPoint methods),
-follow FLOWS_TO edges outward, read CpgCall.code, and look for a template/query/exec/redirect/
-fetch/log call built from unsanitized input. A FLOWS_TO self-loop (src == dst) marks a call whose
+    "A": """YOUR SHAPE: A -- DATA FLOW. Attacker input reaches a dangerous operation.
+START WITH THE PRECOMPUTED SHORTLIST: query the :CandidateFlow nodes ranked best-first
+  MATCH (cf:CandidateFlow {scan_id:$scan_id}) RETURN cf.rank, cf.sink_category, cf.source_uid,
+    cf.sink_uid, cf.path_uids ORDER BY cf.rank
+and for EACH, read the source + sink CpgCall.code (the uids are CpgCall.uid) and decide whether it is
+a real vulnerable flow -- you are JUDGING concrete candidates, not exploring a graph. The path_uids
+array is the tainted chain to inspect. Only after triaging the shortlist should you fall back to
+walking FLOWS_TO by hand from the sources (the FLOWS_TO self-loops, and the parameters of
+:EntryPoint methods) to catch flows the precompute missed; read CpgCall.code and look for a
+template/query/exec/redirect/fetch/log call built from unsanitized input. A FLOWS_TO self-loop (src == dst) marks a call whose
 own argument is already tainted by an untrusted input -- a fast, cheap place to start your sweep.
 This is framework-agnostic: in a JS/Express app the sources look like req.body.*/req.query.*; in
 another stack they are the entry method's parameters -- the self-loops and EntryPoint nodes find

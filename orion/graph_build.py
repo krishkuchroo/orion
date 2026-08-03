@@ -18,7 +18,7 @@ import time
 from datetime import datetime, timezone
 
 from .contracts import OnEvent, ProgressEvent
-from .graph import deps, joern_adapter, persist, profiles, reachability
+from .graph import deps, joern_adapter, pathfind, persist, profiles, reachability
 
 
 def _event(phase: str, event: str, *, detail: str = "") -> ProgressEvent:
@@ -153,6 +153,13 @@ def build(repo_path: str, language: str | None = None,
         on_event(_event("build", "timing",
                         detail=f"centrality: {cent['nodes']} reachable nodes, "
                                f"max betweenness {cent['max_centrality']:.3f}"))
+    # Item 2: precompute ranked source->sink candidate flows as :CandidateFlow nodes. Runs after
+    # centrality (ranks by it) and before the on_batch thread; profile supplies the sink vocabulary.
+    flows, _ = _timed(on_event, "pathfind", lambda: pathfind.pathfind(batch, profile))
+    if on_event is not None:
+        on_event(_event("build", "timing",
+                        detail=f"pathfind: {flows['flows']} candidate flows from {flows['sources']} "
+                               f"sources to {flows['sinks']} sink hits"))
     if on_batch is not None:
         # Overlap the batch consumer (semantic index) with persist (item 4). on_batch reads the
         # in-memory batch, so it does not wait on persist; persist's label-scoped clear won't wipe
