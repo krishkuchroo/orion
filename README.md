@@ -200,7 +200,10 @@ orion/
   monitor.py       live progress log plus the --watch tail
   cli.py           orion scan <repo>
 scripts/run_nodegoat_eval.py   full-pipeline recall harness against the 15-vuln ground truth
-examples/        real, committed scan output (apex run: report.log, findings.json, reverify.json)
+examples/        real, committed scan output (apex run: report.log, findings.json, reverify.json, FINDINGS.md)
+bench/           side-by-side scan helpers (reverify.py, scan.sh, scan_watch.py)
+docs/            design specs and plans (docs/superpowers/), session notes (docs/notes/)
+agenda.md        forward-looking work, baseline comparison first
 ```
 
 ## Testing

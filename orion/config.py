@@ -43,7 +43,7 @@ MAX_TURNS = int(_env("ORION_MAX_TURNS", "40"))
 # (terminal_reason: max_turns) on the default budget -- it only CONFIRMed after a manual re-run at 30.
 # A skeptical reviewer running the default therefore saw ERRORs on the headline bug. max_turns is a
 # CAP, not a fixed spend (simple leads finish in 3-4 turns and stop early), so raising it is nearly
-# free on easy leads and only lets complex leads finish. 25 matches FINDINGS-apex.md's own
+# free on easy leads and only lets complex leads finish. 25 matches examples/apex/FINDINGS.md's own
 # recommendation; override with ORION_VERIFY_MAX_TURNS for a tighter/looser budget.
 VERIFY_MAX_TURNS = int(_env("ORION_VERIFY_MAX_TURNS", "25"))
 # Generic fallback timeout for any run_agent call that does NOT pass its own. Discovery and

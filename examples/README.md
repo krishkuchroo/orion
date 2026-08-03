@@ -18,6 +18,7 @@ A live run against a real third-party TypeScript codebase Orion had never seen (
 | `report.log` | The full human-readable run log: per-phase build timings, the live discovery/verify event stream, and the final ranked, evidence-cited report. Start here. |
 | `findings.json` | The verifier's structured verdicts from the first pass — 2 `CONFIRM`, 1 `REJECT`, 3 `ERROR`. |
 | `reverify.json` | The 3 `ERROR` leads re-run with a larger turn budget, all 3 → `CONFIRM`. |
+| `FINDINGS.md` | The detailed writeup: every vuln with file+line locations, the rejected-FP analysis, and the verifier-budget note. |
 
 > Those first-pass `ERROR`s were a too-low default verify budget (10 turns), not real failures — the
 > complex 4-file RCE needed more turns to re-derive. That default has since been raised to 25 turns /
