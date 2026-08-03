@@ -60,20 +60,40 @@ def _to_leads(final_json: dict, shape: str) -> list[Lead]:
         item_shape = item.get("shape")
         if item_shape not in ("A", "B", "C", "D"):
             item_shape = shape
-        leads.append(Lead(index=i, shape=item_shape, text=text, evidence=evidence, confidence=confidence))
+        source_uid = item.get("source_uid") or None
+        sink_uid = item.get("sink_uid") or None
+        leads.append(Lead(index=i, shape=item_shape, text=text, evidence=evidence,
+                          confidence=confidence, source_uid=source_uid, sink_uid=sink_uid))
     return leads
 
 
 def _dedup(leads: list[Lead]) -> list[Lead]:
-    """Two leads are the same if `(shape, text[:80])` collide; keep the first occurrence and
-    reassign sequential indices over the deduped, aggregated list."""
-    seen: set[tuple[str, str]] = set()
+    """Collapse duplicate leads, keeping the first occurrence and reassigning sequential indices.
+
+    STRUCTURAL first: a lead anchored on a :CandidateFlow carries `source_uid`+`sink_uid`; two leads
+    with the same (source_uid, sink_uid) are the SAME flow no matter how differently they are worded,
+    so they collapse on that endpoint pair alone -- this is what the lexical key silently missed
+    (agents describing one flow in different words double-counted). We key on the exact endpoint pair
+    rather than clustering on partial (source-only / sink-only) overlap on purpose: two genuinely
+    distinct bugs that merely share a source must NOT be merged in a precision-first tool.
+
+    LEXICAL fallback: leads with no structural anchor (shapes B/C/D, or a shape-A lead the model
+    didn't tag) keep the original `(shape, text[:80])` key. The two keyspaces are disjoint, so a
+    structural and a lexical lead never collide."""
+    seen_struct: set[tuple[str, str]] = set()
+    seen_lex: set[tuple[str, str]] = set()
     kept: list[Lead] = []
     for lead in leads:
-        key = (lead.shape, lead.text[:80])
-        if key in seen:
-            continue
-        seen.add(key)
+        if lead.source_uid and lead.sink_uid:
+            key = (lead.source_uid, lead.sink_uid)
+            if key in seen_struct:
+                continue
+            seen_struct.add(key)
+        else:
+            key = (lead.shape, lead.text[:80])
+            if key in seen_lex:
+                continue
+            seen_lex.add(key)
         kept.append(lead)
     return [replace(lead, index=i) for i, lead in enumerate(kept)]
 

@@ -131,6 +131,11 @@ LEADS_JSON_SCHEMA: dict = {
                     "text": {"type": "string"},
                     "evidence": {"type": "string"},
                     "confidence": {"type": "string", "enum": ["LOW", "MEDIUM", "HIGH"]},
+                    # When this lead came from triaging a :CandidateFlow, echo its endpoints (the
+                    # source/sink CpgCall uids) so identical flows collapse in dedup. Omit for leads
+                    # with no graph anchor.
+                    "source_uid": {"type": "string"},
+                    "sink_uid": {"type": "string"},
                 },
                 "required": ["shape", "text", "evidence", "confidence"],
             },

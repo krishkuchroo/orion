@@ -23,6 +23,12 @@ class Lead:
     text: str          # human-readable candidate-lead statement
     evidence: str      # the Cypher query result / snippet the discoverer cited
     confidence: Confidence
+    # Structural endpoints, set when the lead is anchored on a precomputed :CandidateFlow (shape A).
+    # Two leads with the same (source_uid, sink_uid) are the SAME flow however differently worded, so
+    # these drive structural dedup (discover._dedup). None for leads with no graph anchor (B/C/D),
+    # which fall back to lexical dedup.
+    source_uid: str | None = None
+    sink_uid: str | None = None
 
 
 @dataclass
