@@ -44,7 +44,10 @@ Three layers:
    The build is **streaming by default** (`graph/stream_build.py`): it assembles the graph per
    function from `cpg.bin` instead of materializing Joern's whole-graph JSON export (which is ~85×
    larger and OOMs on big repos), so it scales to large real-world codebases; `--no-stream` reverts
-   to the legacy export.
+   to the legacy export. A final build-time pass (`graph/reachability.py`) runs a multi-source BFS
+   from the `EntryPoint` methods and stamps `reachable_from_entry` and `hop_distance` onto every
+   `CpgMethod` and `CpgCall`, so discovery can prioritize attacker-reachable code and the verifier
+   gets an exploitability signal (a sink no entry point can reach is usually not exploitable).
 2. **Orchestration.** `discover.discover` fans out four discovery "shapes" concurrently (A data-flow,
    B absent-control, C disabled or reverted fix, D pattern and dependency). Each shape is a single
    `claude -p` session that calls the read-only MCP tools `run_cypher`, `semantic_search`, and

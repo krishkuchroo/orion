@@ -18,7 +18,7 @@ import time
 from datetime import datetime, timezone
 
 from .contracts import OnEvent, ProgressEvent
-from .graph import deps, joern_adapter, persist, profiles
+from .graph import deps, joern_adapter, persist, profiles, reachability
 
 
 def _event(phase: str, event: str, *, detail: str = "") -> ProgressEvent:
@@ -136,6 +136,15 @@ def build(repo_path: str, language: str | None = None,
         on_event, "normalize",
         lambda: joern_adapter.normalize(envelope, scan_id, language=display_language,
                                         dependencies=dependencies))
+    # Build-time precompute (Item 1): tag every method/call with entry-point reachability + hop
+    # distance, mutating batch.nodes props IN PLACE. Must run BEFORE the on_batch thread below, which
+    # reads the same batch concurrently -- doing it here keeps the mutation single-threaded and the
+    # new props are picked up by persist's `SET n += row.props`. Pure/in-memory: never fatal to a build.
+    reach, _ = _timed(on_event, "reachability", lambda: reachability.tag_reachability(batch))
+    if on_event is not None:
+        on_event(_event("build", "timing",
+                        detail=f"reachability: {reach['reached_methods']}/{reach['total_methods']} methods, "
+                               f"{reach['reached_calls']}/{reach['total_calls']} calls reachable from an entry point"))
     if on_batch is not None:
         # Overlap the batch consumer (semantic index) with persist (item 4). on_batch reads the
         # in-memory batch, so it does not wait on persist; persist's label-scoped clear won't wipe

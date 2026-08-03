@@ -53,8 +53,8 @@ VERDICT_SCHEMA = {
 # orion/strategies.py, which Task C owns and is rewriting in parallel.
 _SCHEMA_BLOCK = """Schema (all nodes carry `scan_id`):
   (:CpgFile   {scan_id, uid, file_path})
-  (:CpgMethod {scan_id, full_name, name, is_external, file_path, line})
-  (:CpgCall   {scan_id, uid, name, code, method_full_name, file_path, line, column})
+  (:CpgMethod {scan_id, full_name, name, is_external, file_path, line, reachable_from_entry, hop_distance})
+  (:CpgCall   {scan_id, uid, name, code, method_full_name, file_path, line, column, reachable_from_entry, hop_distance})
   (:CpgModule {scan_id, import_name, language})
   (:CpgParameter {scan_id, uid, name, index})
   (:CpgReturn {scan_id, uid})
@@ -88,6 +88,10 @@ Rules:
   graph, REJECT it.
 - If you cannot gather enough evidence to decide either way, say INCONCLUSIVE -- do not guess.
 - CONFIRM only when you have concrete, cited evidence (a file+line, a queried graph fact, or both).
+- EXPLOITABILITY (reachability): if the lead's sink has `reachable_from_entry = false`, weigh that as
+  evidence AGAINST exploitability and lean INCONCLUSIVE or REJECT -- but do NOT auto-REJECT on it
+  alone. The graph under-links arrow-function calls, so a real reachable sink can be mislabeled
+  unreachable; confirm the reach (or its absence) against the real source before you downgrade.
 
 When you are done, output the final verdict as the required structured JSON with fields
 `decision` (CONFIRM | REJECT | INCONCLUSIVE), `reason` (why, citing your own evidence), and

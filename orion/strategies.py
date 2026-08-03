@@ -14,8 +14,8 @@ from __future__ import annotations
 # CpgCall.code for the raw source text of a call.
 SCHEMA = """Schema-of-record (every node and every relationship carries `scan_id`):
   (:CpgFile      {scan_id, uid, file_path})
-  (:CpgMethod    {scan_id, full_name, name, is_external, file_path, line})
-  (:CpgCall      {scan_id, uid, name, code, method_full_name, file_path, line, column})
+  (:CpgMethod    {scan_id, full_name, name, is_external, file_path, line, reachable_from_entry, hop_distance})
+  (:CpgCall      {scan_id, uid, name, code, method_full_name, file_path, line, column, reachable_from_entry, hop_distance})
   (:CpgModule    {scan_id, import_name, language})
   (:CpgParameter {scan_id, uid, name, index})
   (:CpgReturn    {scan_id, uid})
@@ -30,6 +30,13 @@ Edges (relationship properties also carry scan_id):
 File attribution: use CpgCall.file_path (stamped on every call) -- do NOT rely on CONTAINS_CALL
 alone, it is missing for calls nested inside arrow-functions assigned to object properties.
 `code` on CpgCall is the raw source text of the call.
+
+REACHABILITY (precomputed): `reachable_from_entry` (bool) and `hop_distance` (int; 0 = an entry
+method itself, -1 = not reached) are stamped on every CpgMethod/CpgCall by a build-time BFS from the
+:EntryPoint methods. A sink with `reachable_from_entry = false` usually cannot be driven by attacker
+input. Treat this as a PRIORITY HINT, not a hard filter: the same arrow-function gap that breaks
+CONTAINS_CALL can leave a genuinely reachable call marked unreachable, so never discard a lead on
+`reachable_from_entry` alone.
 
 ATTACKER-CONTROLLED SOURCES (framework-agnostic): a FLOWS_TO self-loop (src == dst) marks a call
 whose own argument is already tainted by an untrusted input -- this is the fast way to find sources
@@ -64,7 +71,10 @@ fetch/log call built from unsanitized input. A FLOWS_TO self-loop (src == dst) m
 own argument is already tainted by an untrusted input -- a fast, cheap place to start your sweep.
 This is framework-agnostic: in a JS/Express app the sources look like req.body.*/req.query.*; in
 another stack they are the entry method's parameters -- the self-loops and EntryPoint nodes find
-them either way.""",
+them either way. Prefer calls with `reachable_from_entry = true` and low `hop_distance` (they sit on
+a real attacker path); a sink no EntryPoint reaches is usually not exploitable -- but this is a
+priority hint, not a filter (the arrow-function CONTAINS_CALL gap can mislabel reachable code), so
+still look at an unreachable-but-dangerous sink, just rank it lower.""",
     "B": """YOUR SHAPE: B -- ABSENCE OF A CONTROL. Nothing "flows"; the bug is a missing or
 disabled protection. Enumerate the standard protections an app like this should have (CSRF
 tokens on state-changing routes, security headers, output escaping, encryption of sensitive
