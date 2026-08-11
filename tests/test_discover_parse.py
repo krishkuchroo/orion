@@ -194,7 +194,7 @@ def test_one_shape_live():
     """Run ONE real discovery shape (A) via claude_cli.run_agent against the loaded NodeGoat scan
     graph, over the real mcp__orion__* MCP tools. Assert at least one grounded lead comes back,
     citing at least one query it actually ran."""
-    from orion import strategies
+    from orion import config, strategies
     from orion.graph_build import scan_id_for
 
     scan_id = scan_id_for("fixtures/NodeGoat")
@@ -206,8 +206,16 @@ def test_one_shape_live():
         message=f'scan_id = "{scan_id}". Begin your Shape A sweep now.',
         json_schema=strategies.LEADS_JSON_SCHEMA,
         on_event=tool_events.append,
-        max_turns=15,
-        timeout=180,
+        # Mirror the budgets `discover._run_shape` actually uses (config.MAX_TURNS /
+        # config.DISCOVER_TIMEOUT) instead of hardcoding numbers here. The old literals (15 turns /
+        # 180s) were the values config.py:41-68 explicitly repudiated -- a flat 180s "sat BELOW the
+        # average and silently killed thorough sweeps," and a short turn cap ends the sweep as
+        # `terminal_reason: max_turns`, which run_agent correctly reports as an _error. A real Shape
+        # A sweep over NodeGoat measures ~120-180s and its turn count varies with what the agent
+        # decides to query, so both literals straddled the boundary and failed this live-green test
+        # on variance rather than on any defect. Testing budgets production abandoned tests nothing.
+        max_turns=config.MAX_TURNS,
+        timeout=config.DISCOVER_TIMEOUT,
     )
 
     assert "_error" not in result, result.get("_error")
