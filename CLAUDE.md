@@ -80,6 +80,20 @@ this session (the earlier "nothing committed" rule lifted at Love Kush's request
   on the target side keeping method-less sources) and threaded into `build_summary`'s
   `cross_rd`/`closure_targets` args; `build_summary`/`_reach_full`/`stitch` are byte-for-byte the
   Phase-1 code.
+- **Runtime enrichment is an OPT-IN, POST-PERSIST, ADDITIVE stage** (2026-08-12, `orion/runtime/`,
+  `orion scan --runtime`): it EXECUTES the target (a web app over HTTP, or an exe rebuilt from source
+  with coverage) via Orion's own bounded coverage-guided loop, correlates observed coverage back to
+  graph nodes by `(file_path, line)`, and writes `executed`/`hit_count` props + a new `OBSERVED_CALL`
+  edge onto the ALREADY-PERSISTED graph through its own driver. It adds NO `NODE_KEY` label, so
+  `persist._clear` never wipes it and the static graph (and the 217/1075 FLOWS_TO parity) is
+  byte-for-byte unchanged — verified live (FLOWS_TO held at 217 through a writeback+clear cycle).
+  Seam is parallel to `Profile`: `runtime/targets.py` picks `(Driver, Tracer)` — HttpDriver+V8Tracer
+  (`NODE_V8_COVERAGE` + `--cpu-prof`, zero-instrumentation) or ProcessDriver+GoCoverTracer
+  (`go build -cover`). The pure core (`runtime/correlate.py`) resolves the missing-method-end-line
+  problem by "greatest declaration line ≤ covered line". Value metrics on live NodeGoat: U=123 nodes
+  runtime overturned a `reachable_from_entry=false` guess on, J=2 `OBSERVED_CALL` edges with no static
+  path. Coverage is NOT a call graph: props come from coverage (every language), OBSERVED_CALL edges
+  ONLY from the profiler's call tree. Design: `docs/superpowers/specs/2026-08-11-runtime-observation-design.md`.
 
 ## Gotchas (paid for by the PoC — bake in)
 
@@ -87,7 +101,20 @@ this session (the earlier "nothing committed" rule lifted at Love Kush's request
   the default prompt and starts reading stray `CLAUDE.md`.
 - File-path property is `CpgFile.file_path`, not `.name`.
 - The graph **lies by omission**: calls nested in arrow-functions assigned to object properties get
-  no `CONTAINS_CALL` edge — so the verifier must read real source, not trust file attribution.
+  no `CONTAINS_CALL` edge — so the verifier must read real source, not trust file attribution. (The
+  `--runtime` stage's `OBSERVED_CALL` edges exist to fill exactly this gap with observed calls.)
+- **Runtime coverage flushes ONLY on a clean process exit.** `NODE_V8_COVERAGE` and `--cpu-prof`
+  write nothing when a long-running server is SIGTERM'd. Two things are load-bearing (both in
+  `runtime/`): (1) a `--require` preload that traps SIGTERM/SIGINT → `process.exit(0)`, launched into
+  the target's own start via `NODE_OPTIONS`, and signalling the whole process GROUP (`os.killpg`) so
+  `npm start`'s `node` child gets it; (2) `enrich` collects coverage ONCE, AFTER `driver.stop()` — a
+  mid-run collect sees an empty dir. Also: `launch_env(work)` and `tracer.collect(work)` MUST use the
+  same `work` dir (the driver holds its tracer and derives the env at `start()`, not at select time).
+  And NodeGoat host-run needs mongo PUBLISHED on `localhost:27017` (its compose only `expose`s it) +
+  seeded via `artifacts/db-reset.js`, and `npm install` run in the fixture.
+- `orion/runtime/__init__.py` re-exports `enrich` (the function), so `orion.runtime.enrich` is the
+  FUNCTION, not the submodule — import the module via `importlib.import_module` if you need its
+  internals (`_call_index`, `_methods`).
 - The old `FINAL:`/`CYPHER:` text protocol is GONE — agents use real MCP tools + `--json-schema`
   structured output. Still non-negotiable: a non-zero exit / timeout / `is_error` / missing result
   is NEVER a clean success — it becomes the `{"_error":...}` sentinel (`claude_cli._final_to_result`),

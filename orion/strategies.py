@@ -31,6 +31,8 @@ Edges (relationship properties also carry scan_id):
   (:CpgMethod)-[:DEFINED_IN]->(:CpgFile)
   (:CpgCall)-[:FLOWS_TO {arg_index}]->(:CpgCall)      -- taint dataflow, reliable
   (:EntryPoint)-[:ENTERS_AT]->(:CpgMethod)
+  (:CpgMethod)-[:OBSERVED_CALL {hits}]->(:CpgMethod)  -- a caller->callee pair SEEN AT RUNTIME (only
+                                                         present after a --runtime scan)
 File attribution: use CpgCall.file_path (stamped on every call) -- do NOT rely on CONTAINS_CALL
 alone, it is missing for calls nested inside arrow-functions assigned to object properties.
 `code` on CpgCall is the raw source text of the call.
@@ -44,6 +46,12 @@ CONTAINS_CALL can leave a genuinely reachable call marked unreachable, so never 
 CENTRALITY (precomputed): `centrality` (float 0-1) is the betweenness of the node in the reachable
 call graph -- how many attacker paths funnel through it. A HIGH-centrality node is a chokepoint (a
 shared sanitizer or a shared sink wrapper): a bug there has a large blast radius, so prioritize it.
+RUNTIME (present only after a `--runtime` scan): `executed` (bool) and `hit_count` (int) on
+CpgMethod/CpgCall mean the node ACTUALLY RAN during a live drive of the target -- ground truth that
+OVERRIDES a `reachable_from_entry = false` guess. An OBSERVED_CALL edge is a real caller->callee link
+seen at runtime that the static graph may lack (it fills the arrow-function CONTAINS_CALL gap). But
+ABSENCE is never proof: fuzzing is incomplete, so a node with no `executed` prop may simply not have
+been exercised -- never discard a lead solely because runtime did not reach it.
 
 ATTACKER-CONTROLLED SOURCES (framework-agnostic): a FLOWS_TO self-loop (src == dst) marks a call
 whose own argument is already tainted by an untrusted input -- this is the fast way to find sources
