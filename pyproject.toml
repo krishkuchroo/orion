@@ -6,6 +6,10 @@ requires-python = ">=3.12"
 dependencies = [
     "neo4j>=5.0",
     "fastmcp>=2.0",
+    # Build-time graph analytics (reachability BFS is stdlib, but betweenness centrality and the
+    # structural-dedup clustering use networkx). Orion's Neo4j installs no APOC/GDS, so all graph
+    # algorithms run in Python over the in-memory batch. Present transitively today; pinned direct.
+    "networkx>=3.0",
 ]
 
 [project.optional-dependencies]
@@ -22,7 +26,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["orion", "orion.graph"]
+packages = ["orion", "orion.graph", "orion.runtime"]
 
 [tool.pytest.ini_options]
 # Scope bare `pytest` to Orion's own suite so it never recurses into the gitignored `fixtures/` scan

@@ -23,6 +23,12 @@ class Lead:
     text: str          # human-readable candidate-lead statement
     evidence: str      # the Cypher query result / snippet the discoverer cited
     confidence: Confidence
+    # Structural endpoints, set when the lead is anchored on a precomputed :CandidateFlow (shape A).
+    # Two leads with the same (source_uid, sink_uid) are the SAME flow however differently worded, so
+    # these drive structural dedup (discover._dedup). None for leads with no graph anchor (B/C/D),
+    # which fall back to lexical dedup.
+    source_uid: str | None = None
+    sink_uid: str | None = None
 
 
 @dataclass
@@ -32,6 +38,10 @@ class Verdict:
     decision: Decision
     reason: str
     evidence: str = ""  # what the verifier itself queried or read
+    # Betweenness centrality (0-1) of the lead's sink call, when the lead is anchored on a
+    # :CandidateFlow. A blast-radius signal: report ranking uses it to float a bug on a high-traffic
+    # chokepoint above an equally-decided one in a backwater. 0.0 when unknown.
+    sink_centrality: float = 0.0
 
 
 # A progress event is a plain dict appended one-per-line to the run's JSONL log, and also the

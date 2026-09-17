@@ -23,6 +23,9 @@ NODE_KEY: dict[str, tuple[str, ...]] = {
     "CpgReturn": ("scan_id", "uid"),
     "EntryPoint": ("scan_id", "uid"),
     "Dependency": ("scan_id", "name"),
+    # Precomputed source->sink candidate flows (graph/pathfind.py). Persisted like any other node so
+    # the label-scoped clear/reload + NODE_KEY index apply; agents fetch it via run_cypher.
+    "CandidateFlow": ("scan_id", "uid"),
 }
 
 

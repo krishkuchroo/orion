@@ -80,8 +80,25 @@ def test_report_stable_order_within_same_decision():
     a = Verdict(lead=_lead(5), decision="CONFIRM", reason="r5", evidence="e5")
     b = Verdict(lead=_lead(2), decision="CONFIRM", reason="r2", evidence="e2")
     text = render([a, b])
-    # Same decision -> original lead index order (2 before 5), not insertion order.
+    # Same decision, equal (default 0.0) centrality -> original lead index order (2 before 5).
     assert text.index("lead 2") < text.index("lead 5")
+
+
+def test_report_centrality_breaks_ties_within_decision():
+    # Same decision; the lower-index lead has LOWER centrality, so the blast-radius tiebreak must
+    # float the higher-centrality lead (index 9) above it, overriding index order.
+    backwater = Verdict(lead=_lead(2), decision="CONFIRM", reason="r2", evidence="e2",
+                        sink_centrality=0.05)
+    chokepoint = Verdict(lead=_lead(9), decision="CONFIRM", reason="r9", evidence="e9",
+                         sink_centrality=0.90)
+    text = render([backwater, chokepoint])
+    assert text.index("lead 9") < text.index("lead 2")
+    # But centrality never crosses a decision boundary: a CONFIRM in a backwater still beats a
+    # high-centrality REJECT.
+    hot_reject = Verdict(lead=_lead(1), decision="REJECT", reason="r1", evidence="e1",
+                         sink_centrality=0.99)
+    text2 = render([hot_reject, backwater])
+    assert text2.index("[CONFIRM]") < text2.index("[REJECT]")
 
 
 def test_monitor_roundtrip(tmp_path):

@@ -131,6 +131,18 @@ def _run_scan(args: argparse.Namespace) -> int:
         from .graph import profiles
         profile = profiles.select_profile(args.repo)
 
+    # Opt-in runtime enrichment (--runtime): EXECUTE the target and fold observed coverage back into
+    # the graph before discovery reads it. Best-effort by contract -- a failure is an event, never an
+    # abort, and it only ADDS props/edges (never touches NODE_KEY labels), so the static graph and its
+    # FLOWS_TO parity are untouched. Needs a repo checkout to boot/build; skipped on --scan-id only.
+    if getattr(args, "runtime", False):
+        if args.repo:
+            from . import runtime
+            runtime.enrich(scan_id, args.repo, profile, on_event, budget=args.runtime_budget)
+        else:
+            on_event(_event("runtime", "warn",
+                            detail="--runtime needs a repo checkout to execute; skipped on --scan-id"))
+
     def _pipeline():
         # Size the per-shape discovery timeout to the graph: a bigger graph is a bigger search space
         # and needs longer sweeps (see config.discover_timeout). Sizing is best-effort -- if the
@@ -214,6 +226,12 @@ def main(argv: list[str] | None = None) -> int:
     scan.set_defaults(stream=True)
     scan.add_argument("--queue-size", dest="queue_size", type=int, default=64,
                       help="functions held in flight by the streaming build (default 64)")
+    scan.add_argument("--runtime", action="store_true",
+                      help="EXECUTES the target: after the static build, boot/build and drive it to "
+                           "enrich the graph with observed coverage (executed/hit_count + OBSERVED_CALL). "
+                           "Off by default; runs on the host.")
+    scan.add_argument("--runtime-budget", dest="runtime_budget", type=int, default=200,
+                      help="max inputs the runtime fuzz loop drives (default 200)")
 
     idx = sub.add_parser("index-exploits",
                          help="build/refresh the global Metasploit exploit-reference corpus (one-time)")

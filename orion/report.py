@@ -17,12 +17,15 @@ _ORDER = {"CONFIRM": 0, "INCONCLUSIVE": 1, "REJECT": 2, "ERROR": 3}
 
 
 def render(verdicts: list[Verdict]) -> str:
-    """A ranked, evidence-cited text report. Confirmed leads sort first; within a decision,
-    leads keep their original index order. Each entry shows the lead's shape tag, confidence,
-    the verifier's decision and reason, and both pieces of evidence -- the lead's own citation
-    and whatever the verifier itself queried or read.
+    """A ranked, evidence-cited text report. Confirmed leads sort first; within a decision, a bug on
+    a higher-centrality (larger blast-radius) sink ranks above one in a backwater, and ties fall back
+    to the original lead index for stable output. Each entry shows the lead's shape tag, confidence,
+    the verifier's decision and reason, and both pieces of evidence -- the lead's own citation and
+    whatever the verifier itself queried or read.
     """
-    ranked = sorted(verdicts, key=lambda v: (_ORDER.get(v.decision, 9), v.lead.index))
+    ranked = sorted(
+        verdicts,
+        key=lambda v: (_ORDER.get(v.decision, 9), -getattr(v, "sink_centrality", 0.0), v.lead.index))
 
     counts: dict[str, int] = {}
     for v in ranked:

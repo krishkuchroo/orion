@@ -7,8 +7,21 @@ from memory), and a separate verifier agent independently confirms each lead bef
 
 The goal is recall on an arbitrary codebase that a fixed rule catalog cannot reach, without the
 false-positive flood. On the OWASP NodeGoat benchmark Orion finds 14 of 15 vulnerabilities at zero
-false positives, where a deterministic catalog scanner finds none. (The 15th, "components with known
-vulnerabilities," needs a CVE feed the current graph does not carry.)
+false positives, scored by `scripts/run_nodegoat_eval.py` against the ground truth in
+`tests/ground_truth_nodegoat.py`. (The 15th, "components with known vulnerabilities," needs a CVE
+feed the current graph does not carry.)
+
+> **On comparisons:** a head-to-head against a deterministic scanner (Semgrep or CodeQL run on the
+> same NodeGoat checkout and scored through the same matcher) is the honest way to show Orion reaches
+> bugs a fixed rule catalog cannot. That baseline is **not committed yet**, so this README does not
+> claim a number for it — the claim above is only what Orion's own eval measures.
+
+It is not benchmark-only. Orion has been run end to end against **real third-party code it had never
+seen** — a full scan of the TypeScript project [`pensarai/apex`](https://github.com/pensarai/apex)
+(a 160,814-node / 339,405-edge graph) surfaced 5 confirmed vulnerabilities (including a HIGH shell
+command injection) and correctly rejected a false positive. **The complete, unedited output of that
+run is committed under [`examples/`](examples/) so the evidence survives a clone** — read
+`examples/apex/report.log` for the full build timings, live event stream, and ranked report.
 
 ## The one rule that makes it trustworthy
 
@@ -28,6 +41,15 @@ Three layers:
    8-node, 5-edge schema in Neo4j: `CpgFile`, `CpgMethod`, `CpgCall`, `CpgModule`, `CpgParameter`,
    `CpgReturn`, `EntryPoint`, `Dependency`, with `CONTAINS_CALL`, `RESOLVES_TO`, `DEFINED_IN`,
    `FLOWS_TO`, and `ENTERS_AT` edges. Every node and edge carries a `scan_id` for scan isolation.
+   The build is **streaming by default** (`graph/stream_build.py`): it assembles the graph per
+   function from `cpg.bin` instead of materializing Joern's whole-graph JSON export (which is ~85×
+   larger and OOMs on big repos), so it scales to large real-world codebases; `--no-stream` reverts
+   to the legacy export. A final build-time pass (`graph/reachability.py`) runs a multi-source BFS
+   from the `EntryPoint` methods and stamps `reachable_from_entry` and `hop_distance` onto every
+   `CpgMethod` and `CpgCall`, so discovery can prioritize attacker-reachable code and the verifier
+   gets an exploitability signal (a sink no entry point can reach is usually not exploitable). The
+   same pass stamps `centrality` — betweenness over the reachable call graph — so chokepoint
+   functions (shared sanitizers, shared sink wrappers) with the largest blast radius surface first.
 2. **Orchestration.** `discover.discover` fans out four discovery "shapes" concurrently (A data-flow,
    B absent-control, C disabled or reverted fix, D pattern and dependency). Each shape is a single
    `claude -p` session that calls the read-only MCP tools `run_cypher`, `semantic_search`, and
@@ -84,7 +106,7 @@ A full run has four prerequisites. Install them once, then any scan is a single 
 ### 2. Clone Orion
 
 ```bash
-git clone https://github.com/krishkuchroo/orion.git
+git clone https://github.com/lutherleo/orion.git
 cd orion
 ```
 
@@ -157,6 +179,35 @@ with a prebuilt `cpg.bin` under `fixtures/NodeGoat/` to run the build and evalua
 This prints an N-of-15 recall table matched against `tests/ground_truth_nodegoat.py`, plus any
 confirmed findings that match no ground-truth item (false-positive candidates).
 
+## Open-weight study (in progress — no results yet)
+
+Branch `eval/open-weight-study` tests one research claim: **a free open-weight model running inside
+Orion finds real vulnerabilities in large codebases as well as or better than frontier models working
+alone, and at lower cost.** The claim is set up so it can fail; whatever the runs show gets reported.
+Full design: `docs/superpowers/specs/2026-09-17-open-weight-eval-design.md`.
+
+| Arm | Model | Harness |
+|---|---|---|
+| `orion-gemma4` | Gemma 4 (Ollama) | Orion |
+| `orion-gptoss20b` | gpt-oss-20b (Ollama) | Orion |
+| `plain-gemma4` | Gemma 4 (Ollama) | Claude Code, no graph — isolates what the graph adds |
+| `plain-sonnet5` | Claude Sonnet 5, xhigh effort | Claude Code |
+| `plain-opus5` | Claude Opus 5, xhigh effort | Claude Code |
+| `plain-gpt` | GPT-5.6 Sol | Codex CLI |
+
+- **Dataset:** large JavaScript/TypeScript, Python and Java repositories checked out at the commit
+  before a real security fix. Headline vulnerabilities must have both the advisory and the fix commit
+  dated after 2026-05-31, the latest training cutoff among the models. Candidates:
+  `eval/dataset/candidates.tsv` (not yet the locked manifest).
+- **Protocol:** 3 runs per arm per repo, run sequentially (local arms first, then frontier). The
+  arms, dataset manifest, prompt and matching rule are frozen with a git tag before the first scored
+  run.
+- **What this branch produces:** raw run data only — findings, tokens, context use, time, memory and
+  failures, indexed in a queryable SQLite log (`eval/runs.db`).
+- **Scoring is separate.** Matching findings to the answer key, cost per bug caught, confidence
+  intervals and human labeling of unmatched findings are built in a separate session over the
+  recorded data. Until then this section claims no numbers.
+
 ## Layout
 
 ```
@@ -169,7 +220,9 @@ orion/
     profiles.py       language and framework profiles: the one place framework knowledge lives
     deps.py           manifest to Dependency nodes (package.json, requirements, pom, go.mod)
     schema.py         canonical node and edge identity plus the batched writer
-    persist.py        atomic clear-and-load into Neo4j
+    persist.py        chunked, parallel clear-and-load into Neo4j
+    stream_build.py   streaming per-function graph build (default; avoids the 85x export blob)
+    taint_summary.py  summary-stitch taint that reproduces collapse_flows byte-for-byte
   graph_build.py   build orchestration to scan_id
   mcp_server.py    FastMCP server exposing run_cypher, semantic_search, get_schema (all read-only)
   claude_cli.py    headless claude -p driver (MCP, retries with backoff, diagnostics salvage)
@@ -181,6 +234,10 @@ orion/
   monitor.py       live progress log plus the --watch tail
   cli.py           orion scan <repo>
 scripts/run_nodegoat_eval.py   full-pipeline recall harness against the 15-vuln ground truth
+examples/        real, committed scan output (apex run: report.log, findings.json, reverify.json, FINDINGS.md)
+bench/           side-by-side scan helpers (reverify.py, scan.sh, scan_watch.py)
+docs/            design specs and plans (docs/superpowers/), session notes (docs/notes/)
+agenda.md        forward-looking work, baseline comparison first
 ```
 
 ## Testing

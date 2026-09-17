@@ -1,0 +1,18 @@
+{
+  "target": "fixtures/NodeGoat @ c5cb68a",
+  "scan_id": "272baff2960fde92c265b14152842a3f3a41d6f2",
+  "command": "orion scan fixtures/NodeGoat --runtime  (host-run; mongo on localhost:27017, seeded)",
+  "driver": "HttpDriver + V8Tracer (NODE_V8_COVERAGE + --cpu-prof)",
+  "budget_inputs": 80,
+  "seeds_from_graph": 18,
+  "observed": {"covered_lines": 63, "call_frames": 4},
+  "metric": {
+    "calls_marked": 106,
+    "methods_marked": 54,
+    "observed_edges": 4,
+    "novel_edges": 2,
+    "unreachable_executed": 123,
+    "dropped": {"coverage_no_call": 13, "coverage_no_method": 0, "edge_unresolved": 0}
+  },
+  "note": "Snapshot of one --runtime run. Runtime evidence varies run to run (fuzzing is non-deterministic across boots), so this is NOT bit-reproducible; re-running produces the same shape, not the same integers."
+}

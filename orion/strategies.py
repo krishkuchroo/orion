@@ -14,22 +14,44 @@ from __future__ import annotations
 # CpgCall.code for the raw source text of a call.
 SCHEMA = """Schema-of-record (every node and every relationship carries `scan_id`):
   (:CpgFile      {scan_id, uid, file_path})
-  (:CpgMethod    {scan_id, full_name, name, is_external, file_path, line})
-  (:CpgCall      {scan_id, uid, name, code, method_full_name, file_path, line, column})
+  (:CpgMethod    {scan_id, full_name, name, is_external, file_path, line, reachable_from_entry, hop_distance, centrality})
+  (:CpgCall      {scan_id, uid, name, code, method_full_name, file_path, line, column, reachable_from_entry, hop_distance, centrality})
   (:CpgModule    {scan_id, import_name, language})
   (:CpgParameter {scan_id, uid, name, index})
   (:CpgReturn    {scan_id, uid})
   (:EntryPoint   {scan_id, uid, method_full_name, exposure, kind})   -- attacker-reachable entry methods
   (:Dependency   {scan_id, name, version})                           -- declared third-party deps
+  (:CandidateFlow {scan_id, uid, source_uid, sink_uid, sink_category, path_uids, rank})
+     -- PRECOMPUTED source->sink taint paths, ranked (rank 0 = best). source_uid/sink_uid are CpgCall
+        uids; path_uids is a JSON array of the CpgCall uids along the flow; sink_category is the sink
+        kind (code_exec/sql/nosql/redirect/...). Triage these FIRST (see shape A).
 Edges (relationship properties also carry scan_id):
   (:CpgMethod)-[:CONTAINS_CALL]->(:CpgCall)
   (:CpgCall)-[:RESOLVES_TO]->(:CpgMethod)
   (:CpgMethod)-[:DEFINED_IN]->(:CpgFile)
   (:CpgCall)-[:FLOWS_TO {arg_index}]->(:CpgCall)      -- taint dataflow, reliable
   (:EntryPoint)-[:ENTERS_AT]->(:CpgMethod)
+  (:CpgMethod)-[:OBSERVED_CALL {hits}]->(:CpgMethod)  -- a caller->callee pair SEEN AT RUNTIME (only
+                                                         present after a --runtime scan)
 File attribution: use CpgCall.file_path (stamped on every call) -- do NOT rely on CONTAINS_CALL
 alone, it is missing for calls nested inside arrow-functions assigned to object properties.
 `code` on CpgCall is the raw source text of the call.
+
+REACHABILITY (precomputed): `reachable_from_entry` (bool) and `hop_distance` (int; 0 = an entry
+method itself, -1 = not reached) are stamped on every CpgMethod/CpgCall by a build-time BFS from the
+:EntryPoint methods. A sink with `reachable_from_entry = false` usually cannot be driven by attacker
+input. Treat this as a PRIORITY HINT, not a hard filter: the same arrow-function gap that breaks
+CONTAINS_CALL can leave a genuinely reachable call marked unreachable, so never discard a lead on
+`reachable_from_entry` alone.
+CENTRALITY (precomputed): `centrality` (float 0-1) is the betweenness of the node in the reachable
+call graph -- how many attacker paths funnel through it. A HIGH-centrality node is a chokepoint (a
+shared sanitizer or a shared sink wrapper): a bug there has a large blast radius, so prioritize it.
+RUNTIME (present only after a `--runtime` scan): `executed` (bool) and `hit_count` (int) on
+CpgMethod/CpgCall mean the node ACTUALLY RAN during a live drive of the target -- ground truth that
+OVERRIDES a `reachable_from_entry = false` guess. An OBSERVED_CALL edge is a real caller->callee link
+seen at runtime that the static graph may lack (it fills the arrow-function CONTAINS_CALL gap). But
+ABSENCE is never proof: fuzzing is incomplete, so a node with no `executed` prop may simply not have
+been exercised -- never discard a lead solely because runtime did not reach it.
 
 ATTACKER-CONTROLLED SOURCES (framework-agnostic): a FLOWS_TO self-loop (src == dst) marks a call
 whose own argument is already tainted by an untrusted input -- this is the fast way to find sources
@@ -57,14 +79,23 @@ never confirmed findings -- a separate, independent verifier (a different sessio
 transcript) will re-derive each lead from the graph and real source before anything is reported."""
 
 _SHAPE_TEXT: dict[str, str] = {
-    "A": """YOUR SHAPE: A -- DATA FLOW. Attacker input reaches a dangerous operation. Start from the
-attacker-controlled sources (the FLOWS_TO self-loops, and the parameters of :EntryPoint methods),
-follow FLOWS_TO edges outward, read CpgCall.code, and look for a template/query/exec/redirect/
-fetch/log call built from unsanitized input. A FLOWS_TO self-loop (src == dst) marks a call whose
+    "A": """YOUR SHAPE: A -- DATA FLOW. Attacker input reaches a dangerous operation.
+START WITH THE PRECOMPUTED SHORTLIST: query the :CandidateFlow nodes ranked best-first
+  MATCH (cf:CandidateFlow {scan_id:$scan_id}) RETURN cf.rank, cf.sink_category, cf.source_uid,
+    cf.sink_uid, cf.path_uids ORDER BY cf.rank
+and for EACH, read the source + sink CpgCall.code (the uids are CpgCall.uid) and decide whether it is
+a real vulnerable flow -- you are JUDGING concrete candidates, not exploring a graph. The path_uids
+array is the tainted chain to inspect. Only after triaging the shortlist should you fall back to
+walking FLOWS_TO by hand from the sources (the FLOWS_TO self-loops, and the parameters of
+:EntryPoint methods) to catch flows the precompute missed; read CpgCall.code and look for a
+template/query/exec/redirect/fetch/log call built from unsanitized input. A FLOWS_TO self-loop (src == dst) marks a call whose
 own argument is already tainted by an untrusted input -- a fast, cheap place to start your sweep.
 This is framework-agnostic: in a JS/Express app the sources look like req.body.*/req.query.*; in
 another stack they are the entry method's parameters -- the self-loops and EntryPoint nodes find
-them either way.""",
+them either way. Prefer calls with `reachable_from_entry = true` and low `hop_distance` (they sit on
+a real attacker path); a sink no EntryPoint reaches is usually not exploitable -- but this is a
+priority hint, not a filter (the arrow-function CONTAINS_CALL gap can mislabel reachable code), so
+still look at an unreachable-but-dangerous sink, just rank it lower.""",
     "B": """YOUR SHAPE: B -- ABSENCE OF A CONTROL. Nothing "flows"; the bug is a missing or
 disabled protection. Enumerate the standard protections an app like this should have (CSRF
 tokens on state-changing routes, security headers, output escaping, encryption of sensitive
@@ -108,6 +139,11 @@ LEADS_JSON_SCHEMA: dict = {
                     "text": {"type": "string"},
                     "evidence": {"type": "string"},
                     "confidence": {"type": "string", "enum": ["LOW", "MEDIUM", "HIGH"]},
+                    # When this lead came from triaging a :CandidateFlow, echo its endpoints (the
+                    # source/sink CpgCall uids) so identical flows collapse in dedup. Omit for leads
+                    # with no graph anchor.
+                    "source_uid": {"type": "string"},
+                    "sink_uid": {"type": "string"},
                 },
                 "required": ["shape", "text", "evidence", "confidence"],
             },
