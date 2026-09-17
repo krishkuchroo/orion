@@ -18,9 +18,29 @@ this session (the earlier "nothing committed" rule lifted at Love Kush's request
 
 ## Open-weight study (branch `eval/open-weight-study`, started 2026-09-17)
 
-Design of record: `docs/superpowers/specs/2026-09-17-open-weight-eval-design.md`. Claim under test:
-open-weight model + Orion ≥ frontier models alone on real post-cutoff CVEs in large repos, at lower
-cost. Rules for working on it:
+Design of record: `docs/superpowers/specs/2026-09-17-open-weight-eval-design.md`; implementation plan:
+`docs/superpowers/plans/2026-09-17-open-weight-eval.md`. Claim under test: open-weight model + Orion ≥
+frontier models alone on real post-cutoff CVEs in large repos, at lower cost.
+
+**Build status (2026-09-17):** the harness code is DONE and pushed to `krish/eval/open-weight-study`
+(Tasks 1–14). It lives in a standalone `eval/` package (orion/ untouched); **44 tests green** via
+`./.venv/bin/pytest eval/tests -q`. Bare `pytest` still scopes to orion's own `tests/` (testpaths),
+so `eval/` does not interfere. Built: run log (`eval/db.py`: runs/events/agent_calls/resources +
+`failures` view), usage/resource capture (`eval/usage.py`, `eval/resources.py`), the `claude`
+usage-shim (`eval/shim/claude` + `eval/shim_setup.py` — tees stream-json to per-run `usage.jsonl`,
+since Orion's `--json` carries no token usage), dataset tier checker + fix-commit enricher
+(`eval/dataset/`), frozen plain-agent prompt/schema (`eval/arms/prompt.py`), Orion verdict capture on
+the REAL contract (`eval/convert.py`: `decision`/`reason`/`lead.text`, NOT the fictional
+`verdict`/`lead.file`), env wiring + arm drivers (`eval/arms/{env,launch,plain}.py`), queue/preflight/
+runner (`eval/{queue,preflight,run}.py`). **Not yet done (needs models/dataset):** Phase 0 smoke test,
+the frozen `eval/dataset/manifest.json` with answer keys, the `eval-prereg-v1` tag, and the runs.
+
+**Matching rule (frozen 2026-09-17):** caught = same file AND (function-name match OR line within the
+patched range ±10); caught-right-type also needs same CWE family. Deterministic matcher first, LLM
+judge only for location-less findings (validated vs Krish's labels on ≥100). Applied in the SEPARATE
+scoring session, not this branch.
+
+Rules for working on it:
 
 - **Research data: never fabricate, estimate, or backfill a number.** If a tool doesn't report
   something machine-readably, it is recorded as missing, not guessed. Report results either way.
@@ -39,9 +59,13 @@ cost. Rules for working on it:
 - **Pre-registration:** arms, manifest + answer keys, plain-agent prompt/schema, matching rule and
   hypotheses are frozen by tag `eval-prereg-v1` before the first scored run; changes need a new tag
   and a dated reason in `eval/CHANGELOG.md`.
-- **Scoring and human labeling are NOT built on this branch.** They are written in a separate
-  session against `eval/runs.db` + `eval/runs/` + the manifest. This branch only has to capture
-  everything they need.
+- **Scoring and labeling are NOT built on this branch.** They are written in a separate session
+  against `eval/runs.db` + `eval/runs/` + the manifest; labeling = Krish + an LLM judge. This branch
+  only has to capture everything they need. GOTCHA: Orion emits FREE-TEXT findings (file/line only as
+  prose in `lead.text`), plain agents emit STRUCTURED `findings.json` — the two shapes are captured
+  verbatim and reconciled only at scoring (the `scripts/run_nodegoat_eval.py` substring+keyword way).
+- **Exploits are deferred** to a later, separate study (task change + memory cost on 16 GB). No
+  exploit code here; `candidates.tsv`/`manifest.json` are kept as the vulnerability catalog for it.
 - Open-weight wiring: `ANTHROPIC_BASE_URL` → Ollama, `ORION_MODEL` = Ollama tag, and
   `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL` = same tag so fp-check's nested subagents don't
   escape to Anthropic. Unproven until the Phase 0 NodeGoat gate passes; llama.cpp `llama-server` is
