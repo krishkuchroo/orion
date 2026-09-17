@@ -91,16 +91,24 @@ The patched commit is also checked out (needed later for the "still reported aft
 ## 4. Machine and memory plan
 
 All local arms run on the study machine: **MacBook Pro, Apple M4, 16 GB unified memory**, macOS.
-Joern, Neo4j and a 13+ GB model cannot all be in memory at once, so each Orion run is phased:
+Joern (a JVM whose heap defaults to 0.75×RAM ≈ 12 GB, `config.py:26`) and a 13+ GB model cannot both
+be resident. The key structural fact (confirmed in `cli.py:_run_scan`): **Joern runs as a subprocess
+that exits when the build returns, and only then does discovery start the model.** They are sequential
+within one `orion scan`, not concurrent. So the memory plan is configuration, not process surgery:
 
-1. **Build** — Ollama stopped. Joern builds the graph (streaming build) into Neo4j. The embedding
-   index uses the same setting for every repo (decided in Phase 0: CPU index or `--no-semantic`).
-2. **Reason** — Joern gone; Neo4j kept with a capped heap (~2 GB); Ollama loads the model; discovery
-   then verification run.
+1. **Cap the Joern heap** — set `ORION_JOERN_HEAP_GB` to a fixed modest value (Phase 0 picks it, start
+   ~7) so the build fits under 16 GB instead of claiming 12 GB.
+2. **Keep the model from being resident during build** — set `OLLAMA_KEEP_ALIVE=0` so Ollama unloads
+   the model when idle; it loads on discovery's first request, after Joern has exited.
+3. **Cap Neo4j** — Orion's Neo4j container heap capped (~2 GB) in `docker-compose.yml`.
 
-The graph is built once per repo and reused by all three runs of both Orion arms (the build is
-deterministic). Build time and memory are still recorded and counted into every Orion run's cost.
-Plain-agent arms skip phase 1. Peak RSS is sampled for every phase.
+**Graph reuse (spec-critical).** The graph is model-independent, so it is built **once per repo** and
+reused by every later Orion run via `orion scan --scan-id <id>` (which skips the build entirely,
+`cli.py:70,107-110`). The harness captures the `scan_id:` line Orion prints on the first build
+(`cli.py:79`) and passes `--scan-id` for the other 5 Orion runs of that repo (2 arms × 3 runs − 1
+build). This removes 5 of every 6 Joern builds — the largest single memory and time cost — and is what
+makes the 16 GB target feasible. Build time/memory are recorded on the one build run and attributed to
+it. Plain-agent arms never build. Peak RSS is sampled for every run.
 
 ## 5. Harness (what gets built on this branch)
 
@@ -128,7 +136,16 @@ per model. The agent runs in the repo checkout with read/search tools and no net
                "cwe": "CWE-", "title": "", "explanation": ""}]}
 ```
 
-Orion's confirmed verdicts are converted to the same shape, so all arms are scored identically later.
+**Output-shape asymmetry (important).** Orion does **not** emit structured location fields. Its `--json`
+output is a list of `Verdict` dicts (`contracts.py:18-45`): `decision` (`CONFIRM`/`REJECT`/…), `reason`,
+and a nested `lead` with only `text`/`evidence` free-text — file/line/CWE appear only as prose inside
+that text (see `examples/apex/findings.json`). So the two arm families produce genuinely different
+shapes and this branch does **not** force them into one. The harness captures each verbatim: plain arms'
+`findings.json` as-is, Orion's `--json` verdicts as-is (with a thin CONFIRM filter that preserves the
+real fields, never inventing structured ones). Reconciling the two for scoring — extracting file/line
+from Orion's prose (the approach `scripts/run_nodegoat_eval.py` already uses: substring + class-keyword
+matching over the lead's free text) and flattening the plain arms' fields to comparable text — is the
+separate scoring session's job (§8), not this branch's.
 
 ### 5.3 Runner
 
@@ -164,8 +181,13 @@ Recorded by this branch, straight from the tools' own output. Nothing here is co
 
 - **Findings:** each arm's `findings.json` (and Orion's full verdicts incl. REJECT/INCONCLUSIVE/ERROR,
   so "lost at discovery vs. killed by verifier vs. lost to errors" can be computed later).
-- **Tokens:** input, output, cache-read, cache-write per agent call, split discovery vs. verification
-  (Claude Code `usage`/`modelUsage`; Codex `turn.completed`; Ollama usage through Claude Code).
+- **Tokens:** input, output, cache-read, cache-write per agent call. **Orion's `--json` does NOT carry
+  usage** — Orion parses Claude's stream-json internally and discards it (`claude_cli.py`). To capture
+  it without modifying `orion/`, the harness puts a **`claude` wrapper shim** first on `PATH` for the
+  Orion and plain-Claude arms: the shim `tee`s each call's stream-json (which contains the `result`
+  usage block) to a per-run `usage.jsonl`, then passes stdout through unchanged (`set -o pipefail` so
+  Orion still sees the real exit code). This also covers the plain-Claude arms uniformly. Codex reports
+  usage directly via `codex exec --json` `turn.completed`. If a field is absent it is stored `NULL`.
 - **Context:** peak tokens per session, the model's configured window, turns used vs. allowed,
   sessions ending at the context limit.
 - **Time and memory:** wall-clock per phase, peak RSS per phase, graph nodes/edges, LOC.
