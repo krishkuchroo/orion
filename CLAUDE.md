@@ -16,6 +16,39 @@ ambiguity warning landed this session. Validated beyond NodeGoat: a full PyGoat 
 confirmed 20 findings incl. 6 known-vuln deps, no framework-specific tuning. First commit to `main`
 this session (the earlier "nothing committed" rule lifted at Love Kush's request).
 
+## Open-weight study (branch `eval/open-weight-study`, started 2026-09-17)
+
+Design of record: `docs/superpowers/specs/2026-09-17-open-weight-eval-design.md`. Claim under test:
+open-weight model + Orion ≥ frontier models alone on real post-cutoff CVEs in large repos, at lower
+cost. Rules for working on it:
+
+- **Research data: never fabricate, estimate, or backfill a number.** If a tool doesn't report
+  something machine-readably, it is recorded as missing, not guessed. Report results either way.
+- **Six arms, fixed:** `orion-gemma4`, `orion-gptoss20b` (Ollama; discovery AND verifier on the
+  open-weight model), `plain-gemma4` (graph ablation), `plain-sonnet5` / `plain-opus5` (Claude Code,
+  xhigh), `plain-gpt` (Codex, GPT-5.6 Sol). Orion is only used with open-weight models; Codex only
+  with GPT. No Qwen (no published cutoff), no Gemini (not open-weight), no Go repos.
+- **Dataset rule:** headline CVEs need advisory AND fix commit after 2026-05-31 (latest cutoff =
+  Opus 5, May 2026), a localized fix (≤10 non-test files, one bug), and vulnerable code in JS/TS,
+  Python or Java. Otherwise → control tier (possibly memorized) or scale tier (won't build on 16 GB).
+- **Machine:** MacBook Pro M4, 16 GB. Orion runs are phased: build the graph with Ollama stopped,
+  then reason with Joern gone and Neo4j heap capped. Don't load Joern and the model together.
+- **Protocol:** 3 runs per arm per repo, sequential (arms 1→2→3, then 4→5→6); no time budget, a run
+  is `hung` only after 60 min with no progress event. Every run writes to `eval/runs.db` (SQLite;
+  `failures` view) plus raw artifacts under `eval/runs/<arm>/<repo>/<run>/`.
+- **Pre-registration:** arms, manifest + answer keys, plain-agent prompt/schema, matching rule and
+  hypotheses are frozen by tag `eval-prereg-v1` before the first scored run; changes need a new tag
+  and a dated reason in `eval/CHANGELOG.md`.
+- **Scoring and human labeling are NOT built on this branch.** They are written in a separate
+  session against `eval/runs.db` + `eval/runs/` + the manifest. This branch only has to capture
+  everything they need.
+- Open-weight wiring: `ANTHROPIC_BASE_URL` → Ollama, `ORION_MODEL` = Ollama tag, and
+  `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL` = same tag so fp-check's nested subagents don't
+  escape to Anthropic. Unproven until the Phase 0 NodeGoat gate passes; llama.cpp `llama-server` is
+  the fallback.
+- Git: `origin` (lutherleo/orion) was unreachable on 2026-09-17; this branch is cut from local
+  `Dante` and pushed to `krish`.
+
 ## Working agreement (how Love Kush wants to build)
 
 - Build in three layers, in order: **Build** (the graph) → **Orchestration** (the agents) →

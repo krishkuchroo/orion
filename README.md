@@ -179,6 +179,35 @@ with a prebuilt `cpg.bin` under `fixtures/NodeGoat/` to run the build and evalua
 This prints an N-of-15 recall table matched against `tests/ground_truth_nodegoat.py`, plus any
 confirmed findings that match no ground-truth item (false-positive candidates).
 
+## Open-weight study (in progress — no results yet)
+
+Branch `eval/open-weight-study` tests one research claim: **a free open-weight model running inside
+Orion finds real vulnerabilities in large codebases as well as or better than frontier models working
+alone, and at lower cost.** The claim is set up so it can fail; whatever the runs show gets reported.
+Full design: `docs/superpowers/specs/2026-09-17-open-weight-eval-design.md`.
+
+| Arm | Model | Harness |
+|---|---|---|
+| `orion-gemma4` | Gemma 4 (Ollama) | Orion |
+| `orion-gptoss20b` | gpt-oss-20b (Ollama) | Orion |
+| `plain-gemma4` | Gemma 4 (Ollama) | Claude Code, no graph — isolates what the graph adds |
+| `plain-sonnet5` | Claude Sonnet 5, xhigh effort | Claude Code |
+| `plain-opus5` | Claude Opus 5, xhigh effort | Claude Code |
+| `plain-gpt` | GPT-5.6 Sol | Codex CLI |
+
+- **Dataset:** large JavaScript/TypeScript, Python and Java repositories checked out at the commit
+  before a real security fix. Headline vulnerabilities must have both the advisory and the fix commit
+  dated after 2026-05-31, the latest training cutoff among the models. Candidates:
+  `eval/dataset/candidates.tsv` (not yet the locked manifest).
+- **Protocol:** 3 runs per arm per repo, run sequentially (local arms first, then frontier). The
+  arms, dataset manifest, prompt and matching rule are frozen with a git tag before the first scored
+  run.
+- **What this branch produces:** raw run data only — findings, tokens, context use, time, memory and
+  failures, indexed in a queryable SQLite log (`eval/runs.db`).
+- **Scoring is separate.** Matching findings to the answer key, cost per bug caught, confidence
+  intervals and human labeling of unmatched findings are built in a separate session over the
+  recorded data. Until then this section claims no numbers.
+
 ## Layout
 
 ```
