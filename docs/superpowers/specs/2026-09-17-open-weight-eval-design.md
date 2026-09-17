@@ -179,8 +179,19 @@ Recorded by this branch, straight from the tools' own output. Nothing here is co
 Built later, in a separate session, over `eval/runs.db` + `eval/runs/` + the manifest:
 matching findings to the answer key (caught; caught with the right type; missed), "still reported on
 the patched commit", consistency across the 3 runs, cost per bug caught, confidence intervals, and
-blinded human labeling of unmatched findings with inter-rater agreement. This branch only guarantees
-that everything those need is captured.
+labeling of unmatched findings. Labeling is **the user (Krish) plus an LLM judge**, with the judge
+validated against Krish's labels on ≥ 100 findings and the validation disclosed. This branch only
+guarantees that everything those need is captured.
+
+### 8a. Deferred: exploit validation (NOT in this study)
+
+Exploit execution was considered and **postponed to a later, separate study** — it changes the task,
+needs each app stood up with its data on a machine larger than the 16 GB study Mac, and would have to
+apply to every arm to stay fair. Nothing in this branch runs exploits. What this branch does do is
+**keep the record needed to start that study later**: `eval/dataset/candidates.tsv` (and, once locked,
+`manifest.json`) is the catalog of every real vulnerability with its repo, fix commit and location, so
+a future exploit tier can pick from it without re-mining. Recall here stays location-based; an exploit
+tier would only *upgrade* a location match to "provably exploitable," never replace it.
 
 ## 9. Pre-registration (to finalize together before any scored run)
 
