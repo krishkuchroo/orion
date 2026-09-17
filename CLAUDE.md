@@ -46,8 +46,9 @@ cost. Rules for working on it:
   `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL` = same tag so fp-check's nested subagents don't
   escape to Anthropic. Unproven until the Phase 0 NodeGoat gate passes; llama.cpp `llama-server` is
   the fallback.
-- Git: `origin` (lutherleo/orion) was unreachable on 2026-09-17; this branch is cut from local
-  `Dante` and pushed to `krish`.
+- Git: the study's home is **`krish` = github.com/krishkuchroo/orion** (branch
+  `eval/open-weight-study`, cut from local `Dante`). `origin` (lutherleo/orion) was unreachable on
+  2026-09-17; work and push to `krish`, not `origin`.
 
 ## Working agreement (how Love Kush wants to build)
 
