@@ -717,43 +717,65 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 
 ---
 
-### Task 7: Orion-verdict → findings.json converter
+### Task 7: Orion-verdict capture (REAL schema — no invented fields)
 
 **Files:**
 - Create: `eval/convert.py`
 - Test: `eval/tests/test_convert.py`
 
+**CRITICAL — verified against `orion/contracts.py:18-45` and `examples/apex/findings.json`:** Orion's
+`--json` output is `[dataclasses.asdict(Verdict)…]`. A `Verdict` has `decision` (NOT `verdict`),
+`reason` (NOT `verdict_reason`), `evidence`, `sink_centrality`, and a nested `lead`. A `Lead` has
+`index, shape, text, evidence, confidence, source_uid, sink_uid` — **there is NO `file`, `function`,
+`line_start`, `line_end`, `cwe`, or `title`.** Location/CWE live only as prose in `lead.text`. This
+task therefore preserves the real fields and never fabricates structured ones. Extracting location from
+the prose is the separate scoring session's job (spec §5.2, §8).
+
 **Interfaces:**
-- Consumes: Orion's `--json` verdict output shape and `prompt.validate_findings`.
+- Consumes: Orion's real `--json` verdict list.
 - Produces:
-  - `convert.orion_to_findings(verdicts: list[dict]) -> dict` — keeps only `verdict == "CONFIRM"` items and maps each to the plain-agent finding shape, so every arm is scored from the same structure. Orion verdict fields used: `lead.file`, `lead.function`, `lead.line_start`, `lead.line_end`, `lead.cwe` (fallback `""`), `lead.title`, `verdict_reason`→`explanation`. Missing numeric fields become `0`, missing strings `""`. Output passes `prompt.validate_findings`.
+  - `convert.confirmed_verdicts(verdicts: list[dict]) -> list[dict]` — returns the items with
+    `decision == "CONFIRM"`, each as `{"decision","reason","evidence","sink_centrality","text",
+    "text_evidence"}` where `text` = `lead.text`, `text_evidence` = `lead.evidence`. Nothing invented;
+    missing keys become `""`/`0.0`.
+  - `convert.load(path: str) -> list[dict]` — reads the `--json` file; returns `[]` if it is absent
+    (a crashed/hung Orion run may never write it) rather than raising.
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
 # eval/tests/test_convert.py
+import json
 from eval import convert
-from eval.arms import prompt
 
-def test_keeps_only_confirms_and_maps_shape():
-    verdicts = [
-        {"verdict": "CONFIRM", "verdict_reason": "tainted path reaches exec",
-         "lead": {"file": "a.ts", "function": "run", "line_start": 10, "line_end": 12,
-                  "cwe": "CWE-78", "title": "cmd injection"}},
-        {"verdict": "REJECT", "lead": {"file": "b.ts", "function": "x"}},
-    ]
-    out = convert.orion_to_findings(verdicts)
-    assert len(out["findings"]) == 1
-    f = out["findings"][0]
-    assert f["file"] == "a.ts" and f["cwe"] == "CWE-78" and f["line_start"] == 10
-    assert prompt.validate_findings(out) == []
+REAL = [  # shape of dataclasses.asdict(Verdict), as examples/apex/findings.json shows
+    {"lead": {"index": 0, "shape": "A", "text": "cmd injection in run() at createFile.ts:116",
+              "evidence": "MATCH ...", "confidence": "high", "source_uid": "s", "sink_uid": "k"},
+     "decision": "CONFIRM", "reason": "tainted path reaches exec", "evidence": "read src",
+     "sink_centrality": 0.4},
+    {"lead": {"index": 1, "shape": "B", "text": "maybe", "evidence": "", "confidence": "low",
+              "source_uid": None, "sink_uid": None},
+     "decision": "REJECT", "reason": "no flow", "evidence": "", "sink_centrality": 0.0},
+]
 
-def test_missing_fields_get_defaults_and_stay_valid():
-    verdicts = [{"verdict": "CONFIRM", "lead": {"file": "a.ts"}}]
-    out = convert.orion_to_findings(verdicts)
-    f = out["findings"][0]
-    assert f["function"] == "" and f["line_start"] == 0
-    assert prompt.validate_findings(out) == []
+def test_keeps_only_confirms_with_real_fields():
+    out = convert.confirmed_verdicts(REAL)
+    assert len(out) == 1
+    f = out[0]
+    assert f["decision"] == "CONFIRM"
+    assert f["reason"] == "tainted path reaches exec"
+    assert "createFile.ts:116" in f["text"]
+    assert f["sink_centrality"] == 0.4
+    # no invented structured fields
+    assert "file" not in f and "line_start" not in f
+
+def test_load_missing_file_returns_empty(tmp_path):
+    assert convert.load(str(tmp_path / "nope.json")) == []
+
+def test_load_reads_real_json(tmp_path):
+    p = tmp_path / "findings.json"
+    p.write_text(json.dumps(REAL))
+    assert len(convert.load(str(p))) == 2
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -765,34 +787,43 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'eval.convert'`
 
 ```python
 # eval/convert.py
-def orion_to_findings(verdicts: list[dict]) -> dict:
-    findings = []
+import json, os
+
+def load(path: str) -> list[dict]:
+    if not os.path.isfile(path):
+        return []
+    try:
+        return json.loads(open(path).read())
+    except Exception:
+        return []
+
+def confirmed_verdicts(verdicts: list[dict]) -> list[dict]:
+    out = []
     for v in verdicts:
-        if v.get("verdict") != "CONFIRM":
+        if v.get("decision") != "CONFIRM":
             continue
         lead = v.get("lead") or {}
-        findings.append({
-            "file": lead.get("file") or "",
-            "function": lead.get("function") or "",
-            "line_start": int(lead.get("line_start") or 0),
-            "line_end": int(lead.get("line_end") or 0),
-            "cwe": lead.get("cwe") or "",
-            "title": lead.get("title") or "",
-            "explanation": v.get("verdict_reason") or "",
+        out.append({
+            "decision": "CONFIRM",
+            "reason": v.get("reason") or "",
+            "evidence": v.get("evidence") or "",
+            "sink_centrality": float(v.get("sink_centrality") or 0.0),
+            "text": lead.get("text") or "",
+            "text_evidence": lead.get("evidence") or "",
         })
-    return {"findings": findings}
+    return out
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `./.venv/bin/pytest eval/tests/test_convert.py -v`
-Expected: PASS (2 passed)
+Expected: PASS (3 passed)
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add eval/convert.py eval/tests/test_convert.py
-git commit -m "eval: convert Orion CONFIRM verdicts into the shared findings.json shape
+git commit -m "eval: capture Orion CONFIRM verdicts using the REAL contract (decision/reason/lead.text)
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ```
@@ -808,8 +839,8 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 **Interfaces:**
 - Consumes: nothing.
 - Produces:
-  - `env.orion_env(base: dict, *, ollama_url: str, model_tag: str) -> dict` — returns a copy of `base` with `ANTHROPIC_BASE_URL=ollama_url`, `ORION_MODEL=model_tag`, and `ANTHROPIC_DEFAULT_OPUS_MODEL`/`ANTHROPIC_DEFAULT_SONNET_MODEL`/`ANTHROPIC_DEFAULT_HAIKU_MODEL` all `=model_tag` (so fp-check subagents stay on the local model), plus `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1`.
-  - `env.plain_ollama_env(base, *, ollama_url, model_tag) -> dict` — same base URL and default-model overrides for a no-Orion Claude Code run (arm 3).
+  - `env.orion_env(base, *, ollama_url, model_tag, usage_log, shim_dir, joern_heap_gb="7") -> dict` — returns a copy of `base` with: `ANTHROPIC_BASE_URL=ollama_url`; `ORION_MODEL=model_tag` and `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL=model_tag` (so fp-check subagents stay on the local model); `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1`; `EVAL_USAGE_LOG=usage_log` and `PATH` prefixed with `shim_dir` (so the `claude` usage shim from Task 8b runs); `ORION_JOERN_HEAP_GB=joern_heap_gb` and `OLLAMA_KEEP_ALIVE=0` (memory plan, spec §4).
+  - `env.plain_claude_env(base, *, usage_log, shim_dir, ollama_url=None, model_tag=None) -> dict` — for the plain Claude Code arms (3/4/5). Sets `EVAL_USAGE_LOG` + `PATH` shim; when `ollama_url`/`model_tag` are given (arm 3, `plain-gemma4`) also sets `ANTHROPIC_BASE_URL` + the default-model overrides.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -817,19 +848,28 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 # eval/tests/test_arms_env.py
 from eval.arms import env
 
-def test_orion_env_sets_all_model_defaults_and_base_url():
-    out = env.orion_env({"PATH": "/bin"}, ollama_url="http://127.0.0.1:11434", model_tag="gemma4:q4")
+def test_orion_env_sets_wiring_usage_and_memory_knobs():
+    out = env.orion_env({"PATH": "/bin"}, ollama_url="http://127.0.0.1:11434",
+                        model_tag="gemma4:q4", usage_log="/r/usage.jsonl", shim_dir="/shim")
     assert out["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:11434"
     assert out["ORION_MODEL"] == "gemma4:q4"
     for k in ("ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
               "ANTHROPIC_DEFAULT_HAIKU_MODEL"):
         assert out[k] == "gemma4:q4"
     assert out["CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"] == "1"
-    assert out["PATH"] == "/bin"  # base preserved
+    assert out["EVAL_USAGE_LOG"] == "/r/usage.jsonl"
+    assert out["PATH"].startswith("/shim:")  # shim resolves `claude` first
+    assert out["ORION_JOERN_HEAP_GB"] == "7"
+    assert out["OLLAMA_KEEP_ALIVE"] == "0"
+
+def test_plain_claude_env_frontier_has_no_base_url():
+    out = env.plain_claude_env({"PATH": "/bin"}, usage_log="/r/u.jsonl", shim_dir="/shim")
+    assert "ANTHROPIC_BASE_URL" not in out
+    assert out["PATH"].startswith("/shim:")
 
 def test_env_builders_do_not_mutate_base():
     base = {"PATH": "/bin"}
-    env.orion_env(base, ollama_url="u", model_tag="m")
+    env.orion_env(base, ollama_url="u", model_tag="m", usage_log="l", shim_dir="s")
     assert "ANTHROPIC_BASE_URL" not in base
 ```
 
@@ -848,31 +888,154 @@ def _model_defaults(env: dict, model_tag: str) -> None:
     env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = model_tag
     env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = model_tag
 
-def orion_env(base: dict, *, ollama_url: str, model_tag: str) -> dict:
+def _with_shim(env: dict, usage_log: str, shim_dir: str) -> None:
+    env["EVAL_USAGE_LOG"] = usage_log
+    env["PATH"] = f"{shim_dir}:{env.get('PATH', '')}"
+
+def orion_env(base, *, ollama_url, model_tag, usage_log, shim_dir, joern_heap_gb="7") -> dict:
     env = dict(base)
     env["ANTHROPIC_BASE_URL"] = ollama_url
     env["CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"] = "1"
+    env["ORION_JOERN_HEAP_GB"] = joern_heap_gb
+    env["OLLAMA_KEEP_ALIVE"] = "0"
     _model_defaults(env, model_tag)
+    _with_shim(env, usage_log, shim_dir)
     return env
 
-def plain_ollama_env(base: dict, *, ollama_url: str, model_tag: str) -> dict:
+def plain_claude_env(base, *, usage_log, shim_dir, ollama_url=None, model_tag=None) -> dict:
     env = dict(base)
-    env["ANTHROPIC_BASE_URL"] = ollama_url
     env["CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"] = "1"
-    _model_defaults(env, model_tag)
+    if ollama_url:
+        env["ANTHROPIC_BASE_URL"] = ollama_url
+    if model_tag:
+        _model_defaults(env, model_tag)
+    _with_shim(env, usage_log, shim_dir)
     return env
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `./.venv/bin/pytest eval/tests/test_arms_env.py -v`
-Expected: PASS (2 passed)
+Expected: PASS (3 passed)
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add eval/arms/env.py eval/tests/test_arms_env.py
-git commit -m "eval: env builders that point Claude Code (and fp-check subagents) at Ollama
+git commit -m "eval: env builders (Ollama wiring, usage-shim PATH, Joern heap + keep-alive)
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 8b: `claude` usage-capture shim
+
+**Files:**
+- Create: `eval/shim/claude` (executable shell wrapper)
+- Create: `eval/shim_setup.py`
+- Test: `eval/tests/test_shim.py`
+
+**Why:** Orion's `--json` output carries no token usage (it parses Claude's stream-json internally and
+discards it, `orion/claude_cli.py`). Orion invokes bare `claude ... --output-format stream-json`, so a
+`claude` wrapper placed first on `PATH` sees every call's stream-json — including the `result` object's
+usage — and `tee`s it to the per-run `EVAL_USAGE_LOG`, passing stdout through unchanged so Orion is
+unaffected. Same shim captures the plain-Claude arms.
+
+**Interfaces:**
+- Consumes: `EVAL_USAGE_LOG` env var (per-run path).
+- Produces:
+  - `eval/shim/claude` — the wrapper. Finds the real `claude` (via `EVAL_REAL_CLAUDE`, else the first
+    `claude` on `PATH` after removing the shim dir), runs it with all args, and appends its stdout to
+    `$EVAL_USAGE_LOG` while streaming stdout on. Uses `set -o pipefail` so the real `claude` exit code
+    is returned, not `tee`'s.
+  - `shim_setup.shim_dir() -> str` — absolute path to `eval/shim`, and asserts the wrapper is
+    executable (chmod +x on first call).
+
+- [ ] **Step 1: Write the failing test**
+
+```python
+# eval/tests/test_shim.py
+import os, stat, subprocess
+from eval import shim_setup
+
+def test_shim_dir_is_executable():
+    d = shim_setup.shim_dir()
+    wrapper = os.path.join(d, "claude")
+    assert os.path.isfile(wrapper)
+    assert os.stat(wrapper).st_mode & stat.S_IXUSR
+
+def test_shim_tees_stdout_to_usage_log(tmp_path):
+    # a fake "real claude" that prints a stream-json-ish result line
+    fake = tmp_path / "realclaude"
+    fake.write_text('#!/bin/bash\necho \'{"type":"result","usage":{"input_tokens":7}}\'\n')
+    fake.chmod(0o755)
+    log = tmp_path / "usage.jsonl"
+    env = dict(os.environ, EVAL_USAGE_LOG=str(log), EVAL_REAL_CLAUDE=str(fake))
+    wrapper = os.path.join(shim_setup.shim_dir(), "claude")
+    out = subprocess.run([wrapper, "-p", "hi"], capture_output=True, text=True, env=env)
+    assert '"input_tokens":7' in out.stdout          # passed through to caller
+    assert '"input_tokens":7' in log.read_text()      # AND captured to the log
+    assert out.returncode == 0
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `./.venv/bin/pytest eval/tests/test_shim.py -v`
+Expected: FAIL with `ModuleNotFoundError: No module named 'eval.shim_setup'`
+
+- [ ] **Step 3: Write minimal implementation**
+
+Create `eval/shim/claude` (mode will be set by `shim_setup`):
+
+```bash
+#!/bin/bash
+# Usage-capture shim: tee claude's stdout to $EVAL_USAGE_LOG, pass it through unchanged.
+set -o pipefail
+if [ -n "$EVAL_REAL_CLAUDE" ]; then
+  REAL="$EVAL_REAL_CLAUDE"
+else
+  # first `claude` on PATH that is not this shim
+  SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+  REAL=""
+  IFS=':' read -ra DIRS <<< "$PATH"
+  for d in "${DIRS[@]}"; do
+    if [ "$d" != "$SELF_DIR" ] && [ -x "$d/claude" ]; then REAL="$d/claude"; break; fi
+  done
+fi
+if [ -z "$REAL" ]; then echo "usage-shim: real claude not found" >&2; exit 127; fi
+if [ -n "$EVAL_USAGE_LOG" ]; then
+  "$REAL" "$@" | tee -a "$EVAL_USAGE_LOG"
+else
+  "$REAL" "$@"
+fi
+```
+
+Create `eval/shim_setup.py`:
+
+```python
+import os, stat
+
+def shim_dir() -> str:
+    d = os.path.abspath(os.path.join(os.path.dirname(__file__), "shim"))
+    wrapper = os.path.join(d, "claude")
+    if os.path.isfile(wrapper):
+        st = os.stat(wrapper)
+        if not st.st_mode & stat.S_IXUSR:
+            os.chmod(wrapper, st.st_mode | 0o755)
+    return d
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `./.venv/bin/pytest eval/tests/test_shim.py -v`
+Expected: PASS (2 passed)
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add eval/shim/claude eval/shim_setup.py eval/tests/test_shim.py
+git commit -m "eval: claude usage-capture shim (tee stream-json to per-run usage log)
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ```
@@ -1138,9 +1301,9 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 - Produces:
   - `launch.HUNG_SECONDS = 3600`.
   - `launch.stream_subprocess(cmd, *, env, cwd, on_line, hung_seconds=HUNG_SECONDS, popen=subprocess.Popen) -> str` — runs `cmd`, calls `on_line(line)` for each stdout line, returns final status `"ok"`/`"hung"`/`"crashed"`. `hung` when no line arrives for `hung_seconds`. `popen` is injected in tests. (Progress events are stdout lines, matching Orion's `stream-json` and Codex `--json`.)
-  - `launch.orion_arm(*, repo_dir, ollama_url, model_tag, json_out, base_env, on_line, popen) -> str` — builds the Orion env, runs `orion scan <repo_dir> --json <json_out> --output-format stream-json` (single process; the memory phasing in §4 is handled by the runner around this call, Task 13), returns status.
+  - `launch.orion_arm(*, repo_dir, ollama_url, model_tag, json_out, usage_log, shim_dir, base_env, on_line, scan_id=None, popen) -> tuple[str, str|None]` — builds the Orion env (Task 8 `env.orion_env`), creates `json_out`'s parent dir, and runs Orion via its **real** flags. When `scan_id` is None it builds: `orion scan <repo_dir> --json <json_out> --quiet`; when `scan_id` is given it reuses the graph: `orion scan --scan-id <scan_id> --json <json_out> --quiet`. It scrapes the `scan_id: <id>` line Orion prints (`cli.py:79`) from `on_line`, and returns `(status, scan_id_seen)`. **There is no `--output-format` flag on `orion scan`** (verified `orion/cli.py:215-234`); progress arrives as stdout lines regardless, which is all the hang detector needs.
 
-Note: real model execution is not unit-tested; tests inject a fake `popen` that yields canned lines. The launcher's job is process control and status, which is what we verify.
+Note: real model execution is not unit-tested; tests inject a fake `popen` that yields canned lines (including a `scan_id:` line). The launcher's job is process control, scan_id capture, and status.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1178,6 +1341,32 @@ def test_crashed_when_returncode_nonzero():
     status = launch.stream_subprocess(["x"], env={}, cwd=".", on_line=lambda l: None,
                                       popen=lambda cmd, **kw: Bad())
     assert status == "crashed"
+
+def test_orion_arm_uses_real_flags_and_captures_scan_id(tmp_path):
+    captured = {}
+    def fake_popen(cmd, **kw):
+        captured["cmd"] = cmd
+        return FakePopen(["scan_id: abc123", '{"type":"result"}'])
+    status, sid = launch.orion_arm(
+        repo_dir=str(tmp_path/"repo"), ollama_url="u", model_tag="gemma4",
+        json_out=str(tmp_path/"out/findings.json"), usage_log=str(tmp_path/"u.jsonl"),
+        shim_dir="/shim", base_env={"PATH": "/bin"}, on_line=lambda l: None,
+        popen=fake_popen)
+    assert status == "ok" and sid == "abc123"
+    assert "--output-format" not in captured["cmd"]      # the flag Orion does NOT have
+    assert "--json" in captured["cmd"]
+    assert (tmp_path/"out").is_dir()                       # parent dir was created
+
+def test_orion_arm_reuses_graph_with_scan_id(tmp_path):
+    captured = {}
+    def fake_popen(cmd, **kw):
+        captured["cmd"] = cmd
+        return FakePopen(["scan_id: abc123"])
+    launch.orion_arm(repo_dir="r", ollama_url="u", model_tag="m",
+                     json_out=str(tmp_path/"f.json"), usage_log="u", shim_dir="/s",
+                     base_env={}, on_line=lambda l: None, scan_id="abc123", popen=fake_popen)
+    assert "--scan-id" in captured["cmd"] and "abc123" in captured["cmd"]
+    assert "r" not in captured["cmd"]  # no repo positional when reusing
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1226,11 +1415,26 @@ def stream_subprocess(cmd, *, env, cwd, on_line, hung_seconds=HUNG_SECONDS,
         return "hung"
     return "ok" if proc.returncode == 0 else "crashed"
 
-def orion_arm(*, repo_dir, ollama_url, model_tag, json_out, base_env, on_line,
-              popen=subprocess.Popen) -> str:
-    env = orion_env(base_env, ollama_url=ollama_url, model_tag=model_tag)
-    cmd = ["orion", "scan", repo_dir, "--json", json_out, "--output-format", "stream-json"]
-    return stream_subprocess(cmd, env=env, cwd=".", on_line=on_line, popen=popen)
+import os, re
+_SCAN_ID_RE = re.compile(r"^scan_id:\s*(\S+)")
+
+def orion_arm(*, repo_dir, ollama_url, model_tag, json_out, usage_log, shim_dir, base_env,
+              on_line, scan_id=None, popen=subprocess.Popen):
+    env = orion_env(base_env, ollama_url=ollama_url, model_tag=model_tag,
+                    usage_log=usage_log, shim_dir=shim_dir)
+    os.makedirs(os.path.dirname(json_out), exist_ok=True)  # Orion's write_text won't mkdir
+    if scan_id:
+        cmd = ["orion", "scan", "--scan-id", scan_id, "--json", json_out, "--quiet"]
+    else:
+        cmd = ["orion", "scan", repo_dir, "--json", json_out, "--quiet"]
+    seen = {"sid": scan_id}
+    def _on_line(line):
+        m = _SCAN_ID_RE.match(line)
+        if m:
+            seen["sid"] = m.group(1)
+        on_line(line)
+    status = stream_subprocess(cmd, env=env, cwd=".", on_line=_on_line, popen=popen)
+    return status, seen["sid"]
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -1259,8 +1463,9 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 - Consumes: everything above.
 - Produces:
   - `run.ARMS = ["orion-gemma4","orion-gptoss20b","plain-gemma4","plain-sonnet5","plain-opus5","plain-gpt"]`.
-  - `run.run_one(conn, *, arm, repo_meta, run_no, model_tags, ollama_url, base_env, orion_commit, launcher) -> str` — starts a `runs` row, dispatches to the arm via `launcher` (injected; wraps Task 12), records the final status, and returns it. `launcher(arm, repo_meta, model_tag, on_line) -> (status, json_findings_path)`. On any exception the run is finished `error` and the exception head is logged, never raised.
-  - `run.main(argv)` — argparse CLI: `--arm` (repeatable, default all), `--manifest`, `--db`, `--runs 3`, `--ollama-url`, resumes via `queue.pending`.
+  - `run.run_one(conn, *, arm, repo_meta, run_no, model_tags, ollama_url, base_env, orion_commit, cli_versions, launcher) -> str` — starts a `runs` row (recording `model_tag`, `cli_versions`, `orion_commit`), dispatches to the arm via `launcher` (injected; wraps Task 12), records the final status, and returns it. `launcher(arm, repo_meta, model_tag, on_line) -> (status, json_findings_path)`. On any exception the run is finished `error` and the exception head is logged, never raised.
+  - `run.git_head(path: str = ".") -> str` — `git -C <path> rev-parse HEAD`, `""` on failure. Supplies `orion_commit`.
+  - `run.main(argv)` — argparse CLI: `--arm` (repeatable, default all), `--manifest`, `--db`, `--runs 3`, `--ollama-url`; loads the manifest, reads versions via `preflight.check`, computes `orion_commit` via `git_head`, builds the launcher (Task 14), and iterates `queue.pending` calling `run_one`. Resumable.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1276,10 +1481,10 @@ def test_run_one_records_status_from_launcher(tmp_path):
     status = run.run_one(conn, arm="plain-opus5",
                          repo_meta={"id": "r1", "tier": "headline"}, run_no=1,
                          model_tags={}, ollama_url="u", base_env={}, orion_commit="c",
-                         launcher=launcher)
+                         cli_versions="claude=2.1.210", launcher=launcher)
     assert status == "ok"
-    row = conn.execute("select status from runs where arm='plain-opus5'").fetchone()
-    assert row[0] == "ok"
+    row = conn.execute("select status, cli_versions from runs where arm='plain-opus5'").fetchone()
+    assert row[0] == "ok" and row[1] == "claude=2.1.210"
 
 def test_run_one_catches_launcher_exception(tmp_path):
     conn = db.connect(str(tmp_path/"t.db"))
@@ -1288,7 +1493,7 @@ def test_run_one_catches_launcher_exception(tmp_path):
     status = run.run_one(conn, arm="orion-gemma4",
                          repo_meta={"id": "r1", "tier": "headline"}, run_no=1,
                          model_tags={"orion-gemma4": "gemma4"}, ollama_url="u",
-                         base_env={}, orion_commit="c", launcher=boom)
+                         base_env={}, orion_commit="c", cli_versions="", launcher=boom)
     assert status == "error"
     err = conn.execute("select message from events where level='error'").fetchone()
     assert "launch failed" in err[0]
@@ -1309,11 +1514,19 @@ from . import db, queue
 ARMS = ["orion-gemma4", "orion-gptoss20b", "plain-gemma4",
         "plain-sonnet5", "plain-opus5", "plain-gpt"]
 
+def git_head(path: str = ".") -> str:
+    import subprocess
+    try:
+        return subprocess.run(["git", "-C", path, "rev-parse", "HEAD"],
+                              capture_output=True, text=True, check=True).stdout.strip()
+    except Exception:
+        return ""
+
 def run_one(conn, *, arm, repo_meta, run_no, model_tags, ollama_url, base_env,
-            orion_commit, launcher) -> str:
+            orion_commit, cli_versions, launcher) -> str:
     model_tag = model_tags.get(arm, arm)
     rid = db.start_run(conn, arm=arm, repo=repo_meta["id"], tier=repo_meta.get("tier", ""),
-                       run_no=run_no, model_tag=model_tag, cli_versions="",
+                       run_no=run_no, model_tag=model_tag, cli_versions=cli_versions,
                        orion_commit=orion_commit)
     def on_line(line):
         db.log_event(conn, rid, stage="run", level="info", message=line[:2000])
@@ -1325,18 +1538,10 @@ def run_one(conn, *, arm, repo_meta, run_no, model_tags, ollama_url, base_env,
         return "error"
     db.finish_run(conn, rid, status)
     return status
-
-def main(argv=None):
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--arm", action="append", choices=ARMS)
-    ap.add_argument("--db", default="eval/runs.db")
-    ap.add_argument("--runs", type=int, default=3)
-    ap.add_argument("--ollama-url", default="http://127.0.0.1:11434")
-    args = ap.parse_args(argv)
-    # Full wiring (manifest load, launcher construction, phasing) is filled in Task 14.
-    print("configured arms:", args.arm or ARMS)
-    return 0
 ```
+
+`main()` is completed in Task 14 (it needs `build_launcher`); its argparse and loop are shown there.
+Do not leave a stub — Task 14 Step 3 replaces this file's `main` with the full version.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -1364,7 +1569,8 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 **Interfaces:**
 - Consumes: `arms.launch`, `arms.env`, `resources`, `usage`, `convert`, `repo`, `db`, `queue`.
 - Produces:
-  - `run.build_launcher(*, ollama_url, base_env, manifest_index, records) -> callable` — returns a `launcher(arm, repo_meta, model_tag, on_line)` that: for `orion-*` arms wraps `arms.launch.orion_arm` inside a `resources.PhaseSampler`, then converts the Orion JSON to findings via `convert.orion_to_findings`; for `plain-*` arms runs the plain agent (Claude Code or Codex) with `prompt.TASK_PROMPT`; and appends a `(arm, repo, resource, usage)` tuple to `records` for the caller to persist. This is the one integration point; keep it thin and covered by the wiring test with an injected `orion_arm`/`plain_arm`.
+  - `run.build_launcher(*, ollama_url, base_env, shim_dir, graph_cache, _orion, _plain) -> callable` — returns a `launcher(arm, repo_meta, model_tag, on_line)` that dispatches `orion-*` arms to `_orion` and `plain-*` arms to `_plain`. `graph_cache` is a dict keyed by `repo_meta["id"]`: the launcher passes `scan_id=graph_cache.get(repo_id)` into `_orion` and stores the returned scan_id back, so the first Orion run of a repo builds and the rest reuse the graph (spec §4). Per-run `json_out` and `usage_log` paths are derived under `eval/runs/<arm>/<repo>/`. Keep it thin; the wiring test injects `_orion`/`_plain`.
+  - `run.main(argv)` — the completed CLI (replaces Task 13's note): argparse (`--arm`, `--manifest`, `--db`, `--runs`, `--ollama-url`), loads the manifest to repo metas, `versions = "; ".join(f"{r['tool']}={r['detail']}" for r in preflight.check())`, `orion_commit = git_head()`, `graph_cache = {}`, `launcher = build_launcher(...)`, then `for arm, repo, n in queue.pending(conn, queue.plan(arms, repo_ids, runs)): run_one(...)`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1372,20 +1578,27 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 # eval/tests/test_run_wiring.py
 from eval import run
 
-def test_build_launcher_dispatches_orion_vs_plain(monkeypatch):
+def test_build_launcher_dispatches_and_reuses_graph():
     called = {}
     def fake_orion(**kw):
-        called["orion"] = kw["model_tag"]
-        return "ok"
+        called.setdefault("orion_scan_ids", []).append(kw["scan_id"])
+        return "ok", "built-sid"        # returns (status, scan_id)
     def fake_plain(**kw):
         called["plain"] = kw["arm"]
-        return "ok"
-    launcher = run.build_launcher(ollama_url="u", base_env={}, manifest_index={},
-                                  records=[], _orion=fake_orion, _plain=fake_plain)
+        return "ok", "path"
+    cache = {}
+    launcher = run.build_launcher(ollama_url="u", base_env={}, shim_dir="/s",
+                                  graph_cache=cache, _orion=fake_orion, _plain=fake_plain)
     launcher("orion-gemma4", {"id": "r1", "repo_dir": "/tmp/r1"}, "gemma4", lambda l: None)
+    launcher("orion-gptoss20b", {"id": "r1", "repo_dir": "/tmp/r1"}, "gptoss", lambda l: None)
     launcher("plain-opus5", {"id": "r1", "repo_dir": "/tmp/r1"}, "opus", lambda l: None)
-    assert called["orion"] == "gemma4"
+    # first orion run built (scan_id None), second reused the cached "built-sid"
+    assert called["orion_scan_ids"] == [None, "built-sid"]
+    assert cache["r1"] == "built-sid"
     assert called["plain"] == "plain-opus5"
+
+def test_git_head_returns_string():
+    assert isinstance(run.git_head("."), str)
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1395,7 +1608,7 @@ Expected: FAIL with `AttributeError: module 'eval.run' has no attribute 'build_l
 
 - [ ] **Step 3: Write minimal implementation**
 
-Add to `eval/run.py`:
+Replace `eval/run.py`'s deferred `main` note with the real launcher and CLI:
 
 ```python
 def _default_orion(**kw):
@@ -1403,29 +1616,65 @@ def _default_orion(**kw):
     return orion_arm(**kw)
 
 def _default_plain(**kw):
-    from .arms.plain import plain_arm  # created alongside; runs Claude Code / Codex with TASK_PROMPT
+    from .arms.plain import plain_arm  # runs Claude Code / Codex with TASK_PROMPT
     return plain_arm(**kw)
 
-def build_launcher(*, ollama_url, base_env, manifest_index, records,
+def build_launcher(*, ollama_url, base_env, shim_dir, graph_cache,
                    _orion=_default_orion, _plain=_default_plain):
     def launcher(arm, repo_meta, model_tag, on_line):
-        repo_dir = repo_meta["repo_dir"]
+        rid = repo_meta["id"]
+        run_dir = f"eval/runs/{arm}/{rid}"
+        usage_log = f"{run_dir}/usage.jsonl"
         if arm.startswith("orion-"):
-            json_out = f"eval/runs/{arm}/{repo_meta['id']}/findings.orion.json"
-            status = _orion(repo_dir=repo_dir, ollama_url=ollama_url, model_tag=model_tag,
-                            json_out=json_out, base_env=base_env, on_line=on_line)
+            json_out = f"{run_dir}/findings.orion.json"
+            status, sid = _orion(repo_dir=repo_meta["repo_dir"], ollama_url=ollama_url,
+                                 model_tag=model_tag, json_out=json_out, usage_log=usage_log,
+                                 shim_dir=shim_dir, base_env=base_env, on_line=on_line,
+                                 scan_id=graph_cache.get(rid))
+            if sid:
+                graph_cache[rid] = sid
             return status, json_out
-        json_out = f"eval/runs/{arm}/{repo_meta['id']}/findings.json"
-        status = _plain(arm=arm, repo_dir=repo_dir, ollama_url=ollama_url,
-                        model_tag=model_tag, json_out=json_out, base_env=base_env,
-                        on_line=on_line)
+        json_out = f"{run_dir}/findings.json"
+        status, _ = _plain(arm=arm, repo_dir=repo_meta["repo_dir"], ollama_url=ollama_url,
+                           model_tag=model_tag, json_out=json_out, usage_log=usage_log,
+                           shim_dir=shim_dir, base_env=base_env, on_line=on_line)
         return status, json_out
     return launcher
+
+def main(argv=None):
+    import json as _json, os
+    from . import preflight
+    from .shim_setup import shim_dir as _shim_dir
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--arm", action="append", choices=ARMS)
+    ap.add_argument("--manifest", default="eval/dataset/manifest.json")
+    ap.add_argument("--db", default="eval/runs.db")
+    ap.add_argument("--runs", type=int, default=3)
+    ap.add_argument("--ollama-url", default="http://127.0.0.1:11434")
+    args = ap.parse_args(argv)
+    arms = args.arm or ARMS
+    repos = _json.loads(open(args.manifest).read())["repos"]  # [{id, repo_dir, tier, ...}]
+    repo_ids = [r["id"] for r in repos]
+    meta_by_id = {r["id"]: r for r in repos}
+    conn = db.connect(args.db)
+    versions = "; ".join(f"{r['tool']}={r['detail']}" for r in preflight.check())
+    orion_commit = git_head()
+    graph_cache = {}
+    launcher = build_launcher(ollama_url=args.ollama_url, base_env=dict(os.environ),
+                              shim_dir=_shim_dir(), graph_cache=graph_cache)
+    todo = queue.pending(conn, queue.plan(arms, repo_ids, args.runs))
+    for arm, repo_id, n in todo:
+        run_one(conn, arm=arm, repo_meta=meta_by_id[repo_id], run_no=n,
+                model_tags=MODEL_TAGS, ollama_url=args.ollama_url, base_env=dict(os.environ),
+                orion_commit=orion_commit, cli_versions=versions, launcher=launcher)
+    return 0
 ```
 
-Create `eval/README.md` documenting: the Phase-0 smoke procedure (`ollama serve`, `ollama pull <gemma4>` and `<gpt-oss-20b>`, `./.venv/bin/python -m eval.preflight`, then a NodeGoat mini-scan with the Ollama env to confirm `run_cypher` executes, `--json-schema` parses, and usage is reported), how to run the study (`./.venv/bin/python -m eval.run --runs 3`), and how to query failures (`sqlite3 eval/runs.db "select * from failures"`).
+Add near the top of `eval/run.py`: `MODEL_TAGS = {"orion-gemma4": "gemma4", "orion-gptoss20b": "gpt-oss:20b", "plain-gemma4": "gemma4", "plain-sonnet5": "claude-sonnet-5", "plain-opus5": "claude-opus-5", "plain-gpt": "gpt-5.6-sol"}` (exact tags confirmed in Phase 0; frozen at pre-registration).
 
-Also create the referenced `eval/arms/plain.py` with `plain_arm(*, arm, repo_dir, ollama_url, model_tag, json_out, base_env, on_line)` that runs Claude Code (arms 3–5) or Codex (arm 6) with `prompt.TASK_PROMPT`, using `env.plain_ollama_env` for `plain-gemma4`. Cover its command construction with one test asserting the built argv contains the model id and the prompt (inject `popen`).
+Create `eval/README.md` documenting: the Phase-0 smoke procedure (`ollama serve`, `ollama pull` the two model tags, `./.venv/bin/python -m eval.preflight`, then a NodeGoat mini-scan with `env.orion_env` to confirm `run_cypher` executes, `--json-schema` parses, the `claude` usage shim writes `usage.jsonl`, and Joern build fits with `ORION_JOERN_HEAP_GB=7`), how to run the study (`./.venv/bin/python -m eval.run --runs 3`), and how to query failures (`sqlite3 eval/runs.db "select * from failures"`).
+
+Also create `eval/arms/plain.py` with `plain_arm(*, arm, repo_dir, ollama_url, model_tag, json_out, usage_log, shim_dir, base_env, on_line, popen=subprocess.Popen) -> tuple[str,str|None]`: creates `json_out`'s parent dir; for `plain-gpt` runs Codex (`codex exec --json` with `prompt.TASK_PROMPT`, cwd=`repo_dir`, no shim); for the Claude arms runs `claude -p <TASK_PROMPT> --output-format stream-json --add-dir <repo_dir>` under `env.plain_claude_env` (passing `ollama_url`/`model_tag` only for `plain-gemma4`). Returns `(status, json_out)`. Cover command construction with one test (`eval/tests/test_plain.py`) asserting the Claude argv contains the model default env and the Codex argv uses `codex exec --json`, injecting `popen`.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -1493,21 +1742,30 @@ Expected: the tag points at the pre-registration commit.
 
 ## Self-Review
 
+This plan was revised after two independent reviews against the real Orion source. The six blockers
+they found are fixed and noted below.
+
 **Spec coverage:**
-- §1 hypotheses → PREREGISTRATION (Task 15) + captured data enabling each (Tasks 1, 2, 3, 7).
-- §2 arms/order/runs → `run.ARMS` (Task 13), `queue.plan` order (Task 10), 3 runs (Task 13 default).
+- §1 hypotheses → PREREGISTRATION (Task 15) + captured data enabling each (Tasks 1, 2, 7, 8b).
+- §2 arms/order/runs → `run.ARMS`/`MODEL_TAGS` (Tasks 13/14), `queue.plan` order (Task 10), 3 runs default.
 - §3 dataset rules/tiers/manifest → Tasks 4, 5, 15.
-- §4 memory phases → `PhaseSampler` (Task 3) + orion arm run inside sampler (Task 14). **Note:** the spec's build-then-reason unload sequencing is operational (stop Ollama during build, cap Neo4j heap); it is documented in `eval/README.md` (Task 14) and executed by the operator, not enforced in code, because it spans external processes. Flagged for the executor.
-- §5 harness (Ollama wiring, plain-agent task, runner, hang detection) → Tasks 8, 6, 12, 13, 14.
+- §4 memory + graph reuse → Joern heap cap + `OLLAMA_KEEP_ALIVE=0` in `env.orion_env` (Task 8); graph built once per repo and reused via `--scan-id` through `build_launcher`'s `graph_cache` (Task 14) — **fixes reviewer blocker #3** (was rebuilding 3× per repo). `PhaseSampler` (Task 3) records peak RSS. Joern runs as a subprocess that exits before reasoning, so no in-process unload seam is needed — **corrects the "structurally unautomatable" concern (#4)**; the residual risk (build peak on 16 GB) is bounded by the heap cap and the scale-tier cutoff.
+- §5 harness (Ollama wiring, usage shim, plain-agent task, runner, hang detection) → Tasks 8, 8b, 6, 12, 13, 14.
 - §5.1 Phase-0 gate → `preflight` (Task 11) + smoke procedure in `eval/README.md` (Task 14).
 - §6 run log + failures view → Task 1.
-- §7 recorded fields → Tasks 1, 2, 3 (usage, context, resources).
-- §8 scoring out of scope → nothing here scores; converter (Task 7) only reshapes.
+- §7 recorded fields → Tasks 1, 2, 3, **8b** (per-call token usage via the `claude` shim — **fixes blocker #5**: Orion's `--json` carries no usage; the shim tees the stream-json that does). `cli_versions` now comes from `preflight.check()` and `orion_commit` from `git_head()` (**fixes should-fix #7, #9**).
+- §8 scoring out of scope → nothing here scores; Task 7 captures Orion's **real** verdict fields (`decision`/`reason`/`lead.text`) and invents nothing — **fixes blocker #2** (the old converter read `verdict`/`lead.file`/`lead.cwe`, which do not exist, and would have zeroed every Orion finding).
 - §8a exploits deferred → no exploit code; catalog kept (Task 4/15).
 - §9 pre-registration → Task 15.
 
-**Placeholder scan:** `run.main` (Task 13) intentionally prints and defers full wiring to Task 14, where `build_launcher` completes it — not a placeholder, a task boundary. `eval/arms/plain.py` is specified in Task 14's step 3 with its signature and a required test; the executor writes it there. No "TODO"/"handle edge cases" left in code.
+**Blocker #1 (fixed):** the Orion command dropped the non-existent `--output-format` flag (Task 12); it now runs `orion scan <repo> --json <out> --quiet` (build) or `--scan-id <id> --json <out> --quiet` (reuse), verified against `orion/cli.py:215-234`. A Task 12 test asserts `--output-format` is absent and `--json` present.
 
-**Type consistency:** `on_line(line: str)` callback shape is consistent across Tasks 12–14. `launcher(arm, repo_meta, model_tag, on_line) -> (status, path)` matches between Task 13 (`run_one`) and Task 14 (`build_launcher`). `findings.json` shape is identical in Tasks 6 (schema/validator), 7 (converter output), and 14. `model_tags`/`model_tag` naming is consistent (Task 13 dict → Task 14 value).
+**Blocker #6 (fixed):** `run.main` is fully written in Task 14 (manifest load → versions → commit → `build_launcher` → `queue.pending` loop), not a stub. `eval/README.md`'s `python -m eval.run` command runs the study.
 
-**Known open item (not a plan defect):** the exact "caught" matching rule is a pre-registration input the user and I finalize before Task 15; the harness captures location data either way, so no code depends on the rule.
+**Reviewer nit #10 (fixed):** Task 7's test now uses Orion's real `dataclasses.asdict(Verdict)` shape, so the TDD loop can no longer go green on a fictional schema.
+
+**Placeholder scan:** `eval/arms/plain.py` is specified in Task 14 with its full signature and a required test. No "TODO"/"handle edge cases" left in code.
+
+**Type consistency:** `on_line(line: str)` is consistent across Tasks 12–14. `orion_arm(...) -> (status, scan_id)` and `plain_arm(...) -> (status, path)` both match `build_launcher`'s use (Task 14) and `run_one`'s `launcher(...) -> (status, path)` (Task 13). Task 7 no longer claims to produce the plain-agent `findings.json` shape — the two arm families are captured in their own shapes (spec §5.2), reconciled only in the scoring session.
+
+**Known open item (not a plan defect):** the exact "caught" matching rule is a pre-registration input the user and I finalize before Task 15; the harness captures both arm families' raw output either way, so no code depends on the rule.
