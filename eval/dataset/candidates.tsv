@@ -1,0 +1,43 @@
+# Candidate CVEs for the open-weight study. NOT the locked manifest: every row still needs the
+# Phase-1 checks in docs/superpowers/specs/2026-09-17-open-weight-eval-design.md (fix-commit date,
+# no pre-cutoff public discussion, hand answer key, repo size, builds with Joern). Go rows dropped (no Go).
+row	repo	lang	ghsa	cve	advisory_published	cwe	summary	fix_commit	status
+1	nocobase/nocobase	ts	GHSA-p853-83gj-wjj3	CVE-2026-55410	2026-08-20	CWE-78	Command injection via backup-restore schema name	0e1aba1b7b112ffc841588963f7343c00edd9806	candidate
+2	nocobase/nocobase	ts	GHSA-p849-8hwh-84j9	CVE-2026-52887	2026-07-31	CWE-89	SQLi in myInAppChannels:list filter	68d64e3fcfb8be2ae4f3bfc9e1ee3f85b87c89ce	candidate
+3	TryGhost/Ghost	js	GHSA-cjc9-q5gf-327p	CVE-2026-70593	2026-08-04	CWE-22	Theme upload path traversal	fbaa92327e52607036a1e42204c9eadcc751d82c	candidate
+4	TryGhost/Ghost	js	GHSA-gcvv-72q8-9v76	CVE-2026-70591	2026-08-04	CWE-918	SSRF in image fetching	5eff2de0f477b11c88f20bceb9d184c0d3b8a62e	candidate
+5	TryGhost/Ghost	js	GHSA-2gx6-7gx2-wwcf	CVE-2026-70588	2026-08-04	CWE-79	XSS in Universal Import	a8bea3a4ceec4c852b880f4885119453c3d8588e	candidate
+6	FlowiseAI/Flowise	ts	GHSA-x3hf-7cj6-3r4m	CVE-2026-69259	2026-08-04	CWE-94	RCE via SQLite Record Manager node	d07186844263bad057008863037466aff7c3390f	excluded:bundled-fix
+7	FlowiseAI/Flowise	ts	GHSA-88pr-878c-24wf		2026-08-04	CWE-22,CWE-73	Arbitrary file write in S3 Directory loader	571b5d6218b1c129588ac625c8f20e30905a67cb	candidate
+8	Budibase/budibase	ts	GHSA-2xgg-r2wc-c5r2		2026-07-24	CWE-89	MySQL DESCRIBE backtick injection	2c61f389c9986c91ddd8ae161c2b5e8ec21c60ac	candidate
+9	Budibase/budibase	ts	GHSA-hfhx-w8p8-4hc7	CVE-2026-73307	2026-07-24	CWE-918	SSRF via fetch() in uploadUrl	72e602d68daeebe3b95b0ed87acd351a38e327d7	candidate
+10	apostrophecms/apostrophe	js	GHSA-6h5j-32cf-4253	CVE-2026-53609	2026-07-31	CWE-1321	Server-side prototype pollution in apos.util	5a88e9630cbbdde33154ef8abe7557ddf7be418b	excluded:bundled-fix
+11	apostrophecms/apostrophe	js	GHSA-79qf-vqgc-7xx3	CVE-2026-63667	2026-09-02	CWE-22	Arbitrary file read via import-export attachment path	87cccf44a23d09420875ca8a3765eb3db843836a	excluded:bundled-fix
+12	vendurehq/vendure	ts	GHSA-xhq9-whgq-49j5	CVE-2026-63459	2026-09-17	CWE-79	Stored XSS in Admin Dashboard	d7aa42a3f0cb524297a1a2fdf700e4aba9aca684	candidate
+13	BerriAI/litellm	py	GHSA-6wvf-77m9-58rm	CVE-2026-37004	2026-08-27	CWE-1336	SSTI in dotprompt prompt manager	d910a95661fce3cdd36f3b06c03ecf9c46c6457c	candidate
+14	BerriAI/litellm	py	GHSA-5jmr-gcrj-2c9q	CVE-2026-59820	2026-07-22	CWE-22	File write via Skills archive extraction	6a15adcd64137d37f73dee76dfe7481f8c2d9196	candidate
+15	BerriAI/litellm	py	GHSA-hx8v-g79f-8w5f	CVE-2026-59823	2026-09-17	CWE-918	Proxy SSRF via request parameter	47214be317f45a2d2ac08258362e0481411eb427	candidate
+16	mlflow/mlflow	py	GHSA-7gwp-5pfp-969j	CVE-2026-64849	2026-08-17	CWE-918	Full-read SSRF in webhook delivery	ba949522477cbd5915aa55d29b0cfad7d5ddf939	candidate
+17	mlflow/mlflow	py	GHSA-gqvg-gmmx-x4hm		2026-09-01	CWE-502	Pickle deserialization guard bypass (statsmodels)	38615289094a4b700a20b5d1dbfbe57bdfb0411f	candidate
+18	mlflow/mlflow	py	GHSA-3p64-6gvh-82v5	CVE-2026-69146	2026-08-17	CWE-862	LogInputs bypasses run UPDATE authz	5c34aec5669e2386b38b5ee0855cd61174e27693	candidate
+19	open-webui/open-webui	py	GHSA-pwxh-7358-jq2x	CVE-2026-70492	2026-08-04	CWE-79	Stored XSS via KaTeX error fallback	bc600d3f085802c45aa8f38c30e6e8c986bde6cc	excluded:fix-in-unsupported-language(svelte)
+20	open-webui/open-webui	py	GHSA-3pf7-q2g3-wj28	CVE-2026-87997	2026-09-10	CWE-639,CWE-862	Inject chats into another user's folder	d9e23b90c100d19b00270aea3cde0501d2354a6c	candidate
+21	apache/airflow	py	GHSA-f6vj-48fm-hmvx	CVE-2026-49818	2026-06-09	CWE-22	Path traversal in GCSToSambaOperator	bc1df029af15cb1d35d5ca0d33bf9235500137cc	candidate
+22	apache/airflow	py	GHSA-4fh7-7jx4-8f6c	CVE-2026-49296	2026-07-07	CWE-639	DAG source authz bypass	992e602015b5e9a3fd297e18047cff9d85094c95	candidate
+23	langflow-ai/langflow	py	GHSA-qrpv-q767-xqq2	CVE-2026-55255	2026-06-19	CWE-639	IDOR in /api/v1/responses	2c9f498d664a3c32698b57d7c5e752625291060e	candidate
+24	django-cms/django-cms	py	GHSA-hvq6-2r72-p2x7	CVE-2026-75526	2026-08-20	CWE-79	Stored XSS in plugin exception rendering	b56a568844ff3702495945f73a31d0868285bf88	candidate
+36	openremote/openremote	java	GHSA-cgfv-jrfp-2r7v		2026-07-06	CWE-89	SQLi in datapoint crosstab export	02ac83074b81617add814b2a72d459abdf374147	candidate
+37	openremote/openremote	java	GHSA-7v6w-c3f4-9wpq	CVE-2026-54640	2026-07-06	CWE-611	XXE in KNXProtocol	c28d3c60ebc2da68d9b6c4a6d7a5ad875a255ee9	candidate
+38	openremote/openremote	java	GHSA-xqr9-4wvv-gvch	CVE-2026-54641	2026-07-06	CWE-639	Cross-realm user info disclosure	de89b8d3af272d717bf297934c2cbc97243f08b7	candidate
+39	jenkinsci/jenkins	java	GHSA-93qh-vwrm-c5pw	CVE-2026-53441	2026-06-10	CWE-79	Stored XSS in node offline cause	20041e8090d3b228d586169141ea7f12ffe4444d	candidate
+40	spring-projects/spring-framework	java	GHSA-x863-p983-p4f7	CVE-2026-41855	2026-06-09	CWE-502	Unsafe deserialization in Jackson JMS converter	9bec52b1ec741976658e916850b31f41afd2da2d	candidate
+41	apache/nifi	java	GHSA-qvj8-gwpm-4x49	CVE-2026-44911	2026-06-22	CWE-863	Read-only users can submit config verification	f30f877fb3e0e2a0db7850be8b6d586203860a45	candidate
+42	apache/camel	java	GHSA-qvc3-6q9x-95pj	CVE-2026-53913	2026-07-06	CWE-287	KeycloakSecurityPolicy skips token verification	1477cb4e87b2c301f1cdcddca5b153fbbef6934b	candidate
+43	yamcs/yamcs	java	GHSA-rxpg-wjf8-qv9c	CVE-2026-55549	2026-08-28	CWE-79	Reflected XSS in authorize endpoint	4d47d5cdcf5d92c2c5bbbc19feada422923332e3	excluded:bundled-fix
+44	geonetwork/core-geonetwork	java	GHSA-5hx7-j24v-rffj	CVE-2026-55864	2026-09-09	CWE-918	Unauthenticated SSRF (SLD API)	17fdae28a5a51996bf5ff7f7e8236332c74eab77	excluded:bundled-fix
+45	geoserver/geoserver	java	GHSA-x4r9-gmw3-hxww	CVE-2025-58175	2026-06-12	CWE-611,CWE-918	SSRF/XXE via entity resolution	b48d9fe4171fb547db79605a64d6fb4e0341f414	control:fix-commit-2025-08-28
+46	xwiki/xwiki-platform	java	GHSA-45ph-gxxr-gwgw	CVE-2026-53966	2026-08-19	CWE-862	Privilege escalation via Live Data save	448b0f074cc6711410eb2647c4740454c92d1626	candidate
+47	DSpace/DSpace	java	GHSA-9qm4-rh6w-pq5x	CVE-2026-49833	2026-07-08	CWE-22	Path traversal in LDN message generation	522c96a21e04104ae455f63e8111b29e9ad6faba	excluded:bundled-fix
+48	sakaiproject/sakai	java	GHSA-w2x5-gv52-9ccv	CVE-2026-54049	2026-08-24	CWE-79	Stored XSS in Conversations	2696b4b48cbef2e81512f52f84f7477adff78b27	excluded:bundled-fix
+49	spring-projects/spring-ws	java	GHSA-2mpf-m756-hxjm	CVE-2026-40998	2026-06-11	CWE-611	XXE in Jaxp13XPathTemplate	eb8d66c0995d1e1dd5bfcfb657c8c9de21266d97	candidate
+50	quarkusio/quarkus	java	GHSA-qcxp-gm7m-4j5v	CVE-2026-50559	2026-07-29	CWE-287,CWE-863	Authn/authz bypass via path normalization	919b80017d85564143a845b38e9cca54aff5b3cc	excluded:bundled-fix
