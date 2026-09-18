@@ -20,7 +20,7 @@
 - **Dataset headline rule:** advisory date AND fix-commit date both after 2026-05-31; localized fix (≤10 non-test files, one bug); vulnerable code in JS/TS, Python, or Java. (spec §3.1)
 - **No exploits.** `candidates.tsv`/`manifest.json` are the vulnerability catalog only. (spec §8a)
 - **Nothing here scores.** Matching, cost-per-bug, intervals and labeling are a separate session. (spec §8)
-- **Commit attribution:** end every commit message with `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.
+- **Commit attribution:** NONE. Never add `Co-Authored-By: Claude` or a "Generated with Claude Code" line to commits or PRs (repo rule, CLAUDE.md top).
 - Work on branch `eval/open-weight-study`. Run Python via `./.venv/bin/python`; run tests with `./.venv/bin/pytest`.
 
 ---
@@ -170,9 +170,7 @@ Expected: PASS (2 passed)
 
 ```bash
 git add eval/__init__.py eval/db.py eval/tests/__init__.py eval/tests/test_db.py
-git commit -m "eval: SQLite run-log schema (runs/events/agent_calls/resources + failures view)
-
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+git commit -m "eval: SQLite run-log schema (runs/events/agent_calls/resources + failures view)"
 ```
 
 ---
@@ -260,9 +258,7 @@ Expected: PASS (4 passed)
 
 ```bash
 git add eval/usage.py eval/tests/test_usage.py
-git commit -m "eval: token/cost parsers for Claude Code result and Codex turn.completed
-
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+git commit -m "eval: token/cost parsers for Claude Code result and Codex turn.completed"
 ```
 
 ---
@@ -364,9 +360,7 @@ Expected: PASS (2 passed). If `psutil` is missing, install it: `./.venv/bin/pip 
 
 ```bash
 git add eval/resources.py eval/tests/test_resources.py
-git commit -m "eval: background peak-RSS + wall-clock sampler over a process tree
-
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+git commit -m "eval: background peak-RSS + wall-clock sampler over a process tree"
 ```
 
 ---
@@ -480,9 +474,7 @@ Expected: PASS (6 passed)
 
 ```bash
 git add eval/dataset/__init__.py eval/dataset/check.py eval/tests/test_dataset_check.py
-git commit -m "eval: pure dataset tier classifier (headline/control/scale/excluded)
-
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+git commit -m "eval: pure dataset tier classifier (headline/control/scale/excluded)"
 ```
 
 ---
@@ -578,9 +570,7 @@ Expected: PASS (2 passed)
 
 ```bash
 git add eval/dataset/enrich.py eval/tests/test_dataset_enrich.py
-git commit -m "eval: enrich candidates with fix-commit date and non-test file count via gh api
-
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+git commit -m "eval: enrich candidates with fix-commit date and non-test file count via gh api"
 ```
 
 ---
@@ -710,9 +700,7 @@ Expected: PASS (3 passed)
 
 ```bash
 git add eval/arms/__init__.py eval/arms/prompt.py eval/arms/findings.schema.json eval/tests/test_prompt.py
-git commit -m "eval: frozen plain-agent security-audit prompt + findings schema + validator
-
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+git commit -m "eval: frozen plain-agent security-audit prompt + findings schema + validator"
 ```
 
 ---
@@ -823,9 +811,7 @@ Expected: PASS (3 passed)
 
 ```bash
 git add eval/convert.py eval/tests/test_convert.py
-git commit -m "eval: capture Orion CONFIRM verdicts using the REAL contract (decision/reason/lead.text)
-
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+git commit -m "eval: capture Orion CONFIRM verdicts using the REAL contract (decision/reason/lead.text)"
 ```
 
 ---
@@ -922,9 +908,7 @@ Expected: PASS (3 passed)
 
 ```bash
 git add eval/arms/env.py eval/tests/test_arms_env.py
-git commit -m "eval: env builders (Ollama wiring, usage-shim PATH, Joern heap + keep-alive)
-
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+git commit -m "eval: env builders (Ollama wiring, usage-shim PATH, Joern heap + keep-alive)"
 ```
 
 ---
@@ -1035,9 +1019,7 @@ Expected: PASS (2 passed)
 
 ```bash
 git add eval/shim/claude eval/shim_setup.py eval/tests/test_shim.py
-git commit -m "eval: claude usage-capture shim (tee stream-json to per-run usage log)
-
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+git commit -m "eval: claude usage-capture shim (tee stream-json to per-run usage log)"
 ```
 
 ---
@@ -1114,9 +1096,7 @@ Expected: PASS (2 passed)
 
 ```bash
 git add eval/repo.py eval/tests/test_repo.py
-git commit -m "eval: repo checkout helper (vulnerable = parent of fix commit)
-
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+git commit -m "eval: repo checkout helper (vulnerable = parent of fix commit)"
 ```
 
 ---
@@ -1187,9 +1167,7 @@ Expected: PASS (2 passed)
 
 ```bash
 git add eval/queue.py eval/tests/test_queue.py
-git commit -m "eval: sequential resumable run queue (skip completed ok runs)
-
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+git commit -m "eval: sequential resumable run queue (skip completed ok runs)"
 ```
 
 ---
@@ -1283,9 +1261,7 @@ Expected: PASS (2 passed)
 
 ```bash
 git add eval/preflight.py eval/tests/test_preflight.py
-git commit -m "eval: Phase-0 preflight checker for the 8 prerequisites
-
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+git commit -m "eval: Phase-0 preflight checker for the 8 prerequisites"
 ```
 
 ---
@@ -1446,9 +1422,7 @@ Expected: PASS (2 passed)
 
 ```bash
 git add eval/arms/launch.py eval/tests/test_arms_launch.py
-git commit -m "eval: subprocess launcher with hang detection + Orion arm driver
-
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+git commit -m "eval: subprocess launcher with hang detection + Orion arm driver"
 ```
 
 ---
@@ -1552,9 +1526,7 @@ Expected: PASS (2 passed)
 
 ```bash
 git add eval/run.py eval/tests/test_run.py
-git commit -m "eval: top-level runner (run_one records status; catches launcher errors)
-
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+git commit -m "eval: top-level runner (run_one records status; catches launcher errors)"
 ```
 
 ---
@@ -1685,9 +1657,7 @@ Expected: PASS
 
 ```bash
 git add eval/run.py eval/arms/plain.py eval/README.md eval/tests/test_run_wiring.py eval/tests/test_plain.py
-git commit -m "eval: wire runner launcher (Orion vs plain arms) + Phase-0 smoke README
-
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+git commit -m "eval: wire runner launcher (Orion vs plain arms) + Phase-0 smoke README"
 ```
 
 ---
@@ -1727,9 +1697,7 @@ matching rule, and hypotheses frozen before any scored run.
 ```bash
 git add eval/PREREGISTRATION.md eval/CHANGELOG.md eval/dataset/manifest.json
 git rm eval/dataset/candidates.tsv
-git commit -m "eval: pre-registration v1 — freeze arms, dataset, prompt, matching rule, hypotheses
-
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+git commit -m "eval: pre-registration v1 — freeze arms, dataset, prompt, matching rule, hypotheses"
 git tag eval-prereg-v1
 ```
 
