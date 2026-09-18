@@ -1492,7 +1492,7 @@ def test_run_one_catches_launcher_exception(tmp_path):
         raise RuntimeError("launch failed")
     status = run.run_one(conn, arm="orion-gemma4",
                          repo_meta={"id": "r1", "tier": "headline"}, run_no=1,
-                         model_tags={"orion-gemma4": "gemma4"}, ollama_url="u",
+                         model_tags={"orion-gemma4": "gemma3:12b"}, ollama_url="u",
                          base_env={}, orion_commit="c", cli_versions="", launcher=boom)
     assert status == "error"
     err = conn.execute("select message from events where level='error'").fetchone()
@@ -1670,7 +1670,7 @@ def main(argv=None):
     return 0
 ```
 
-Add near the top of `eval/run.py`: `MODEL_TAGS = {"orion-gemma4": "gemma4", "orion-gptoss20b": "gpt-oss:20b", "plain-gemma4": "gemma4", "plain-sonnet5": "claude-sonnet-5", "plain-opus5": "claude-opus-5", "plain-gpt": "gpt-5.6-sol"}` (exact tags confirmed in Phase 0; frozen at pre-registration).
+Add near the top of `eval/run.py`: `MODEL_TAGS = {"orion-gemma4": "gemma3:12b", "orion-gptoss20b": "gpt-oss:20b", "plain-gemma4": "gemma3:12b", "plain-sonnet5": "claude-sonnet-5", "plain-opus5": "claude-opus-5", "plain-gpt": "gpt-5.6-sol"}` (exact tags confirmed in Phase 0; frozen at pre-registration).
 
 Create `eval/README.md` documenting: the Phase-0 smoke procedure (`ollama serve`, `ollama pull` the two model tags, `./.venv/bin/python -m eval.preflight`, then a NodeGoat mini-scan with `env.orion_env` to confirm `run_cypher` executes, `--json-schema` parses, the `claude` usage shim writes `usage.jsonl`, and Joern build fits with `ORION_JOERN_HEAP_GB=7`), how to run the study (`./.venv/bin/python -m eval.run --runs 3`), and how to query failures (`sqlite3 eval/runs.db "select * from failures"`).
 

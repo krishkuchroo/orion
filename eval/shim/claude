@@ -1,0 +1,20 @@
+#!/bin/bash
+# Usage-capture shim: tee claude's stdout to $EVAL_USAGE_LOG, pass it through unchanged.
+set -o pipefail
+if [ -n "$EVAL_REAL_CLAUDE" ]; then
+  REAL="$EVAL_REAL_CLAUDE"
+else
+  # first `claude` on PATH that is not this shim
+  SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+  REAL=""
+  IFS=':' read -ra DIRS <<< "$PATH"
+  for d in "${DIRS[@]}"; do
+    if [ "$d" != "$SELF_DIR" ] && [ -x "$d/claude" ]; then REAL="$d/claude"; break; fi
+  done
+fi
+if [ -z "$REAL" ]; then echo "usage-shim: real claude not found" >&2; exit 127; fi
+if [ -n "$EVAL_USAGE_LOG" ]; then
+  "$REAL" "$@" | tee -a "$EVAL_USAGE_LOG"
+else
+  "$REAL" "$@"
+fi

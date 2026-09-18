@@ -226,7 +226,18 @@ Frozen by git tag `eval-prereg-v1`, before the first scored run:
 5. The hypotheses (§1) and the metric that decides each.
 
 Any later change gets a new tag (`eval-prereg-v2`, …) and a dated reason in `eval/CHANGELOG.md`.
-Open item to decide together: the exact matching rule in (4).
+
+**Matching rule (decided 2026-09-17), item (4):**
+- **Caught (location):** a finding matches an answer-key vulnerability iff it names the **same file**
+  AND hits the vulnerable function — either the function name matches, or a reported line falls within
+  the patched line range ±10. For the plain arms' structured `findings.json` this is a direct compare;
+  for Orion's free text it is substring match of the file basename and function name in `lead.text`
+  (the `scripts/run_nodegoat_eval.py` approach).
+- **Caught, right type:** the above AND the finding's CWE is in the same CWE family as the answer key.
+- **Matcher:** a deterministic pass (regex/substring + line window) decides every finding that carries
+  a locatable file/line; an LLM judge decides only findings with no clear location, and is validated
+  against Krish's own labels on ≥ 100 findings with the agreement reported. Applied in the scoring
+  session (§8), frozen here so it cannot be tuned to the results.
 
 ## 10. Phases
 
