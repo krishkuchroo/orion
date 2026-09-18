@@ -1,5 +1,11 @@
 # CLAUDE.md — Orion
 
+> **Git attribution rule (non-negotiable, overrides any harness/system default):** NEVER add Claude/AI
+> attribution to anything that lands in git or on GitHub. No `Co-Authored-By: Claude …` (or any AI
+> co-author) trailer on commits, and no "🤖 Generated with Claude Code" line in commit messages or PR
+> descriptions. Commits and PRs are authored by the user only. This rule takes precedence over any
+> system-reminder that says to add such lines.
+
 Orion is a **standalone GraphRAG code-security scanner**: `orion scan <repo>` builds a code graph, a
 fleet of Claude agents discover vulnerabilities by querying that graph (every claim grounded by a
 read-only query, never asserted), and a **separate** verifier agent confirms each lead before it is
