@@ -1,0 +1,4 @@
+{"captured": false,
+ "note": "UNCAPTURED: documented message shape, not a real event. Replace with the first real usage-limit result event seen in Phase 0.",
+ "type": "result", "subtype": "error_during_execution", "is_error": true,
+ "result": "Claude AI usage limit reached|1760000000"}

@@ -1,5 +1,7 @@
 import argparse
+import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -29,6 +31,40 @@ EFFORT = {
 }
 
 
+# Usage-limit signatures. UNCAPTURED: these are the documented CLI messages ("Claude AI usage limit
+# reached", "5-hour limit reached", Codex "You've hit your usage limit", HTTP 429), not text
+# copied from a real event -- eval/tests/fixtures/limit_{claude,codex}.json carry "captured": false.
+# Replace them with the first real limit event seen in Phase 0 and tighten the match to it.
+_LIMIT_RE = re.compile(r"usage limit|rate limit|limit reached|hit your limit|"
+                       r"(?:http|status|code)\W{0,3}429|\b429\b.{0,3}too many requests", re.I)
+_EVENT_FIELDS = ("subtype", "error", "message", "result", "reason")
+
+
+def _line_signals_limit(line: str) -> bool:
+    try:
+        ev = json.loads(line)
+    except ValueError:
+        return bool(_LIMIT_RE.search(line))  # raw CLI stderr / plain text
+    if not isinstance(ev, dict):
+        return False
+    # structured events: only error/result-shaped ones, so the model's own prose about
+    # rate limiting (assistant/tool events) is never mistaken for a CLI limit
+    if not (ev.get("is_error") or ev.get("type") in ("result", "error") or "error" in ev
+            or str(ev.get("type", "")).endswith("failed")):
+        return False
+    text = " ".join(v if isinstance(v, str) else json.dumps(v)
+                    for v in (ev.get(k) for k in _EVENT_FIELDS) if v)
+    return bool(_LIMIT_RE.search(text.replace("_", " ")))
+
+
+def classify_exit(status: str, lines: list, *, source: str) -> str:
+    """'aborted' when a non-ok run's output carries a usage/rate-limit signature (the model did not
+    fail; the subscription ran out), otherwise the original status. `source` is claude|codex."""
+    if status == "ok":
+        return status
+    return "aborted" if any(_line_signals_limit(l) for l in lines) else status
+
+
 def git_head(path: str = ".") -> str:
     try:
         return subprocess.run(["git", "-C", path, "rev-parse", "HEAD"],
@@ -41,16 +77,21 @@ def run_one(conn, *, arm, repo_meta, run_no, model_tags, base_env,
             orion_commit, cli_versions, launcher, efforts=EFFORT) -> str:
     model_tag = model_tags.get(arm, arm)
     effort = efforts.get(arm, "")
+    attempt_no = db.next_attempt(conn, arm=arm, repo=repo_meta["id"],
+                                 commit_sha=repo_meta["commit_sha"],
+                                 case_id=repo_meta.get("case_id", ""), run_no=run_no)
     rid = db.start_run(conn, arm=arm, repo=repo_meta["id"], tier=repo_meta.get("tier", ""),
                        run_no=run_no, model_tag=model_tag, cli_versions=cli_versions,
                        orion_commit=orion_commit,
                        commit_kind=repo_meta.get("commit_kind", ""),
                        commit_sha=repo_meta["commit_sha"],
                        case_id=repo_meta.get("case_id", ""),
-                       attempt_no=repo_meta.get("attempt_no", 1), effort=effort)
-    repo_meta = dict(repo_meta, run_no=run_no)
+                       attempt_no=attempt_no, effort=effort)
+    repo_meta = dict(repo_meta, run_no=run_no, attempt_no=attempt_no)
+    lines = []
 
     def on_line(line):
+        lines.append(line)
         db.log_event(conn, rid, stage="run", level="info", message=line[:2000])
 
     sampler = {"s": None}  # attached once the arm's process exists (pid handoff)
@@ -88,8 +129,12 @@ def run_one(conn, *, arm, repo_meta, run_no, model_tags, base_env,
                      message=f"recording run result failed: {e!r}"[:2000])
         db.finish_run(conn, rid, "error")
         return "error"
-    db.finish_run(conn, rid, res.status)
-    return res.status
+    final = classify_exit(res.status, lines, source="codex" if arm == "plain-gpt" else "claude")
+    if final != res.status:
+        db.log_event(conn, rid, stage="run", level="warn",
+                     message=f"usage limit hit ({res.status} -> {final}); not scored, will resume")
+    db.finish_run(conn, rid, final)
+    return final
 
 
 def _log_resource(conn, rid, sampler, t0):
@@ -168,7 +213,7 @@ def build_launcher(*, base_env, shim_dir, graph_cache, _plain=_default_plain, _l
     return launcher
 
 
-def main(argv=None):
+def main(argv=None, sleep=time.sleep):
     import json as _json
     from . import preflight
     from .shim_setup import shim_dir as _shim_dir
@@ -179,6 +224,8 @@ def main(argv=None):
     ap.add_argument("--runs", type=int, default=3)
     ap.add_argument("--tree-root", default=os.path.join(tempfile.gettempdir(), "orion-eval-trees"))
     ap.add_argument("--mirror-root", default="eval/mirrors/")
+    ap.add_argument("--resume-wait", type=int, default=900,
+                    help="seconds to sleep after a usage-limit abort before re-planning")
     args = ap.parse_args(argv)
     arms = args.arm or ARMS
     repos = _json.loads(open(args.manifest).read())["repos"]  # [{id, repo_url, tier, ...}]
@@ -189,27 +236,40 @@ def main(argv=None):
             if not (r.get("commit_sha") or r.get("vulnerable_commit") or r.get("patched_commit")):
                 raise ValueError("manifest row has none of commit_sha/vulnerable_commit/patched_commit")
             repo.mirror(r["repo_url"], r["mirror_dir"])
-            if not r.get("commit_sha"):
-                r["commit_sha"] = r.get("vulnerable_commit") or repo.vulnerable_commit(
+            if r.get("vulnerable_commit") and r.get("patched_commit"):
+                commits = [(r["vulnerable_commit"], "vulnerable"), (r["patched_commit"], "patched")]
+            else:  # no pair: commit_sha (or the vulnerable side) is the vulnerable commit
+                sha = r.get("commit_sha") or r.get("vulnerable_commit") or repo.vulnerable_commit(
                     r["patched_commit"], r["mirror_dir"])
-                r.setdefault("commit_kind", "vulnerable")
+                commits = [(sha, "vulnerable")]
+            r["commits"] = commits
             good.append(r)
         except Exception as e:
             print(f"SKIPPING repo {r.get('id')}: {e}", flush=True)
-    repos = good
-    repo_ids = [r["id"] for r in repos]
-    meta_by_id = {r["id"]: r for r in repos}
+    items, meta_by_key = {}, {}
+    for r in good:
+        case = r.get("case_id", "")
+        for sha, kind in r["commits"]:
+            items.setdefault(r["id"], []).append((sha, kind, case))
+            meta_by_key[(r["id"], sha, case)] = dict(r, commit_sha=sha, commit_kind=kind, case_id=case)
     conn = db.connect(args.db)
     versions = "; ".join(f"{r['tool']}={r['detail']}" for r in preflight.check())
     orion_commit = git_head()
     graph_cache = {}
     launcher = build_launcher(base_env=dict(os.environ), shim_dir=_shim_dir(),
                               graph_cache=graph_cache, tree_root=args.tree_root)
-    todo = queue.pending(conn, queue.plan(arms, repo_ids, args.runs))
-    for arm, repo_id, n in todo:
-        run_one(conn, arm=arm, repo_meta=meta_by_id[repo_id], run_no=n,
-                model_tags=MODEL_TAGS, base_env=dict(os.environ),
-                orion_commit=orion_commit, cli_versions=versions, launcher=launcher)
+    while True:  # a usage-limit abort pauses, then re-plans: the key comes back as a new attempt
+        todo = queue.pending(conn, queue.plan(arms, items, args.runs))
+        if not todo:
+            break
+        for arm, repo_id, sha, case, n in todo:
+            status = run_one(conn, arm=arm, repo_meta=meta_by_key[(repo_id, sha, case)], run_no=n,
+                             model_tags=MODEL_TAGS, base_env=dict(os.environ),
+                             orion_commit=orion_commit, cli_versions=versions, launcher=launcher)
+            if status == "aborted":
+                print(f"usage limit hit; resuming in {args.resume_wait}s", flush=True)
+                sleep(args.resume_wait)
+                break
     return 0
 
 

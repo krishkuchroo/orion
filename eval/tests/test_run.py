@@ -134,3 +134,59 @@ def test_run_one_finishes_run_when_post_launch_logging_fails(tmp_path):
     assert conn.execute("select ended from runs").fetchone()[0] is not None   # never left 'running'
     err = conn.execute("select message from events where level='error'").fetchone()
     assert err is not None and "bogus" in err[0]
+
+
+def test_run_one_marks_usage_limit_aborted_and_takes_next_attempt(tmp_path):
+    conn = db.connect(str(tmp_path / "t.db"))
+
+    def launcher(arm, repo_meta, model_tag, on_line, *, effort, on_start):
+        on_line('{"type":"result","is_error":true,"result":"Claude AI usage limit reached|1"}')
+        return ArmResult(status="error", findings_path=None, usage=[])
+    assert _run_one(conn, launcher) == "aborted"
+
+    seen = {}
+
+    def launcher2(arm, repo_meta, model_tag, on_line, *, effort, on_start):
+        seen["attempt"] = repo_meta["attempt_no"]
+        return ArmResult(status="ok", findings_path=str(tmp_path / "f.json"), usage=[])
+    assert _run_one(conn, launcher2) == "ok"
+    rows = conn.execute("select attempt_no, status from runs order by attempt_no").fetchall()
+    assert rows == [(1, "aborted"), (2, "ok")] and seen["attempt"] == 2
+
+
+def _patch_main(monkeypatch, tmp_path, statuses, calls):
+    import json
+    from eval import preflight, shim_setup
+    man = tmp_path / "m.json"
+    man.write_text(json.dumps({"repos": [{"id": "r1", "repo_url": "u", "tier": "headline",
+                                          "vulnerable_commit": "v1", "patched_commit": "p1"}]}))
+    monkeypatch.setattr(run.repo, "mirror", lambda *a, **k: None)
+    monkeypatch.setattr(preflight, "check", lambda: [])
+    monkeypatch.setattr(shim_setup, "shim_dir", lambda: str(tmp_path))
+    monkeypatch.setattr(run, "build_launcher", lambda **k: None)
+    monkeypatch.setattr(run, "git_head", lambda *a: "c")
+    it = iter(statuses)
+
+    def fake_run_one(conn, *, arm, repo_meta, run_no, **kw):
+        st = next(it)
+        calls.append((arm, repo_meta["commit_sha"], repo_meta["commit_kind"], run_no, st))
+        a = db.next_attempt(conn, arm=arm, repo="r1", commit_sha=repo_meta["commit_sha"],
+                            case_id="", run_no=run_no)
+        rid = db.start_run(conn, arm=arm, repo="r1", tier="h", run_no=run_no, model_tag="m",
+                           cli_versions="", orion_commit="c", commit_sha=repo_meta["commit_sha"],
+                           attempt_no=a)
+        db.finish_run(conn, rid, st)
+        return st
+    monkeypatch.setattr(run, "run_one", fake_run_one)
+    return ["--arm", "plain-opus5", "--runs", "1", "--manifest", str(man),
+            "--db", str(tmp_path / "t.db"), "--resume-wait", "7"]
+
+
+def test_main_plans_both_commits_and_resumes_after_abort(tmp_path, monkeypatch):
+    calls, sleeps = [], []
+    argv = _patch_main(monkeypatch, tmp_path, ["aborted", "ok", "ok"], calls)
+    assert run.main(argv, sleep=sleeps.append) == 0
+    assert sleeps == [7]
+    assert calls == [("plain-opus5", "v1", "vulnerable", 1, "aborted"),
+                     ("plain-opus5", "v1", "vulnerable", 1, "ok"),
+                     ("plain-opus5", "p1", "patched", 1, "ok")]
