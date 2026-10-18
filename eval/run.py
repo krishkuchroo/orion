@@ -1,11 +1,12 @@
 import argparse
-import glob
 import os
 import shutil
 import subprocess
 import tempfile
+import time
 
 from . import db, queue, repo
+from .resources import PhaseSampler
 
 ARMS = ["orion-gemma4", "orion-gptoss20b", "plain-gemma4",
         "plain-sonnet5", "plain-opus5", "plain-gpt"]
@@ -20,6 +21,13 @@ MODEL_TAGS = {
     "plain-gpt": "gpt-5.6-sol",
 }
 
+# Reasoning effort per arm (design: Claude Code arms run at xhigh). Arms absent here run
+# at the CLI default and record effort='' -- Task A6 turns these into real CLI flags.
+EFFORT = {
+    "plain-sonnet5": "xhigh",
+    "plain-opus5": "xhigh",
+}
+
 
 def git_head(path: str = ".") -> str:
     try:
@@ -29,38 +37,72 @@ def git_head(path: str = ".") -> str:
         return ""
 
 
-def run_one(conn, *, arm, repo_meta, run_no, model_tags, ollama_url, base_env,
-            orion_commit, cli_versions, launcher) -> str:
+def run_one(conn, *, arm, repo_meta, run_no, model_tags, base_env,
+            orion_commit, cli_versions, launcher, efforts=EFFORT) -> str:
     model_tag = model_tags.get(arm, arm)
+    effort = efforts.get(arm, "")
     rid = db.start_run(conn, arm=arm, repo=repo_meta["id"], tier=repo_meta.get("tier", ""),
                        run_no=run_no, model_tag=model_tag, cli_versions=cli_versions,
                        orion_commit=orion_commit,
                        commit_kind=repo_meta.get("commit_kind", ""),
                        commit_sha=repo_meta["commit_sha"],
                        case_id=repo_meta.get("case_id", ""),
-                       attempt_no=repo_meta.get("attempt_no", 1))
+                       attempt_no=repo_meta.get("attempt_no", 1), effort=effort)
     repo_meta = dict(repo_meta, run_no=run_no)
 
     def on_line(line):
         db.log_event(conn, rid, stage="run", level="info", message=line[:2000])
+
+    sampler = {"s": None}  # attached once the arm's process exists (pid handoff)
+
+    def on_start(proc):
+        if sampler["s"] is not None:
+            sampler["s"].__exit__(None, None, None)
+        sampler["s"] = PhaseSampler(proc.pid).__enter__()
+
+    t0 = time.monotonic()
     try:
-        status, _findings = launcher(arm, repo_meta, model_tag, on_line)
+        res = launcher(arm, repo_meta, model_tag, on_line, effort=effort, on_start=on_start)
     except Exception as e:
+        _log_resource(conn, rid, sampler["s"], t0)
         db.log_event(conn, rid, stage="run", level="error", message=str(e)[:2000])
         db.finish_run(conn, rid, "error")
         return "error"
-    db.finish_run(conn, rid, status)
-    return status
+    _log_resource(conn, rid, sampler["s"], t0)
+    for block in res.usage:
+        db.log_agent_call(conn, rid, session_id=None, stage="run",
+                          input_tokens=block.get("uncached_in"), output_tokens=block.get("out"),
+                          cache_read=block.get("cache_read"), cache_write=block.get("cache_write"),
+                          turns_used=None, turn_limit=None, peak_context=None,
+                          exit_reason=None, error_head=None)
+    for step in res.steps or []:
+        db.log_step(conn, rid, **step)
+    if res.findings_path is None:
+        db.log_event(conn, rid, stage="run", level="warn",
+                     message="no valid findings file; scored as a miss")
+    db.finish_run(conn, rid, res.status)
+    return res.status
 
 
-def _default_orion(**kw):
-    from .arms.launch import orion_arm
-    return orion_arm(**kw)
+def _log_resource(conn, rid, sampler, t0):
+    """One resources row for the run phase. Peak RSS comes only from a sampler that was
+    attached to a live process; otherwise it is recorded as missing (None), never 0."""
+    if sampler is not None:
+        sampler.__exit__(None, None, None)
+        wall, rss = sampler.wall_seconds, sampler.peak_rss_mb
+    else:
+        wall, rss = time.monotonic() - t0, None
+    db.log_resource(conn, rid, phase="run", wall_seconds=wall, peak_rss_mb=rss,
+                    graph_nodes=None, graph_edges=None, loc=None)
 
 
 def _default_plain(**kw):
     from .arms.plain import plain_arm  # runs Claude Code / Codex with TASK_PROMPT
     return plain_arm(**kw)
+
+
+def _default_lm(**kw):
+    raise NotImplementedError("orion-lm arms land in Task F3")
 
 
 def run_dir_for(arm, repo_meta, root=os.path.join("eval", "runs")):
@@ -84,47 +126,38 @@ def _leak_guard(tree):
         d = parent
 
 
-def build_launcher(*, ollama_url, base_env, shim_dir, graph_cache,
-                   _orion=_default_orion, _plain=_default_plain, _export=repo.export_tree, tree_root=None):
+def build_launcher(*, base_env, shim_dir, graph_cache, _plain=_default_plain, _lm=_default_lm,
+                   _export=repo.export_tree, tree_root=None):
     tree_root = tree_root or os.path.join(tempfile.gettempdir(), "orion-eval-trees")
-    def launcher(arm, repo_meta, model_tag, on_line):
-        rid = repo_meta["id"]
+
+    def launcher(arm, repo_meta, model_tag, on_line, *, effort, on_start):
         sha = repo_meta["commit_sha"]
         run_dir = os.path.abspath(run_dir_for(arm, repo_meta))
         tree = os.path.abspath(os.path.join(run_dir_for(arm, repo_meta, tree_root), "tree"))
         _leak_guard(tree)
         usage_log = os.path.join(run_dir, "usage.jsonl")
-        name = "findings.orion.json" if arm.startswith("orion-") else "findings.json"
-        json_out = os.path.join(run_dir, name)
+        json_out = os.path.join(run_dir, "findings.json")
         try:
             os.makedirs(run_dir, exist_ok=True)
             _export(repo_meta["mirror_dir"], sha, tree)
+            common = dict(arm=arm, repo_dir=tree, model_tag=model_tag, effort=effort,
+                          json_out=json_out, usage_log=usage_log, base_env=base_env,
+                          on_line=on_line, on_start=on_start)
             if arm.startswith("orion-"):
-                status, sid = _orion(repo_dir=tree, ollama_url=ollama_url,
-                                     model_tag=model_tag, json_out=json_out, usage_log=usage_log,
-                                     shim_dir=shim_dir, base_env=base_env, on_line=on_line,
-                                     scan_id=graph_cache.get((rid, sha)))
-                if sid:
-                    graph_cache[(rid, sha)] = sid
+                # in-process orion-lm arms (Task F3); default seam refuses so nothing
+                # silently runs the deleted `orion scan` subprocess path
+                res = _lm(graph_cache=graph_cache, **common)
             else:
-                status, _ = _plain(arm=arm, repo_dir=tree, ollama_url=ollama_url,
-                                   model_tag=model_tag, json_out=json_out, usage_log=usage_log,
-                                   shim_dir=shim_dir, base_env=base_env, on_line=on_line)
-            # anything an arm left inside the tree is copied out before the tree is deleted
-            for f in glob.glob(os.path.join(tree, "findings*.json")) + \
-                    glob.glob(os.path.join(tree, "usage.jsonl")):
-                dst = os.path.join(run_dir, os.path.basename(f))
-                if not os.path.exists(dst):
-                    shutil.copy2(f, dst)
+                # the arm copies its findings.json out of the tree before it is deleted
+                res = _plain(shim_dir=shim_dir, **common)
         finally:
             shutil.rmtree(tree, ignore_errors=True)
-        return status, json_out
+        return res
     return launcher
 
 
 def main(argv=None):
     import json as _json
-    import os
     from . import preflight
     from .shim_setup import shim_dir as _shim_dir
     ap = argparse.ArgumentParser()
@@ -134,7 +167,6 @@ def main(argv=None):
     ap.add_argument("--runs", type=int, default=3)
     ap.add_argument("--tree-root", default=os.path.join(tempfile.gettempdir(), "orion-eval-trees"))
     ap.add_argument("--mirror-root", default="eval/mirrors/")
-    ap.add_argument("--ollama-url", default="http://127.0.0.1:11434")
     args = ap.parse_args(argv)
     arms = args.arm or ARMS
     repos = _json.loads(open(args.manifest).read())["repos"]  # [{id, repo_url, tier, ...}]
@@ -159,13 +191,12 @@ def main(argv=None):
     versions = "; ".join(f"{r['tool']}={r['detail']}" for r in preflight.check())
     orion_commit = git_head()
     graph_cache = {}
-    launcher = build_launcher(ollama_url=args.ollama_url, base_env=dict(os.environ),
-                              shim_dir=_shim_dir(), graph_cache=graph_cache,
-                              tree_root=args.tree_root)
+    launcher = build_launcher(base_env=dict(os.environ), shim_dir=_shim_dir(),
+                              graph_cache=graph_cache, tree_root=args.tree_root)
     todo = queue.pending(conn, queue.plan(arms, repo_ids, args.runs))
     for arm, repo_id, n in todo:
         run_one(conn, arm=arm, repo_meta=meta_by_id[repo_id], run_no=n,
-                model_tags=MODEL_TAGS, ollama_url=args.ollama_url, base_env=dict(os.environ),
+                model_tags=MODEL_TAGS, base_env=dict(os.environ),
                 orion_commit=orion_commit, cli_versions=versions, launcher=launcher)
     return 0
 

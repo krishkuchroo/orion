@@ -3,6 +3,7 @@ import os
 import pytest
 
 from eval import run
+from eval.arms import ArmResult
 
 
 def _meta(commit, **kw):
@@ -10,53 +11,61 @@ def _meta(commit, **kw):
                  "case_id": "", "run_no": 1, "attempt_no": 1, "mirror_dir": "/m"}, **kw)
 
 
+def _launcher(tmp_path, **kw):
+    base = dict(base_env={}, shim_dir="/s", graph_cache={}, tree_root=str(tmp_path / "trees"))
+    base.update(kw)
+    return run.build_launcher(**base)
+
+
 def test_build_launcher_dispatches_exports_and_cleans_up(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    called = {"orion_scan_ids": [], "exports": [], "repo_dirs": [], "all_paths": []}
+    called = {"exports": [], "plain": []}
 
     def fake_export(mirror, sha, dest, **kw):
         called["exports"].append((mirror, sha, dest))
         os.makedirs(dest)
         open(os.path.join(dest, "a.js"), "w").write("x")
 
-    def fake_orion(**kw):
-        called["orion_scan_ids"].append(kw["scan_id"])
-        called["repo_dirs"].append(kw["repo_dir"])
-        called["all_paths"] += [kw["repo_dir"], kw["json_out"], kw["usage_log"]]
+    def fake_plain(**kw):
+        called["plain"].append(kw)
         assert os.path.exists(os.path.join(kw["repo_dir"], "a.js"))
-        open(kw["json_out"], "w").write("[]")
-        return "ok", "built-" + os.path.basename(os.path.dirname(os.path.dirname(kw["repo_dir"])))
+        open(kw["json_out"], "w").write('{"findings": []}')
+        return ArmResult(status="ok", findings_path=kw["json_out"],
+                         usage=[{"uncached_in": 1, "cache_read": None, "cache_write": None,
+                                 "out": 2, "reasoning": None}])
+    launcher = _launcher(tmp_path, _plain=fake_plain, _export=fake_export)
+    res1 = launcher("plain-opus5", _meta("c1"), "opus", lambda l: None, effort="xhigh", on_start=None)
+    res3 = launcher("plain-gpt", _meta("c1", attempt_no=2), "gpt", lambda l: None, effort="", on_start=None)
+    assert isinstance(res1, ArmResult) and res1.usage[0]["uncached_in"] == 1
+    kw1, kw3 = called["plain"]
+    assert kw1["arm"] == "plain-opus5" and kw3["arm"] == "plain-gpt"
+    assert kw1["effort"] == "xhigh" and kw1["model_tag"] == "opus"
+    assert "ollama_url" not in kw1
+    run_dir = str(tmp_path / "eval/runs/plain-opus5/r1/c1/_/1")
+    tree = str(tmp_path / "trees/plain-opus5/r1/c1/_/1/tree")
+    assert called["exports"][0] == ("/m", "c1", tree)
+    assert kw1["repo_dir"] == tree
+    assert kw1["usage_log"] == f"{run_dir}/usage.jsonl"
+    assert not os.path.exists(tree)                          # tree deleted
+    assert res1.findings_path == f"{run_dir}/findings.json"  # findings kept in the run dir
+    assert os.path.exists(res1.findings_path)
+    assert res3.findings_path == str(tmp_path / "eval/runs/plain-gpt/r1/c1/_/1.a2/findings.json")
+    for kw in called["plain"]:
+        assert all(os.path.isabs(kw[k]) for k in ("repo_dir", "json_out", "usage_log"))
+        assert not kw["repo_dir"].startswith(str(tmp_path / "eval"))
+
+
+def test_build_launcher_forwards_on_start(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    marker = object()
+    seen = {}
 
     def fake_plain(**kw):
-        called["plain"] = kw["arm"]
-        called["repo_dirs"].append(kw["repo_dir"])
-        called["all_paths"] += [kw["repo_dir"], kw["json_out"], kw["usage_log"]]
-        open(kw["json_out"], "w").write("[]")
-        return "ok", "path"
-    cache = {}
-    launcher = run.build_launcher(ollama_url="u", base_env={}, shim_dir="/s", graph_cache=cache, tree_root=str(tmp_path / 'trees'),
-                                  _orion=fake_orion, _plain=fake_plain, _export=fake_export)
-    s1, out1 = launcher("orion-gemma4", _meta("c1"), "gemma3:12b", lambda l: None)
-    launcher("orion-gptoss20b", _meta("c1", run_no=2), "gptoss", lambda l: None)
-    launcher("orion-gemma4", _meta("c2"), "gemma3:12b", lambda l: None)
-    s3, out3 = launcher("plain-opus5", _meta("c1", attempt_no=2), "opus", lambda l: None)
-    # c1 first run built, second reused; a different commit does not reuse
-    assert called["orion_scan_ids"][1] == cache[("r1", "c1")]
-    assert called["orion_scan_ids"][2] is None
-    assert called["orion_scan_ids"][0] is None
-    assert len(cache) == 2 and ("r1", "c1") in cache and ("r1", "c2") in cache
-    assert called["plain"] == "plain-opus5"
-    run_dir = str(tmp_path / "eval/runs/orion-gemma4/r1/c1/_/1")
-    tree = str(tmp_path / "trees/orion-gemma4/r1/c1/_/1/tree")
-    assert called["exports"][0] == ("/m", "c1", tree)
-    assert called["repo_dirs"][0] == tree
-    assert not os.path.exists(tree)                          # tree deleted
-    assert os.path.exists(f"{run_dir}/findings.orion.json")  # findings kept
-    assert out1 == f"{run_dir}/findings.orion.json"
-    assert out3 == str(tmp_path / "eval/runs/plain-opus5/r1/c1/_/1.a2/findings.json")
-    assert os.path.exists(out3)
-    assert all(os.path.isabs(p) for p in called["all_paths"])
-    assert not any(p.startswith(str(tmp_path / "eval")) for p in called["repo_dirs"])
+        seen["on_start"] = kw["on_start"]
+        return ArmResult(status="ok", findings_path=None, usage=[])
+    launcher = _launcher(tmp_path, _plain=fake_plain, _export=lambda *a, **k: os.makedirs(a[2]))
+    launcher("plain-opus5", _meta("c1"), "opus", lambda l: None, effort="xhigh", on_start=marker)
+    assert seen["on_start"] is marker
 
 
 def test_build_launcher_deletes_tree_on_failure(tmp_path, monkeypatch):
@@ -67,11 +76,38 @@ def test_build_launcher_deletes_tree_on_failure(tmp_path, monkeypatch):
 
     def boom(**kw):
         raise RuntimeError("x")
-    launcher = run.build_launcher(ollama_url="u", base_env={}, shim_dir="/s", graph_cache={}, tree_root=str(tmp_path / 'trees'),
-                                  _plain=boom, _export=fake_export)
+    launcher = _launcher(tmp_path, _plain=boom, _export=fake_export)
     with pytest.raises(RuntimeError):
-        launcher("plain-opus5", _meta("c1", case_id="k"), "opus", lambda l: None)
+        launcher("plain-opus5", _meta("c1", case_id="k"), "opus", lambda l: None, effort="", on_start=None)
     assert not os.path.exists(tmp_path / "trees/plain-opus5/r1/c1/k/1/tree")
+
+
+def test_orion_arms_raise_until_task_f3(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    def fake_export(mirror, sha, dest, **kw):
+        os.makedirs(dest)
+    launcher = _launcher(tmp_path, _export=fake_export, _plain=lambda **kw: pytest.fail("plain ran"))
+    with pytest.raises(NotImplementedError, match="F3"):
+        launcher("orion-lm", _meta("c1"), "m", lambda l: None, effort="", on_start=None)
+    assert not os.path.exists(tmp_path / "trees/orion-lm/r1/c1/_/1/tree")   # tree still cleaned up
+
+
+def test_lm_seam_receives_tree_and_graph_cache(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    cache = {}
+    seen = {}
+
+    def fake_lm(**kw):
+        seen.update(kw)
+        return ArmResult(status="ok", findings_path=None, usage=[])
+    launcher = _launcher(tmp_path, graph_cache=cache, _lm=fake_lm,
+                         _export=lambda *a, **k: os.makedirs(a[2]))
+    res = launcher("orion-lm", _meta("c1"), "m", lambda l: None, effort="", on_start=None)
+    assert res.status == "ok"
+    assert seen["arm"] == "orion-lm" and seen["graph_cache"] is cache
+    assert seen["repo_dir"] == str(tmp_path / "trees/orion-lm/r1/c1/_/1/tree")
+    assert seen["json_out"] == str(tmp_path / "eval/runs/orion-lm/r1/c1/_/1/findings.json")
 
 
 def test_git_head_returns_string():
@@ -80,7 +116,6 @@ def test_git_head_returns_string():
 
 def test_leak_guard_rejects_tree_under_repo_marker(tmp_path):
     (tmp_path / "CLAUDE.md").write_text("x")
-    launcher = run.build_launcher(ollama_url="u", base_env={}, shim_dir="/s", graph_cache={},
-                                  tree_root=str(tmp_path / "t"), _export=lambda *a, **k: None)
+    launcher = _launcher(tmp_path, tree_root=str(tmp_path / "t"), _export=lambda *a, **k: None)
     with pytest.raises(RuntimeError, match="CLAUDE.md"):
-        launcher("plain-opus5", _meta("c1"), "opus", lambda l: None)
+        launcher("plain-opus5", _meta("c1"), "opus", lambda l: None, effort="", on_start=None)
