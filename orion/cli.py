@@ -5,10 +5,17 @@
     orion scan ./NodeGoat --watch           # follow live progress while the scan runs
     orion scan ./NodeGoat --json out.json   # also write the verdicts as JSON
     orion scan ./NodeGoat --quiet           # suppress per-event prints (still logs to file)
+    orion scan ./NodeGoat --engine lm --model <path>   # in-process Orion-LM discovery, no claude
 
 Discovery and verification are two SEPARATE `claude -p` sessions (see the design doc) fanned out
 and joined here; this module owns only the wiring -- build -> index -> discover -> verify ->
 report -- and the run's progress log.
+
+`--engine lm` (default: `claude`) swaps discovery for the in-process Orion-LM engine
+(`orion/lm/engine.py`, MLX-LM; never `claude_cli`) and SKIPS the verifier: every lead is reported
+as INCONCLUSIVE "unverified (engine=lm)". The lm sink profile (`profiles.with_lm_sinks`) is applied
+at BUILD time so the graph carries the extra CandidateFlows; with `--scan-id` the existing graph is
+used as-is. Nothing on the claude path changes.
 
 graph_build / embed / discover / verify pull in the Neo4j driver, the local embedding model, and
 the `claude` CLI subprocess wrapper. Those are imported LAZILY inside `_run_scan`, not at module
@@ -51,6 +58,13 @@ def _run_dir(scan_id: str) -> str:
     return str(path)
 
 
+def _load_lm_model(path: str):
+    """Load the Orion-LM model wrapper for `path` (MLX-LM, llama-cpp fallback). A seam: tests replace
+    it, and the MLX import stays inside the lm branch -- `orion.lm.model`'s top level is stdlib-only."""
+    from .lm import model as lm_model
+    return lm_model.load(path)
+
+
 def _run_scan(args: argparse.Namespace) -> int:
     # Cheap arg validation BEFORE the heavy lazy imports below, so a typo'd path fails instantly
     # instead of after loading the embedding model / Neo4j driver.
@@ -63,6 +77,12 @@ def _run_scan(args: argparse.Namespace) -> int:
     if args.repo and not Path(args.repo).is_dir():
         print(f"orion scan: repo path not found or not a directory: {args.repo}", file=sys.stderr)
         return 2
+    lm_engine = getattr(args, "engine", "claude") == "lm"
+    # There is no default model path: `--engine lm` without `--model` is a usage error, not a crash
+    # deep inside the pipeline after the graph has been built.
+    if lm_engine and not args.lm_model:
+        print("orion scan: --engine lm needs --model <path to the Orion-LM model>", file=sys.stderr)
+        return 2
 
     # Deferred on purpose -- see module docstring.
     from . import config, discover, embed, graph_build, graphdb, report, verify
@@ -71,6 +91,15 @@ def _run_scan(args: argparse.Namespace) -> int:
     needs_build = not args.scan_id
     scan_id = args.scan_id or graph_build.scan_id_for(args.repo)
     run_dir = _run_dir(scan_id)
+
+    # The lm sink profile must be in the graph, so it is chosen BEFORE the build and handed to
+    # graph_build.build(profile=). select_profile ignores the language today (it only keys on
+    # package.json/express), so passing none here mirrors the discovery-profile pick below; build
+    # resolves the Joern frontend itself and would select the same base profile.
+    lm_profile = None
+    if lm_engine and args.repo:
+        from .graph import profiles
+        lm_profile = profiles.with_lm_sinks(profiles.select_profile(args.repo))
 
     # In --watch mode the foreground `tail` is the one rendering progress (reading the same
     # JSONL), so the background pipeline's own logger stays quiet to avoid printing every event
@@ -100,14 +129,23 @@ def _run_scan(args: argparse.Namespace) -> int:
         on_event(_event("build", "start", detail=f"building graph for {args.repo}"))
         # Overlap the semantic index with persist: build runs _index_semantic(batch) concurrently
         # with the persist write (item 4), so the two independent costs no longer serialize.
+        # The claude path passes no `profile` (build auto-selects, exactly as before); the lm path
+        # pins the extended-sink profile so pathfind emits the extra CandidateFlows.
+        build_kwargs = {"profile": lm_profile} if lm_profile is not None else {}
+        if lm_profile is not None:
+            on_event(_event("build", "start", detail=f"lm sink profile {lm_profile.name} applied to the build"))
         graph_build.build(args.repo, args.language, on_event,
                           stream=args.stream, queue_size=args.queue_size,
-                          on_batch=_index_semantic)
+                          on_batch=_index_semantic, **build_kwargs)
         on_event(_event("build", "done", detail="graph build complete"))
     else:
         on_event(_event("build", "done", detail=f"using existing scan_id {scan_id}"))
         if args.repo:
             _index_semantic()   # --scan-id path: read spans from the already-persisted graph
+        if lm_engine:
+            on_event(_event("discover", "warn",
+                            detail=f"--scan-id: existing graph {scan_id} used as-is (built without the lm "
+                                   "sink profile; rebuild with `orion scan <repo> --engine lm` to add its flows)"))
 
     # Best-effort: ensure the GLOBAL exploit-reference corpus is indexed (once) so the verifier's
     # exploit_search tool works. Builds ONLY if the metadata file is present locally -- never
@@ -130,6 +168,8 @@ def _run_scan(args: argparse.Namespace) -> int:
     if args.repo:
         from .graph import profiles
         profile = profiles.select_profile(args.repo)
+    if lm_profile is not None:
+        profile = lm_profile   # the same object the graph was built with
 
     # Opt-in runtime enrichment (--runtime): EXECUTE the target and fold observed coverage back into
     # the graph before discovery reads it. Best-effort by contract -- a failure is an event, never an
@@ -157,6 +197,8 @@ def _run_scan(args: argparse.Namespace) -> int:
         except Exception as exc:  # noqa: BLE001 -- best-effort sizing; the floor is a safe default
             on_event(_event("discover", "warn",
                             detail=f"graph node count unavailable, using base discovery timeout: {exc}"))
+        if lm_engine:
+            return _pipeline_lm(node_count)
         d_timeout = config.discover_timeout(node_count)
         on_event(_event("discover", "start",
                         detail=f"discovery fleet starting ({node_count} nodes, per-shape timeout {d_timeout}s)"))
@@ -167,6 +209,27 @@ def _run_scan(args: argparse.Namespace) -> int:
         verdicts = verify.verify_all(scan_id, leads, repo_for_verify, on_event)
         on_event(_event("verify", "done", detail=f"{len(verdicts)} verdicts"))
         return verdicts
+
+    def _pipeline_lm(node_count: int):
+        # The in-process Orion-LM engine: one local model, no `claude -p`, no verifier. The model is
+        # loaded HERE -- after the build -- so Joern and the model are never resident together
+        # (16 GB machine). MLX is imported lazily by _load_lm_model; `orion.lm.engine` itself is
+        # stdlib + graphdb only.
+        from .contracts import Verdict
+        from .lm import engine as lm_engine_mod
+
+        on_event(_event("discover", "start", detail=f"loading Orion-LM model {args.lm_model}"))
+        model = _load_lm_model(args.lm_model)
+        on_event(_event("discover", "start",
+                        detail=f"Orion-LM discovery starting ({node_count} nodes, engine=lm)"))
+        leads = lm_engine_mod.discover_lm(scan_id, repo_for_verify, on_event, profile=profile, model=model)
+        on_event(_event("discover", "done", detail=f"{len(leads)} candidate leads"))
+
+        # No independent verifier on this engine (yet): say so loudly and report every lead as
+        # INCONCLUSIVE rather than inventing a CONFIRM. `report._ORDER` ranks INCONCLUSIVE, so the
+        # report and --json work unchanged.
+        on_event(_event("verify", "done", detail="skipped (engine=lm)"))
+        return [Verdict(lead, "INCONCLUSIVE", "unverified (engine=lm)") for lead in leads]
 
     if args.watch:
         stop = threading.Event()
@@ -208,7 +271,7 @@ def _run_scan(args: argparse.Namespace) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="orion")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
@@ -232,13 +295,22 @@ def main(argv: list[str] | None = None) -> int:
                            "Off by default; runs on the host.")
     scan.add_argument("--runtime-budget", dest="runtime_budget", type=int, default=200,
                       help="max inputs the runtime fuzz loop drives (default 200)")
+    scan.add_argument("--engine", choices=["claude", "lm"], default="claude",
+                      help="discovery engine: `claude` (default; `claude -p` fleet + verifier) or `lm` "
+                           "(in-process Orion-LM model via --model; verifier skipped, leads reported "
+                           "INCONCLUSIVE)")
+    scan.add_argument("--model", dest="lm_model", metavar="PATH",
+                      help="path to the Orion-LM model (engine=lm)")
 
     idx = sub.add_parser("index-exploits",
                          help="build/refresh the global Metasploit exploit-reference corpus (one-time)")
     idx.add_argument("--refresh", action="store_true",
                      help="re-download the Metasploit metadata index before building")
+    return parser
 
-    args = parser.parse_args(argv)
+
+def main(argv: list[str] | None = None) -> int:
+    args = _build_parser().parse_args(argv)
 
     if args.cmd == "scan":
         return _run_scan(args)
