@@ -27,3 +27,7 @@ fixtures/
 # (overrides the *.log rule above for report logs kept under examples/).
 !examples/
 !examples/**
+
+# Orion-LM training-pair miner: dropped.json is >5 MB (full audit rows; regenerate with
+# `python -I train/mine.py build`); raw downloads live outside the repo (orion-lm-research/raw/).
+train/data/dropped.json
