@@ -55,7 +55,12 @@ def _loc(finding, key_file, key_fn, lo, hi) -> bool:
     if _func_match(finding.get("function"), key_fn):
         return True
     line = finding.get("line")
-    return line is not None and lo is not None and hi is not None and lo - _WINDOW <= line <= hi + _WINDOW
+    if line is None or (lo is None and hi is None):
+        return False
+    # Degenerate keys only: a missing bound falls back to the other; inverted bounds are swapped.
+    lo, hi = (hi if lo is None else lo), (lo if hi is None else hi)
+    lo, hi = min(lo, hi), max(lo, hi)
+    return lo - _WINDOW <= line <= hi + _WINDOW
 
 
 def l1(finding: dict, answer_key: dict) -> bool:
@@ -87,6 +92,8 @@ def path_levels(finding: dict, answer_key: dict) -> dict:
     """Secondary path metrics (spec section 6).
 
     edge_validity is None for now: it needs the code graph to check each hop is a real edge.
+    fix_traversal is deliberately line-only (spec: a path node's file and line +/-10 of a fix site),
+    NOT l1_fix_site: a function-name match would credit any path through the fix function.
     """
     path = finding.get("path") or []
     fixes = answer_key.get("fix_sites") or []
@@ -143,9 +150,19 @@ def match_run(findings: list, answer_keys: list) -> list:
 
 
 def write_matches(conn, run_id, rows) -> None:
+    # cwe_family is bound as int(bool); the column is declared TEXT, so SQLite's affinity keeps it
+    # as "1"/"0" on read. Use read_matches() to get a real bool back.
     conn.executemany(
         "INSERT INTO matches(run_id, vuln_id, finding_idx, level, cwe_family, path_level) "
         "VALUES (?,?,?,?,?,?)",
         [(run_id, r["vuln_id"], r["finding_idx"], r["level"], int(bool(r["cwe_family"])),
           r["path_level"]) for r in rows])
     conn.commit()
+
+
+def read_matches(conn, run_id) -> list:
+    """Rows of `matches` for a run as dicts, with cwe_family as a real bool."""
+    cur = conn.execute("SELECT vuln_id, finding_idx, level, cwe_family, path_level "
+                       "FROM matches WHERE run_id=? ORDER BY finding_idx, id", (run_id,))
+    return [{"vuln_id": v, "finding_idx": fi, "level": lv, "cwe_family": str(c) in ("1", "True"),
+             "path_level": pl} for v, fi, lv, c, pl in cur.fetchall()]

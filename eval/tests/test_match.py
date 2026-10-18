@@ -143,3 +143,26 @@ def test_write_matches_round_trip(tmp_path):
     got = conn.execute("select run_id, vuln_id, finding_idx, level, cwe_family, path_level "
                        "from matches").fetchall()
     assert got == [(rid, "0", 0, "L2", "1", None)]
+
+
+def test_key_without_line_end_uses_line_start():
+    ak = {"file": "a.js", "function": None, "line_start": 100, "line_end": None}
+    assert match.l1({"file": "a.js", "function": None, "line": 110}, ak)
+    assert match.l1({"file": "a.js", "function": None, "line": 90}, ak)
+    assert not match.l1({"file": "a.js", "function": None, "line": 111}, ak)
+
+
+def test_inverted_bounds_are_swapped():
+    ak = {"file": "a.js", "function": None, "line_start": 120, "line_end": 100}
+    assert match.l1({"file": "a.js", "function": None, "line": 130}, ak)
+    assert match.l1({"file": "a.js", "function": None, "line": 90}, ak)
+    assert not match.l1({"file": "a.js", "function": None, "line": 131}, ak)
+
+
+def test_read_matches_returns_bool(tmp_path):
+    conn = db.connect(str(tmp_path / "t.db"))
+    rid = db.start_run(conn, arm="a", repo="r", tier="headline", run_no=1, model_tag="m",
+                       cli_versions="", orion_commit="c")
+    f = [{"file": "app.js", "function": "handler", "line": 100, "cwe": "CWE-89"}]
+    match.write_matches(conn, rid, match.match_run(f, [AK]))
+    assert match.read_matches(conn, rid)[0]["cwe_family"] is True
