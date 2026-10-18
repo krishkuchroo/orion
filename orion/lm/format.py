@@ -73,11 +73,21 @@ CODE_CLOSE = "<<<END CODE>>>"
 # character (`<<<` -> `<\<\<\`, `<<<<` -> `<\<\<\<\`), so no `<<<`/`>>>` can survive — a plain
 # str.replace of the first three would leave `<<<<` as `<\<<<`, still a marker. Runs of one or two
 # are untouched (they cannot form a marker). Deterministic, so training examples stay consistent.
+# This rewrites REAL source too (`List<List<List<X>>>>`, CUDA `kernel<<<grid, block>>>`, heredoc or
+# merge-conflict markers), always the same way, so the model sees `<\<\<\` wherever the file has a
+# literal `<<<` — Krish's system prompt can say so. Every repo-controlled string that lands in a
+# message (file names, function names, uids, code, rows, tool error text) goes through `_s`/`_neutralise`
+# at the point of rendering, inside or outside a CODE block, so the marker count is always honest.
 _MARKER_RUN = re.compile(r"<{3,}|>{3,}")
 
 
 def _neutralise(text: str) -> str:
     return _MARKER_RUN.sub(lambda m: "".join(ch + "\\" for ch in m.group()), text)
+
+
+def _s(value) -> str:
+    """Render one repo-controlled value for a message: str() then marker-neutralised."""
+    return _neutralise(str(value))
 
 
 def code_block(text: str) -> str:
@@ -118,8 +128,11 @@ def system_message(schema_text: str) -> dict:
 
 
 def _render_flow(flow: dict) -> str:
-    head = (f"FLOW {flow.get('flow_id')} rank={flow.get('rank')} sink_category={flow.get('sink_category')} "
-            f"source_uid={flow.get('source_uid')} sink_uid={flow.get('sink_uid')}")
+    # Every field here ultimately comes from the scanned repo via the graph (uids embed file/method
+    # names), so each one is rendered through `_s`.
+    head = (f"FLOW {_s(flow.get('flow_id'))} rank={_s(flow.get('rank'))} "
+            f"sink_category={_s(flow.get('sink_category'))} "
+            f"source_uid={_s(flow.get('source_uid'))} sink_uid={_s(flow.get('sink_uid'))}")
     lines = [head]
     nodes = flow.get("nodes") or []
     if not nodes:
@@ -127,7 +140,8 @@ def _render_flow(flow: dict) -> str:
     for i, n in enumerate(nodes):
         role = "source" if i == 0 else ("sink" if i == len(nodes) - 1 else "step")
         code = str(n.get("code") if n.get("code") is not None else "").replace("\n", " ")
-        lines.append(f"  [{role}] {n.get('file')}:{n.get('line')} in {n.get('function')}: {code_inline(code)}")
+        lines.append(f"  [{role}] {_s(n.get('file'))}:{_s(n.get('line'))} in {_s(n.get('function'))}: "
+                     f"{code_inline(code)}")
     return "\n".join(lines)
 
 
@@ -148,14 +162,16 @@ def tool_result_message(action: dict, result: dict) -> dict:
     """The tool's answer to `action`, as a user turn. `{"error": ...}` results become ERROR: turns."""
     name = action.get("action") if isinstance(action, dict) else None
     if isinstance(result, dict) and "error" in result:
-        return {"role": "user", "content": f"ERROR: {name}: {result['error']}"}
+        # Error text can echo repo-derived strings (file names, Neo4j messages) — neutralised too.
+        return {"role": "user", "content": f"ERROR: {name}: {_s(result['error'])}"}
     if name == "read_code" and isinstance(result, dict) and "lines" in result:
         # Source lines go back verbatim (JSON-escaping code wastes tokens and hides the layout), but
         # inside CODE markers: the repo is untrusted and may contain lines that look like RESULT:/ERROR:
-        # turns or ready-made actions.
-        head = f"RESULT: read_code {result.get('file')}:{result.get('start')}-{result.get('end')}"
+        # turns or ready-made actions. The file name in the head is repo-controlled as well.
+        head = f"RESULT: read_code {_s(result.get('file'))}:{_s(result.get('start'))}-{_s(result.get('end'))}"
         return {"role": "user", "content": head + "\n" + code_block(str(result["lines"]))}
-    return {"role": "user", "content": f"RESULT: {name}: {_dumps_result(result)}"}
+    # Cypher rows carry repo text (c.code, file paths) inside the JSON — neutralised as a whole string.
+    return {"role": "user", "content": f"RESULT: {name}: {_neutralise(_dumps_result(result))}"}
 
 
 def error_message(reason: str) -> dict:
