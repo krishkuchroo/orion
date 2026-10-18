@@ -24,7 +24,7 @@ no change anywhere else in the builder.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 
@@ -82,6 +82,34 @@ GENERIC = Profile(
         "untrusted inputs."
     ),
 )
+
+# Extended sink vocabulary for the Orion-LM track, seeded from CodeQL models-as-data call names
+# (engineering, not labels). Opt-in: layered over ANY profile by `with_lm_sinks`, never part of the
+# default profiles, so the default scan and FLOWS_TO are untouched. Matching is case-insensitive
+# substring over a call's name/code (pathfind._classify_sink), so these are a generous candidate
+# generator that a later stage re-checks; hints are qualified where a bare word would match nearly
+# everything. JSON.parse is deliberately NOT a deserialize sink.
+LM_SINK_HINTS: dict[str, tuple[str, ...]] = {
+    "path": ("readFile", "createReadStream", "sendFile", "path.join", "path.resolve",
+             "os.path.join", "FileInputStream", "Paths.get", "open("),
+    "template": ("render_template_string", "Template(", "Handlebars.compile", "ejs.render",
+                 "pug.compile", "Velocity.evaluate", "nunjucks.renderString", "Jinja2"),
+    "deserialize": ("pickle.loads", "yaml.load", "unserialize", "ObjectInputStream", "readObject",
+                    "marshal.loads", "node-serialize", "jsyaml.load"),
+    "xxe": ("DocumentBuilder", "SAXParser", "XMLReader", "etree.fromstring", "etree.parse",
+            "libxmljs", "parseXml", "XMLInputFactory", "xml2js"),
+    "ssrf": ("fetch(", "axios", "http.get", "http.request", "requests.get", "requests.post",
+             "urlopen", "HttpClient", "openConnection"),
+    "prototype_pollution": ("merge", "extend", "deepMerge", "assign", "defaultsDeep", "setWith"),
+}
+
+
+def with_lm_sinks(profile: Profile) -> Profile:
+    """`profile` plus the LM_SINK_HINTS categories. Only `name` and `sink_hints` change; sources and
+    entry-point rules are untouched, so the taint graph (FLOWS_TO) is identical to the base profile's.
+    The base profile's own categories win on a key clash."""
+    return replace(profile, name=f"{profile.name}+lm",
+                   sink_hints={**LM_SINK_HINTS, **profile.sink_hints})
 
 
 def _package_json_requires(repo: Path, pkg: str) -> bool:

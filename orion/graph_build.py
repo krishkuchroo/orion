@@ -85,7 +85,7 @@ def build(repo_path: str, language: str | None = None,
           on_event: OnEvent | None = None, *,
           stream: bool = False, queue_size: int = 64,
           scan_id: str | None = None, mem_stats_path: str | None = None,
-          on_batch=None) -> str:
+          on_batch=None, profile: profiles.Profile | None = None) -> str:
     """Build `repo_path` into Orion's graph and return its scan_id. Clears then loads that scan.
 
     `language` pins the Joern frontend (jssrc/pythonsrc/gosrc/javasrc), overriding auto-detection;
@@ -107,14 +107,19 @@ def build(repo_path: str, language: str | None = None,
     the persist write and wall-clock trends toward max(persist, on_batch) instead of the sum. It must
     read the in-memory batch (not the persisted graph) and must not need persist to finish; persist's
     clear is label-scoped so it won't wipe what on_batch writes. It is best-effort: an exception in
-    on_batch is reported via on_event and never aborts the build."""
+    on_batch is reported via on_event and never aborts the build.
+
+    `profile`, when given, is used instead of `profiles.select_profile(...)` for BOTH the taint-source
+    model and the pathfind sink vocabulary (e.g. `profiles.with_lm_sinks(...)`); None keeps the
+    auto-selected profile exactly as before."""
     scan_id = scan_id or scan_id_for(repo_path)
     frontend, display_language = joern_adapter.resolve_language(repo_path, language)
     if on_event is not None:
         warn = _ambiguity_warning(repo_path, language, frontend)
         if warn is not None:
             on_event(warn)
-    profile = profiles.select_profile(repo_path, display_language)
+    if profile is None:
+        profile = profiles.select_profile(repo_path, display_language)
     t_build0 = time.monotonic()
     if stream:
         import tempfile
