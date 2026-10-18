@@ -83,6 +83,12 @@ def _run_scan(args: argparse.Namespace) -> int:
     if lm_engine and not args.lm_model:
         print("orion scan: --engine lm needs --model <path to the Orion-LM model>", file=sys.stderr)
         return 2
+    # The repo path is the engine's `read_code` sandbox. Without it the only fallback would be the
+    # CWD -- Orion's own checkout (CLAUDE.md, eval/, answer keys) -- which must never be what the
+    # model reads. So unlike the claude path, --scan-id alone is not enough here.
+    if lm_engine and not args.repo:
+        print("orion scan: --engine lm needs the repo path for read_code even with --scan-id", file=sys.stderr)
+        return 2
 
     # Deferred on purpose -- see module docstring.
     from . import config, discover, embed, graph_build, graphdb, report, verify
@@ -218,11 +224,12 @@ def _run_scan(args: argparse.Namespace) -> int:
         from .contracts import Verdict
         from .lm import engine as lm_engine_mod
 
-        on_event(_event("discover", "start", detail=f"loading Orion-LM model {args.lm_model}"))
-        model = _load_lm_model(args.lm_model)
         on_event(_event("discover", "start",
-                        detail=f"Orion-LM discovery starting ({node_count} nodes, engine=lm)"))
-        leads = lm_engine_mod.discover_lm(scan_id, repo_for_verify, on_event, profile=profile, model=model)
+                        detail=f"Orion-LM discovery starting ({node_count} nodes, engine=lm, "
+                               f"loading model {args.lm_model})"))
+        model = _load_lm_model(args.lm_model)
+        # args.repo, never the "." fallback: it is the read_code sandbox (guarded in pre-flight).
+        leads = lm_engine_mod.discover_lm(scan_id, args.repo, on_event, profile=profile, model=model)
         on_event(_event("discover", "done", detail=f"{len(leads)} candidate leads"))
 
         # No independent verifier on this engine (yet): say so loudly and report every lead as
