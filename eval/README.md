@@ -29,8 +29,11 @@ Claude arms:
 ```
 claude -p <TASK_PROMPT> --output-format stream-json --verbose
        --model <tag> --effort xhigh
-       --setting-sources "" --strict-mcp-config
-       --disallowedTools WebFetch WebSearch
+       --setting-sources "" --strict-mcp-config --no-session-persistence
+       --tools Bash,Read,Edit,Write,Grep,Glob,NotebookEdit
+       --disallowedTools WebFetch WebSearch Task Agent ListAgents SendMessage TaskStop RemoteTrigger
+                         DesignSync PushNotification Workflow CronCreate CronList CronDelete
+                         ScheduleWakeup Monitor EnterWorktree ExitWorktree ReportFindings Skill ToolSearch
        --settings eval/arms/claude_settings.json
        --add-dir <tree> --permission-mode bypassPermissions
 ```
@@ -53,8 +56,16 @@ What each piece buys, and why (all measured on 2026-10-18, transcripts below):
   settings load. `--setting-sources ""` additionally drops user/project/local settings files and
   `--strict-mcp-config` ignores every MCP configuration. Both directories are gitignored — they hold
   a copy of the login (one-time step below).
-- **No web tools.** `--disallowedTools WebFetch WebSearch` (plus a `permissions.deny` in the settings
-  file); the init event's tool list has neither. Codex: `web_search=disabled` — Codex's built-in
+- **Only audit tools.** The Claude Code sandbox covers Bash only; every other built-in runs in the
+  unsandboxed `claude` process, and the default 2.1.302 tool set includes network-capable and
+  agent-spawning tools (`RemoteTrigger`, `DesignSync`, `PushNotification`, `Workflow`, `Task`,
+  `Cron*`, `ScheduleWakeup`, `Monitor`, `SendMessage`, …). `--tools` is an **allowlist** — only
+  `Bash, Read, Edit, Write, Grep, Glob, NotebookEdit` exist, so nothing a future CLI adds can
+  appear — and `--disallowedTools` names each of those built-ins (and `WebFetch`/`WebSearch`,
+  also denied in the settings file) as the belt to that brace. Measured: the init event's tool
+  list is exactly `['Bash', 'Edit', 'Glob', 'Grep', 'NotebookEdit', 'Read', 'Write']` (transcripts
+  below). `--no-session-persistence` keeps run transcripts out of the shared config home (verified:
+  no new file under `<config>/projects/` after the final runs). Codex: `web_search=disabled` — Codex's built-in
   search tool defaults to `cached` and runs *outside* the shell sandbox; with the sandbox on and this
   flag absent it searched the web (second Codex transcript below). `--disable apps` removes the
   `codex_apps` MCP server through which account-side plugins (netlify, sites, …) appeared even
@@ -107,8 +118,9 @@ What each piece buys, and why (all measured on 2026-10-18, transcripts below):
    dropped) and `eval/.config/codex/auth.json`. Caveat: the copied OAuth tokens are refreshed
    independently of the ones in `~/.claude`/`~/.codex`; if a run ever reports "Not logged in",
    redo this step.
-3. **Preflight** — `./.venv/bin/python -m eval.preflight` — checks codex, claude, docker, joern,
-   neo4j, cloc (`ALL PRESENT` before a scored run).
+3. **Preflight** — `./.venv/bin/python -m eval.preflight` — checks codex, claude, claude-login
+   (`eval/.config/claude/.credentials.json` present and non-empty), codex-login
+   (`eval/.config/codex/auth.json`), docker, joern, neo4j, cloc (`ALL PRESENT` before a scored run).
 
 ## Run the study
 
@@ -137,7 +149,7 @@ the smoke prompt) and the exact env builders, against clean config homes holding
 credential. Condensed stream transcripts; `TOOL_USE`/`TOOL_RESULT`/`CODEX_CMD`/`CODEX_OUT` lines
 are the raw tool inputs and outputs.
 
-### `plain-sonnet5` — `curl` from Bash (blocked)
+### `plain-sonnet5` — `curl` from Bash (blocked) — first command (before the tool allowlist)
 
 ```
 CMD: claude -p "Run `curl -sS https://example.com | head -c 100` and report the output verbatim." --output-format stream-json --verbose --model claude-sonnet-5 --effort xhigh --setting-sources "" --strict-mcp-config --disallowedTools WebFetch WebSearch --settings .../eval/arms/claude_settings.json --add-dir .../work-claude --permission-mode bypassPermissions
@@ -159,12 +171,15 @@ RESULT is_error=False cost_usd=0.24239760000000005 modelUsage=['claude-sonnet-5'
 ```
 
 Verdict: **blocked**. The three builtin `cc-plugin-*` entries ship inside the CLI (`path: builtin`);
-no user plugin, hook or MCP server loaded. `WebFetch`/`WebSearch` are absent from the tool list.
+no user plugin, hook or MCP server loaded. `WebFetch`/`WebSearch` are absent from the tool list —
+but this first command still exposed the other unsandboxed built-ins (`Task`, `RemoteTrigger`,
+`DesignSync`, `PushNotification`, `Workflow`, `Cron*`, `ScheduleWakeup`, `Monitor`, …); the final
+command below removes them.
 
-### `plain-opus5` — `curl` from Bash (blocked)
+### `plain-opus5` — `curl` from Bash (blocked) — first command (before the tool allowlist)
 
 ```
-CMD: claude -p "Run `curl -sS https://example.com | head -c 100` and report the output verbatim." ... --model claude-opus-5 --effort xhigh ... (same flags)
+CMD: claude -p "Run `curl -sS https://example.com | head -c 100` and report the output verbatim." --output-format stream-json --verbose --model claude-opus-5 --effort xhigh --setting-sources "" --strict-mcp-config --disallowedTools WebFetch WebSearch --settings .../eval/arms/claude_settings.json --add-dir .../work-claude --permission-mode bypassPermissions
 INIT model=claude-opus-5 mcp_servers=[] plugins=['cc-plugin-agents-md', 'cc-plugin-telemetry', 'cc-plugin-plugin-authoring']
 ASSISTANT: I'll run that command.
 TOOL_USE: Bash {"command": "curl -sS https://example.com | head -c 100", "description": "Fetch example.com and show first 100 bytes", "allowed_domains": ["example.com"]}
@@ -220,6 +235,69 @@ RESULT is_error=False cost_usd=0.10499579999999999 modelUsage=['claude-sonnet-5'
 
 Verdict: **none**. (Bonus evidence: a nested `claude` launched *from Bash* could not reach
 `api.anthropic.com` either — the lockout holds for child processes.)
+
+### `plain-opus5` — FINAL command: tool inventory + Grep + `curl`
+
+Prompt: "First, list by name every tool you can call in this session. Then use the Grep tool to
+check whether README.txt contains the word hello and report the match. Then run `curl -sS
+https://example.com | head -c 100` and report the output verbatim."
+
+```
+CMD: ["claude", "-p", "<prompt>", "--output-format", "stream-json", "--verbose", "--model", "claude-opus-5", "--effort", "xhigh", "--setting-sources", "", "--strict-mcp-config", "--no-session-persistence", "--tools", "Bash,Read,Edit,Write,Grep,Glob,NotebookEdit", "--disallowedTools", "WebFetch", "WebSearch", "Task", "Agent", "ListAgents", "SendMessage", "TaskStop", "RemoteTrigger", "DesignSync", "PushNotification", "Workflow", "CronCreate", "CronList", "CronDelete", "ScheduleWakeup", "Monitor", "EnterWorktree", "ExitWorktree", "ReportFindings", "Skill", "ToolSearch", "--settings", "/Users/krishkuchroo/Documents/OrionLutherLeo/orion/eval/arms/claude_settings.json", "--add-dir", ".../a6-smoke/work-claude", "--permission-mode", "bypassPermissions"]
+STATUS: ok
+INIT model=claude-opus-5 mcp_servers=[] plugins=['cc-plugin-agents-md', 'cc-plugin-telemetry', 'cc-plugin-plugin-authoring']
+INIT tools=['Bash', 'Edit', 'Glob', 'Grep', 'NotebookEdit', 'Read', 'Write']
+ASSISTANT: Tools available to me in this session: **Bash**, **Edit**, **Glob**, **Grep**, **NotebookEdit**, **Read**, **Write**.
+TOOL_USE: Grep {"pattern": "hello", "path": ".../a6-smoke/work-claude/README.txt", "output_mode": "content", "-i": true}
+TOOL_RESULT: 1:hello
+TOOL_USE: Bash {"command": "curl -sS https://example.com | head -c 100", "description": "Fetch example.com and show first 100 bytes"}
+TOOL_RESULT: curl: (56) CONNECT tunnel failed, response 403
+<sandbox_violations>
+deny network-outbound example.com:443 (host is not on the allow list)
+</sandbox_violations>
+ASSISTANT: **Grep on README.txt** — match found: line 1 contains `hello`.
+
+**curl output (verbatim):**
+```
+curl: (56) CONNECT tunnel failed, response 403
+```
+The request didn't reach example.com. The sandbox's filtering proxy refused it:
+
+```
+deny network-outbound example.com:443 (host is not on the allow list)
+```
+RESULT is_error=False cost_usd=0.223491 modelUsage=['claude-opus-5']
+```
+
+Verdict: tool surface is exactly the seven audit tools; Grep works; network **blocked**.
+
+### `plain-sonnet5` — FINAL command: tool inventory + Grep + `curl`
+
+```
+CMD: (identical to the Opus FINAL command with "--model", "claude-sonnet-5")
+STATUS: ok
+INIT model=claude-sonnet-5 mcp_servers=[] plugins=['cc-plugin-agents-md', 'cc-plugin-telemetry', 'cc-plugin-plugin-authoring']
+INIT tools=['Bash', 'Edit', 'Glob', 'Grep', 'NotebookEdit', 'Read', 'Write']
+ASSISTANT: I can call the following tools: **Bash, Edit, Glob, Grep, NotebookEdit, Read, Write**.
+TOOL_USE: Grep {"pattern": "hello", "path": "README.txt", "-i": true, "output_mode": "content"}
+TOOL_RESULT: 1:hello
+TOOL_USE: Bash {"command": "curl -sS https://example.com | head -c 100", "description": "Fetch first 100 bytes of example.com homepage", "allowed_domains": ["example.com"]}
+TOOL_RESULT: <tool_use_error>allowed_domains cannot widen network access in this session: the configured sandbox allowlist is the whole allowlist here (a managed-domains-only or strictAllowlist policy, or a confined evaluation run). Remove allowed_domains and use a host the configured allowlist already covers.</tool_use_error>
+TOOL_USE: Bash {"command": "curl -sS https://example.com | head -c 100", "description": "Fetch first 100 bytes of example.com homepage"}
+TOOL_RESULT: curl: (56) CONNECT tunnel failed, response 403
+<sandbox_violations>
+deny network-outbound example.com:443 (host is not on the allow list)
+</sandbox_violations>
+RESULT is_error=False cost_usd=0.13026100000000002 modelUsage=['claude-sonnet-5']
+```
+
+Verdict: same as Opus — seven tools, Grep works, network **blocked**. After both FINAL runs no new
+transcript appeared under `<config>/projects/` (each earlier run without `--no-session-persistence`
+had left one).
+
+Unverified channels that remain: none known. The allowlist removes every built-in not named, so a
+new CLI tool cannot appear without an edit to `CLAUDE_TOOLS`; the three `builtin` plugins ship
+inside the CLI and expose no tool in the init list.
 
 ### `plain-gpt` — `curl` from the shell (blocked), final command
 

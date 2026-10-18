@@ -1,3 +1,5 @@
+import os
+
 from eval import preflight
 
 
@@ -25,3 +27,10 @@ def test_checks_cover_the_model_clis_and_graph_stack_without_ollama():
     for t in ("claude", "codex", "docker", "joern", "neo4j", "cloc"):
         assert t in tools
     assert not any("11434" in " ".join(cmd) for _, cmd in preflight._CHECKS)
+
+
+def test_checks_require_the_copied_logins_in_the_clean_homes():
+    cmds = dict(preflight._CHECKS)
+    assert cmds["claude-login"][-1].endswith(os.path.join("eval", ".config", "claude", ".credentials.json"))
+    assert cmds["codex-login"][-1].endswith(os.path.join("eval", ".config", "codex", "auth.json"))
+    assert cmds["claude-login"][:2] == ["test", "-s"]   # exists and non-empty

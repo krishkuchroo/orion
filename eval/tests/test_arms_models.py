@@ -35,6 +35,21 @@ def test_envs_point_at_clean_homes(tmp_path):
     assert env.codex_env({"PATH": "/bin"}, home=str(tmp_path / "h"))["CODEX_HOME"] == str(tmp_path / "h")
 
 
+def test_claude_arm_allowlists_audit_tools_and_denies_network_and_agent_tools():
+    cmd = plain._build_cmd("plain-opus5", "/repo", "claude-opus-5", "xhigh")
+    assert cmd[cmd.index("--tools") + 1] == "Bash,Read,Edit,Write,Grep,Glob,NotebookEdit"
+    i = cmd.index("--disallowedTools") + 1
+    denied = cmd[i:cmd.index("--settings")]
+    # every built-in from the 2.1.302 init list that reaches the network or spawns agents
+    for t in ("WebFetch", "WebSearch", "Task", "RemoteTrigger", "DesignSync", "PushNotification",
+              "Workflow", "CronCreate", "CronList", "CronDelete", "ScheduleWakeup", "Monitor",
+              "ListAgents", "SendMessage", "TaskStop", "EnterWorktree", "ExitWorktree",
+              "ReportFindings", "Skill", "ToolSearch"):
+        assert t in denied
+    assert not set(plain.CLAUDE_TOOLS) & set(plain.CLAUDE_DISALLOWED)
+    assert "--no-session-persistence" in cmd   # no transcripts pile up in the shared config home
+
+
 def test_claude_arm_keeps_bypass_and_add_dir_and_setting_sources_is_empty():
     cmd = plain._build_cmd("plain-sonnet5", "/repo", "claude-sonnet-5", "xhigh")
     assert cmd[cmd.index("--add-dir") + 1] == "/repo"

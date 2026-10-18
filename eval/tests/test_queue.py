@@ -99,6 +99,6 @@ def test_classify_exit_generic_limit_text_stays_error():
 
 def test_classify_exit_only_for_claude_and_codex():
     from eval import run
-    for src in ("lm", "ollama", ""):
+    for src in ("lm", "lm-base", ""):
         assert run.classify_exit("error", ["Claude AI usage limit reached|1", "HTTP 429"],
                                  source=src) == "error"

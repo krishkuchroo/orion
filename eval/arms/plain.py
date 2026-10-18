@@ -25,6 +25,17 @@ def config_home(arm: str, root: str = CONFIG_ROOT) -> str:
     return os.path.join(root, "codex" if arm == "plain-gpt" else "claude")
 
 
+# Everything the Claude arms may call: a code audit needs a shell and the file tools, nothing
+# else. --tools is an ALLOWLIST (anything not named is absent, including built-ins added by a
+# future CLI version); --disallowedTools is the belt to that brace, naming every built-in from
+# the 2.1.302 init tool list that reaches the network or spawns agents outside the Bash sandbox.
+CLAUDE_TOOLS = ["Bash", "Read", "Edit", "Write", "Grep", "Glob", "NotebookEdit"]
+CLAUDE_DISALLOWED = ["WebFetch", "WebSearch", "Task", "Agent", "ListAgents", "SendMessage",
+                     "TaskStop", "RemoteTrigger", "DesignSync", "PushNotification", "Workflow",
+                     "CronCreate", "CronList", "CronDelete", "ScheduleWakeup", "Monitor",
+                     "EnterWorktree", "ExitWorktree", "ReportFindings", "Skill", "ToolSearch"]
+
+
 def _build_cmd(arm: str, repo_dir: str, model_tag: str, effort: str) -> list[str]:
     """The frontier arm's command line. Flags verified on claude 2.1.302 / codex-cli 0.155.1
     and smoke-tested for the network lockout on 2026-10-18 (eval/README.md)."""
@@ -52,8 +63,9 @@ def _build_cmd(arm: str, repo_dir: str, model_tag: str, effort: str) -> list[str
            "--model", model_tag]
     if effort:
         cmd += ["--effort", effort]
-    cmd += ["--setting-sources", "", "--strict-mcp-config",
-            "--disallowedTools", "WebFetch", "WebSearch",
+    cmd += ["--setting-sources", "", "--strict-mcp-config", "--no-session-persistence",
+            "--tools", ",".join(CLAUDE_TOOLS),
+            "--disallowedTools", *CLAUDE_DISALLOWED,
             "--settings", CLAUDE_SETTINGS,
             "--add-dir", repo_dir, "--permission-mode", "bypassPermissions"]
     return cmd
