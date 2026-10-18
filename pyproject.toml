@@ -28,6 +28,10 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools]
 packages = ["orion", "orion.graph", "orion.lm", "orion.runtime"]
 
+[tool.setuptools.package-data]
+# Krish's Orion-LM system prompt ships with the package (format.system_message reads it).
+"orion.lm" = ["system_prompt.txt"]
+
 [tool.pytest.ini_options]
 # Scope bare `pytest` to Orion's own suite so it never recurses into the gitignored `fixtures/` scan
 # targets (a Django authentik checkout, etc.) whose own `tests/` package would shadow this one and
