@@ -15,8 +15,6 @@ from orion.lm import format as fmt
 from orion.lm import slice as lm_slice
 from orion.lm import tools
 
-STEP_KINDS = ("run_cypher", "read_code", "final", "malformed", "forced_final")
-
 
 def _step(step_no: int, kind: str, res, wall: float, *, query=None, row_count=None, error=None) -> dict:
     return {
