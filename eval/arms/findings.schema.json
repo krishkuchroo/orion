@@ -14,7 +14,19 @@
           "line_end": {"type": "integer"},
           "cwe": {"type": "string"},
           "title": {"type": "string"},
-          "explanation": {"type": "string"}
+          "explanation": {"type": "string"},
+          "path": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "file": {"type": "string"},
+                "function": {"type": "string"},
+                "line": {"type": "integer"},
+                "role": {"type": "string"}
+              }
+            }
+          }
         }
       }
     }

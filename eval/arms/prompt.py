@@ -14,13 +14,19 @@ root. It must be a JSON object of this exact shape and nothing else:
 
 {"findings": [{"file": "<path from repo root>", "function": "<enclosing function or method>", \
 "line_start": <int>, "line_end": <int>, "cwe": "CWE-<number>", "title": "<short label>", \
-"explanation": "<why it is exploitable>"}]}
+"explanation": "<why it is exploitable>", \
+"path": [{"file": "<path>", "function": "<function>", "line": <int>, \
+"role": "source|propagator|sink"}]}]}
+
+The "path" field is optional: when you can trace how attacker-controlled data reaches the \
+vulnerable code, list the steps in order from source to sink; omit it otherwise.
 
 Report only vulnerabilities you can point to a specific location for. If you find none, write \
 {"findings": []}. Do not modify any source file other than writing findings.json."""
 
 _TYPES = {"file": str, "function": str, "line_start": int, "line_end": int,
           "cwe": str, "title": str, "explanation": str}
+_OPTIONAL = {"path": list}  # absent is fine; present must be a list of objects
 
 
 def validate_findings(obj: dict) -> list[str]:
@@ -36,5 +42,8 @@ def validate_findings(obj: dict) -> list[str]:
             if k not in it:
                 problems.append(f"finding {i} missing '{k}'")
             elif not isinstance(it[k], t) or (t is int and isinstance(it[k], bool)):
+                problems.append(f"finding {i} field '{k}' wrong type")
+        for k, t in _OPTIONAL.items():
+            if k in it and (not isinstance(it[k], t) or not all(isinstance(s, dict) for s in it[k])):
                 problems.append(f"finding {i} field '{k}' wrong type")
     return problems
