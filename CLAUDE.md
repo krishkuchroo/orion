@@ -82,8 +82,11 @@ Rules for working on it:
 
 ## Orion-LM track (branch `eval/orion-lm`, started 2026-10-18)
 
-Design: `docs/superpowers/specs/2026-10-18-orion-lm-design.md` — **APPROVED 2026-10-18; nothing is
-built yet.** Goal: fine-tune an open-weight model (Unsloth, cloud GPU) that runs
+Design: `docs/superpowers/specs/2026-10-18-orion-lm-design.md` — **APPROVED 2026-10-18.** Plan:
+`docs/superpowers/plans/2026-10-18-orion-lm.md` (rev 2). **Build paused after Task E3** — A1–A6,
+B1–B6, C1, E1–E3 done and reviewed (eval 190 passed; orion 259 passed + 1 expected Neo4j fail);
+next E4. Status, rulings and Krish-check items: `docs/superpowers/plans/2026-10-18-orion-lm-progress.md`.
+Goal: fine-tune an open-weight model (Unsloth, cloud GPU) that runs
 **in-process inside Orion** (MLX-LM, no Claude, no Ollama) via a **hand-written prompter** that
 writes Cypher over the Joern→Neo4j graph and judges code vulnerable/safe; then benchmark
 `orion-lm` / `orion-lm-base` vs `plain-sonnet5` / `plain-opus5` / `plain-gpt` on the post-2026-05-31
@@ -94,9 +97,7 @@ CVEs (vulnerable AND patched commits) + OWASP Benchmark as the false-alarm set.
   Kush (to confirm with them); 5 pp false-alarm margin; scoring code built on this branch, human
   labeling + final test scoring in a separate session; AI-written text2cypher rows dropped and Krish
   writes the training-target templates + system prompt (Claude writes plumbing only); test set grows
-  to ≈60 dataflow vulns; no cut list. **The implementation plan is NOT written yet** — the first
-  attempt was interrupted before anything was saved. **Next:** `superpowers:writing-plans` →
-  `docs/superpowers/plans/2026-10-18-orion-lm.md` → Krish reviews → build (design §7 order).
+  to ≈60 dataflow vulns; no cut list. Plan written and being built (see the progress file above).
 - **Confirmed by Krish:** no Claude/Ollama in the model path; own prompter; model writes Cypher in a
   run→score→retrain loop; must judge unknown code (train with patched commits as negatives); test
   set run ONCE at the end, tune on dev only; frontier models are competitors only (never training
