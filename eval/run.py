@@ -68,25 +68,37 @@ def run_one(conn, *, arm, repo_meta, run_no, model_tags, base_env,
         db.log_event(conn, rid, stage="run", level="error", message=str(e)[:2000])
         db.finish_run(conn, rid, "error")
         return "error"
-    _log_resource(conn, rid, sampler["s"], t0)
-    for block in res.usage:
-        db.log_agent_call(conn, rid, session_id=None, stage="run",
-                          input_tokens=block.get("uncached_in"), output_tokens=block.get("out"),
-                          cache_read=block.get("cache_read"), cache_write=block.get("cache_write"),
-                          turns_used=None, turn_limit=None, peak_context=None,
-                          exit_reason=None, error_head=None)
-    for step in res.steps or []:
-        db.log_step(conn, rid, **step)
-    if res.findings_path is None:
-        db.log_event(conn, rid, stage="run", level="warn",
-                     message="no valid findings file; scored as a miss")
+    # the run must never be left 'running': a failure while recording what the arm returned
+    # becomes an error event + status "error", not a dangling row
+    try:
+        _log_resource(conn, rid, sampler["s"], t0)
+        for block in res.usage:
+            db.log_agent_call(conn, rid, session_id=None, stage="run",
+                              input_tokens=block.get("uncached_in"), output_tokens=block.get("out"),
+                              cache_read=block.get("cache_read"), cache_write=block.get("cache_write"),
+                              turns_used=None, turn_limit=None, peak_context=None,
+                              exit_reason=None, error_head=None)
+        for step in res.steps or []:
+            db.log_step(conn, rid, **step)
+        if res.findings_path is None:
+            db.log_event(conn, rid, stage="run", level="warn",
+                         message="no valid findings file; scored as a miss")
+    except Exception as e:
+        db.log_event(conn, rid, stage="run", level="error",
+                     message=f"recording run result failed: {e!r}"[:2000])
+        db.finish_run(conn, rid, "error")
+        return "error"
     db.finish_run(conn, rid, res.status)
     return res.status
 
 
 def _log_resource(conn, rid, sampler, t0):
     """One resources row for the run phase. Peak RSS comes only from a sampler that was
-    attached to a live process; otherwise it is recorded as missing (None), never 0."""
+    attached to a live process; otherwise it is recorded as missing (None), never 0.
+    wall_seconds has two sources: with a sampler it is the arm's process lifetime as seen by
+    the sampler (spawn -> launcher return, so it includes the findings copy and the tree
+    rmtree); without one (no process was ever spawned) it is run_one's own clock around the
+    launcher call."""
     if sampler is not None:
         sampler.__exit__(None, None, None)
         wall, rss = sampler.wall_seconds, sampler.peak_rss_mb

@@ -133,3 +133,42 @@ def test_plain_arm_forwards_on_start(tmp_path):
     seen = {}
     _run(tmp_path, on_start=lambda p: seen.setdefault("pid", p.pid))
     assert seen["pid"] == 4321
+
+
+def test_read_usage_warns_on_malformed_usage_event(tmp_path):
+    log = tmp_path / "u.jsonl"
+    log.write_text('{"type":"result","usage":{"input_tokens":5,"output_tok\n')   # truncated line
+    warned = []
+    from eval.arms import plain
+    blocks = plain.read_usage(str(log), source="claude", on_line=warned.append)
+    assert blocks == []
+    assert any("usage" in w and "parse" in w for w in warned)
+
+
+def test_read_usage_warns_when_nonempty_log_yields_no_blocks(tmp_path):
+    log = tmp_path / "u.jsonl"
+    log.write_text('{"type":"system"}\n{"type":"assistant"}\n')   # claude ran, no result event
+    warned = []
+    from eval.arms import plain
+    assert plain.read_usage(str(log), source="claude", on_line=warned.append) == []
+    assert any("no usage" in w for w in warned)
+
+
+def test_read_usage_is_quiet_on_a_clean_log(tmp_path):
+    log = tmp_path / "u.jsonl"
+    log.write_text('{"type":"system"}\n{"type":"result","usage":{"input_tokens":1}}\n')
+    warned = []
+    from eval.arms import plain
+    assert len(plain.read_usage(str(log), source="claude", on_line=warned.append)) == 1
+    assert warned == []
+
+
+def test_plain_arm_surfaces_corrupt_usage_line_through_on_line(tmp_path):
+    (tmp_path / "tree").mkdir()
+    warned = []
+    # Codex printed a truncated turn.completed event; the arm tees it into usage.jsonl verbatim
+    res = _run(tmp_path, arm="plain-gpt", on_line=warned.append,
+               lines=('{"type":"turn.completed","usage":{"input_tokens":1',))
+    assert res.usage == []
+    assert any("parse" in w and "turn.completed" in w for w in warned)
+    assert (tmp_path / "u.jsonl").read_text() == '{"type":"turn.completed","usage":{"input_tokens":1\n'

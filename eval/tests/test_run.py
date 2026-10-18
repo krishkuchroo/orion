@@ -121,3 +121,16 @@ def test_run_one_passes_effort_to_launcher(tmp_path):
         return ArmResult(status="ok", findings_path=None, usage=[])
     _run_one(conn, launcher, arm="plain-gpt")
     assert seen["effort"] == run.EFFORT.get("plain-gpt", "")
+
+
+def test_run_one_finishes_run_when_post_launch_logging_fails(tmp_path):
+    conn = db.connect(str(tmp_path / "t.db"))
+
+    def launcher(arm, repo_meta, model_tag, on_line, *, effort, on_start):
+        # a steps entry that does not match db.log_step's keyword fields
+        return ArmResult(status="ok", findings_path=None, usage=[], steps=[{"bogus": 1}])
+    assert _run_one(conn, launcher) == "error"
+    assert conn.execute("select status, ended from runs").fetchone()[0] == "error"
+    assert conn.execute("select ended from runs").fetchone()[0] is not None   # never left 'running'
+    err = conn.execute("select message from events where level='error'").fetchone()
+    assert err is not None and "bogus" in err[0]
