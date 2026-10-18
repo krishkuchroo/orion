@@ -298,15 +298,18 @@ def _cwe_bench_java(root: str, advisory_dir: str | None = None) -> list[dict]:
     data = os.path.join(root, "data") if os.path.exists(os.path.join(root, "data", "project_info.csv")) else root
     adv_dir = os.path.join(root, "advisory") if os.path.isdir(os.path.join(root, "advisory")) else advisory_dir
     has_fix_info = os.path.exists(os.path.join(data, "fix_info.csv"))
+    # keyed by slug AND by CVE id: iris v2 spells some slugs differently across its files
     methods: dict[str, list] = {}
     for m in _csv_rows(os.path.join(data, "fix_info.csv")):
-        methods.setdefault(m["project_slug"], []).append(
-            {k: m.get(k) for k in ("commit", "file", "class", "method", "method_start", "method_end")})
+        item = {k: m.get(k) for k in ("commit", "file", "class", "method", "method_start", "method_end")}
+        methods.setdefault(m["project_slug"], []).append(item)
+        methods.setdefault(m.get("cve_id") or m.get("cve") or "", []).append(item)
     ss: dict[str, list] = {}
     for m in _csv_rows(os.path.join(data, "fix_info_source_sink.csv")):   # manually extracted (IRIS news)
-        ss.setdefault(m["project_slug"], []).append(
-            {"file": m.get("file"), "method": m.get("method"), "source": m.get("Source"),
-             "source_line": m.get("Source Line"), "sink": m.get("Sink"), "sink_line": m.get("Sink Line")})
+        item = {"file": m.get("file"), "method": m.get("method"), "source": m.get("Source"),
+                "source_line": m.get("Source Line"), "sink": m.get("Sink"), "sink_line": m.get("Sink Line")}
+        ss.setdefault(m["project_slug"], []).append(item)
+        ss.setdefault(m.get("cve_id") or "", []).append(item)
     rows = []
     for r in _csv_rows(os.path.join(data, "project_info.csv")):
         adv_path = os.path.join(adv_dir, f"{r['project_slug']}.json") if adv_dir else ""
@@ -319,9 +322,9 @@ def _cwe_bench_java(root: str, advisory_dir: str | None = None) -> list[dict]:
         fixes = [x.strip() for x in (r.get("fix_commit_ids") or "").split(";") if x.strip()]
         extra = {}
         if has_fix_info:
-            extra["fix_methods"] = methods.get(r["project_slug"], [])
-        if r["project_slug"] in ss:
-            extra["source_sink"] = ss[r["project_slug"]]
+            extra["fix_methods"] = methods.get(r["project_slug"]) or methods.get(r["cve_id"]) or []
+        if ss.get(r["project_slug"]) or ss.get(r["cve_id"]):
+            extra["source_sink"] = ss.get(r["project_slug"]) or ss[r["cve_id"]]
         rows.append(_row("cwe-bench-java", r["project_slug"], aliases=[r["cve_id"], *aliases],
                          repo=_norm_repo(r["github_username"], r["github_repository_name"]),
                          fix_shas=fixes, vuln_sha=r.get("buggy_commit_id") or None, cwe=[r.get("cwe_id")],

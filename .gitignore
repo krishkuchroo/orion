@@ -28,6 +28,8 @@ fixtures/
 !examples/
 !examples/**
 
-# Orion-LM training-pair miner: dropped.json is >5 MB (full audit rows; regenerate with
-# `python -I train/mine.py build`); raw downloads live outside the repo (orion-lm-research/raw/).
+# Orion-LM training-pair miner: pairs.json (5.5 MB) and dropped.json (16.6 MB) are over the 5 MB
+# commit limit; regenerate with `python -I train/mine.py build` (see docs/notes/orion-lm-pairs.md).
+# Raw downloads and caches live outside the repo (~/Documents/OrionLutherLeo/orion-lm-research/raw/).
+train/data/pairs.json
 train/data/dropped.json

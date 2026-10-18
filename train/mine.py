@@ -50,12 +50,12 @@ LOADERS = {
 
 # funnel stages (reason kinds dropped at each step, in check order)
 FUNNEL = (("labels not LLM-assisted", {"llm_assisted_labels"}),
-          ("has GitHub fix commit", {"no_fix_commit", "non_github_repo", "fix_pr_unresolved"}),
+          ("has GitHub fix link", {"no_fix_commit", "non_github_repo"}),
           ("language JS/TS, Python, Java", {"language_unknown", "language_unsupported"}),
           ("advisory < cutoff", {"advisory_date_missing", "advisory_after_cutoff"}),
           ("not a post-cutoff repo/package", {"post_cutoff_repo", "post_cutoff_package"}),
           ("fix commit found, < cutoff, touches language",
-           {"enrich_pending", "commit_missing", "enrich_error", "fix_date_missing", "fix_after_cutoff",
+           {"fix_pr_unresolved", "enrich_pending", "commit_missing", "enrich_error", "fix_date_missing", "fix_after_cutoff",
             "no_source_files_in_language"}),
           ("after dedupe", {"duplicate_alias", "duplicate_commit"}))
 
@@ -204,7 +204,7 @@ def build(raw: str, work: str, out: str, *, cache_path: str = enrich_gh.DEFAULT_
                     "duplicate_commit": sum(1 for d in dropped_any if d["reason"].startswith("duplicate_commit"))}
     st["multi_source_survivors"] = sum(1 for r in kept_any if len(r.get("sources") or []) > 1)
     st["missing"] = {k: st["reasons_max10"].get(k, 0) for k in
-                     ("advisory_date_missing", "enrich_pending", "commit_missing", "enrich_error",
+                     ("advisory_date_missing", "fix_pr_unresolved", "enrich_pending", "commit_missing", "enrich_error",
                       "fix_date_missing", "files_unknown")}
     st["leak"] = {"post_cutoff_repos": len(leak_repos), "post_cutoff_packages": len(leak_pkgs),
                   "post_cutoff_advisories": leak.get("n_advisories"),
@@ -226,6 +226,16 @@ def build(raw: str, work: str, out: str, *, cache_path: str = enrich_gh.DEFAULT_
         1 for d in dropped_any if d["reason"] == "post_cutoff_repo" and d["repo"] not in fix_links
         and (d.get("repo_canonical") or d["repo"]) not in fix_links)
     st["leak"]["post_cutoff_repos_from_fix_links_only"] = len(fix_links)
+    # the same funnel by cwe_class: steps use each row's own class; dedupe merges CWEs across duplicates,
+    # so the size buckets use the survivor's (merged) class
+    by_cls = funnel(Counter(r["cwe_class"] for r in rows),
+                    [dict(d, source=d["cwe_class"]) for d in dropped_any if not d["reason"].startswith("duplicate_")],
+                    [dict(k, source=k["cwe_class"]) for k in kept_any])
+    st["funnel_by_cwe_class"] = {c: {"raw": f["raw"], "stages": f["stages"][:-1], "files_le10": f["files_le10"],
+                                     "files_le20": f["files_le20"], "files_any": f["files_any"]}
+                                 for c, f in by_cls.items()}
+    st["top_post_cutoff_repo_drops"] = dict(Counter(d["repo"] for d in dropped_any
+                                                    if d["reason"] == "post_cutoff_repo").most_common(15))
     st["sizes_bytes"] = {f: os.path.getsize(os.path.join(out, f)) for f in ("pairs.json", "dropped.json")}
     _dump(os.path.join(work, "build_stats.json"), st)
     with open(os.path.join(work, "tables.md"), "w") as f:
@@ -252,6 +262,15 @@ def tables(st: dict) -> str:
         rows.append([src, *vals])
     rows.append(["**total**", *tot])
     parts = ["### Funnel per source (rows surviving each step)\n", _table(["source", *labels], rows), ""]
+    fc = st.get("funnel_by_cwe_class") or {}
+    if fc:
+        lab = ["raw"] + [label for label, _ in FUNNEL[:-1]] + ["after dedupe → files ≤10", "files ≤20", "files any"]
+        parts += ["### Funnel by cwe_class (steps by the row's own CWEs; dedupe/size columns by the merged survivor)\n",
+                  _table(["cwe_class", *lab], [[c, f["raw"], *f["stages"], f["files_le10"], f["files_le20"], f["files_any"]]
+                                               for c, f in sorted(fc.items())]), ""]
+    if st.get("top_post_cutoff_repo_drops"):
+        parts += ["### Repos losing the most rows to the leak check (post_cutoff_repo)\n",
+                  _table(["repo", "rows dropped"], list(st["top_post_cutoff_repo_drops"].items())), ""]
     cc = st["cwe_class"]
     parts += ["### Kept pairs by cwe_class\n",
               _table(["cwe_class", "files ≤10", "files ≤20", "files any"],

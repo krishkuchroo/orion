@@ -4,11 +4,12 @@ Checks run in a fixed order and the first failing one is the row's reason, so th
 a funnel (``STAGES``):
 
 0. labels not LLM-made              llm_assisted_labels  (unless allow_llm_assisted=True)
-1. a GitHub fix commit exists       no_fix_commit / non_github_repo / fix_pr_unresolved
+1. a GitHub fix link exists         no_fix_commit / non_github_repo
 2. language is JS/TS, Python, Java  language_unknown / language_unsupported:<lang>
 3. advisory published < cutoff      advisory_date_missing / advisory_after_cutoff
 4. not a test-set candidate repo    post_cutoff_repo / post_cutoff_package
-5. fix commit metadata obtained     enrich_pending / commit_missing / enrich_error / fix_date_missing
+5. fix commit metadata obtained     fix_pr_unresolved (PR-only link not merged / not found) /
+                                    enrich_pending / commit_missing / enrich_error / fix_date_missing
 6. fix commit date < cutoff         fix_after_cutoff
 7. fix touches the language         no_source_files_in_language
 8. dedupe (alias, then repo+sha)    duplicate_alias:<id> / duplicate_commit:<id>
@@ -22,11 +23,11 @@ from __future__ import annotations
 from train.sources import ANNOTATION_KEYS, CUTOFF, SOURCE_PRIORITY, SUPPORTED_LANGUAGES, cwe_class
 
 STAGES = ("llm_assisted_labels",
-          "no_fix_commit", "non_github_repo", "fix_pr_unresolved",
+          "no_fix_commit", "non_github_repo",
           "language_unknown", "language_unsupported",
           "advisory_date_missing", "advisory_after_cutoff",
           "post_cutoff_repo", "post_cutoff_package",
-          "enrich_pending", "commit_missing", "enrich_error", "fix_date_missing",
+          "fix_pr_unresolved", "enrich_pending", "commit_missing", "enrich_error", "fix_date_missing",
           "fix_after_cutoff",
           "no_source_files_in_language",
           "duplicate_alias", "duplicate_commit",
@@ -41,14 +42,14 @@ def row_reason(r: dict, *, cutoff: str = CUTOFF, post_cutoff_repos=frozenset(), 
                languages=SUPPORTED_LANGUAGES, stop_before_enrichment: bool = False,
                allow_unknown_language: bool = False, allow_llm_assisted: bool = False) -> str | None:
     """First failing per-row check (stages 1-7), or None. ``stop_before_enrichment`` evaluates only
-    the checks that need no GitHub data (used to decide which commits are worth fetching; a PR-only
-    row passes it because the PR is resolved during enrichment)."""
+    the checks that need no GitHub data (used to decide which commits are worth fetching). A PR-only
+    row is resolved to its merge commit during enrichment, so its PR status is judged at stage 5."""
     if r.get("llm_assisted_labels") and not allow_llm_assisted:
         return "llm_assisted_labels"
     if not r.get("repo"):
         return "non_github_repo" if r.get("repo_url") else "no_fix_commit"
-    if not r.get("fix_sha") and not (stop_before_enrichment and r.get("fix_pr")):
-        return "fix_pr_unresolved" if r.get("fix_pr") else "no_fix_commit"
+    if not r.get("fix_sha") and not r.get("fix_pr"):
+        return "no_fix_commit"
     lang = r.get("language")
     if lang is None:
         if not allow_unknown_language:
@@ -66,6 +67,8 @@ def row_reason(r: dict, *, cutoff: str = CUTOFF, post_cutoff_repos=frozenset(), 
         return "post_cutoff_package"
     if stop_before_enrichment:
         return None
+    if not r.get("fix_sha"):
+        return "fix_pr_unresolved"
     status = r.get("enrich_status")
     if status == "commit_missing":
         return "commit_missing"

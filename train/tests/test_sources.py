@@ -318,7 +318,7 @@ def test_cwe_bench_java_v2_layout_with_fix_methods_and_source_sink(tmp_path):
     (tmp_path / "fix_info_source_sink.csv").write_text(
         "project_slug,cve_id,github_username,github_repository_name,commit,file,class,class_start,class_end,method,"
         "method_start,method_end,signature,Done,Link,Source,Source Line,Sink,Sink Line\n"
-        f"kc_CVE-2025-1_1,CVE-2025-1,keycloak,keycloak,{SHA1},A.java,A,1,90,run,10,20,void run(),1,x,userCtx,12,setNote(x),17\n")
+        f"keycloak_CVE-2025-1_1,CVE-2025-1,keycloak,keycloak,{SHA1},A.java,A,1,90,run,10,20,void run(),1,x,userCtx,12,setNote(x),17\n")
     [p] = sources.readymade("cwe-bench-java", str(tmp_path))
     assert p["repo"] == "keycloak/keycloak" and p["fix_sha"] == SHA1 and p["advisory_published"] is None
     assert p["fix_methods"] == [{"commit": SHA1, "file": "A.java", "class": "A", "method": "run",

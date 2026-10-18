@@ -160,3 +160,12 @@ def test_survivor_inherits_location_annotations_and_class_tag_from_duplicates():
     k = {p["id"]: p for p in kept}
     assert k["CVE-7"]["source"] == "vulcan" and k["CVE-7"]["locations"][0]["sink"]["lineno"] == 3
     assert k["CVE-8"]["cwe_class"] == "dataflow" and k["CVE-8"]["sink_location"] == "a.js:1:1"
+
+
+def test_unresolved_pr_is_judged_at_the_enrichment_step_not_before_the_date_and_leak_checks():
+    pairs = [row("LATE", fix_sha=None, fix_pr=3, advisory_published="2026-07-01"),
+             row("LEAK", fix_sha=None, fix_pr=4, repo="o/leaky"),
+             row("OPEN", fix_sha=None, fix_pr=5)]
+    _, dropped = filters.keep(pairs, post_cutoff_repos={"o/leaky"})
+    assert reasons(dropped) == {"LATE": "advisory_after_cutoff", "LEAK": "post_cutoff_repo",
+                                "OPEN": "fix_pr_unresolved"}
