@@ -29,6 +29,40 @@ FLOW = {"flow_id": "F0", "rank": 0, "sink_category": "code_exec", "source_uid": 
         "nodes": [{"file": "a.js", "function": "f", "line": 10, "code": "exec(x)"}]}
 
 
+def test_context_overflow_on_the_forced_final_ends_the_session_with_no_leads(tmp_path):
+    from orion.lm.model import ContextOverflow
+    calls = []
+
+    def generate(messages):
+        calls.append(len(messages))
+        if len(calls) == 1:                      # trips the prompter's budget cap ...
+            return gen(json.dumps({"action": "run_cypher", "query": Q}), p=7900, c=200)
+        raise ContextOverflow(8300, 8000)        # ... and the longer forced-final prompt overflows the wrapper
+
+    leads, steps = prompter.run_session(generate, StubDB(), str(tmp_path), "s", flows=[FLOW], context_cap=8000)
+    assert leads == [] and len(calls) == 2
+    assert [s["kind"] for s in steps] == ["run_cypher", "context_overflow"]
+    last = steps[-1]
+    assert last["error"] == "prompt is 8300 tokens, context_cap is 8000"
+    assert last["prompt_tokens"] is None and last["completion_tokens"] is None and last["cached_tokens"] is None
+    assert last["step_no"] == 2 and isinstance(last["wall_seconds"], float)
+
+
+def test_context_overflow_on_a_normal_call_ends_the_session_too(tmp_path):
+    from orion.lm.model import ContextOverflow
+    it = iter([gen(json.dumps({"action": "run_cypher", "query": Q}))])
+
+    def generate(messages):
+        try:
+            return next(it)
+        except StopIteration:
+            raise ContextOverflow(9000, 8000)    # a big RESULT: turn pushed the next prompt over
+
+    leads, steps = prompter.run_session(generate, StubDB(), str(tmp_path), "s", flows=[FLOW])
+    assert leads == [] and [s["kind"] for s in steps] == ["run_cypher", "context_overflow"]
+    assert prompter.CONTEXT_MARGIN == 1024
+
+
 def test_run_cypher_then_final_yields_lead_and_steps(tmp_path):
     acts = [json.dumps({"action": "run_cypher", "query": Q}),
             json.dumps({"action": "final", "leads": [{"flow_id": "F0", "file": "a.js", "function": "f",

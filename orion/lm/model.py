@@ -32,6 +32,16 @@ Three facts measured on this machine with mlx-community/gemma-3-1b-it-4bit (deta
    previous reply text, the model's own reply tokens (already in the cache) are kept and only the text
    after the reply is tokenized. The text the model conditions on is byte-identical to the training
    text; only the token boundaries inside its own past reply differ (as in every KV-cached chat server).
+   TRAINING/RUNTIME GAP, stated plainly: Task D5 trains on the CANONICAL tokenization of the whole
+   history, while at runtime the model's own past replies stay in its own tokenization. `GenResult.spliced`
+   says whether a call took the spliced path, so Task C2 can A/B "splice" against "canonical re-tokenize
+   + cache reset" on the dev set before any bake-off number is trusted; `reset_cache()` before a call
+   forces the canonical path.
+
+Caps: `context_cap` here is the HARD limit — a prompt above it raises `ContextOverflow`, nothing is
+truncated. The prompter's `context_cap` is a budget that must sit at least one turn + reply lower
+(`prompter.CONTEXT_MARGIN`, 1024 suggested), because its forced-final prompt is always longer than the call
+that tripped the budget. The prompter catches `ContextOverflow` and ends the session with zero leads.
 3. A constrained (Outlines) turn ends with the EOS token the Outlines vocabulary was built with. If that
    is the tokenizer's `<eos>` instead of the template's turn-end token (`<end_of_turn>` for Gemma), the
    cache and the template disagree at that one token and (2) applies. So the Outlines vocabulary is built
@@ -43,15 +53,23 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import os
 from dataclasses import dataclass
+
+log = logging.getLogger(__name__)
 
 # Fallbacks when the model directory has no generation_config.json (mlx-community 4-bit conversions
 # often drop it). The bake-off table records what each model actually ran with (`.sampling`).
 DEFAULT_TEMPERATURE = 1.0
 DEFAULT_TOP_P = 0.95
-DEFAULT_TOP_K = 0  # 0 = disabled (mlx_lm make_sampler convention)
+DEFAULT_TOP_K = 0  # 0 = disabled (mlx_lm make_sampler convention); per-family values below
 DEFAULT_MAX_TOKENS = 1024
+# Published non-greedy recommendations, keyed by the config.json `model_type` / GGUF `general.architecture`
+# prefix, used only when generation_config.json is absent. Gemma 3 model card: temperature 1.0,
+# top_p 0.95, top_k 64. Other families fall back to the module defaults (top_k off) — add them here as
+# their cards are read, never guessed.
+FAMILY_TOP_K = {"gemma": 64}
 
 
 def _check_max_tokens(max_tokens: int) -> int:
@@ -67,6 +85,9 @@ class GenResult:
     prompt_tokens: int
     completion_tokens: int
     cached_tokens: int
+    # True when the prompt reused the model's own tokens for its previous reply instead of re-tokenizing
+    # the history (module docstring, fact 2). Defaulted so scripted test generators need not set it.
+    spliced: bool = False
 
 
 class ContextOverflow(ValueError):
@@ -159,18 +180,31 @@ def _local_model_dir(path_or_repo: str) -> str:
             f"offline, download it once first (huggingface-cli download {path_or_repo})") from e
 
 
-def _resolve_sampling(model_dir: str | None, temperature, top_p, top_k) -> dict:
-    """Explicit kwargs win; then the model's generation_config.json; then the module defaults."""
+def _read_json(path: str) -> dict:
+    if not os.path.isfile(path):
+        return {}
+    with open(path, encoding="utf-8") as f:
+        return json.load(f) or {}
+
+
+def _family_top_k(family: str | None) -> int:
+    for prefix, k in FAMILY_TOP_K.items():
+        if family and family.lower().startswith(prefix):
+            return k
+    return DEFAULT_TOP_K
+
+
+def _resolve_sampling(model_dir: str | None, temperature, top_p, top_k, family: str | None = None) -> dict:
+    """Explicit kwargs win; then the model's generation_config.json; then the family table / defaults.
+    `family` defaults to config.json's `model_type` when `model_dir` is given."""
     gen_cfg: dict = {}
     if model_dir:
-        p = os.path.join(model_dir, "generation_config.json")
-        if os.path.isfile(p):
-            with open(p, encoding="utf-8") as f:
-                gen_cfg = json.load(f) or {}
+        gen_cfg = _read_json(os.path.join(model_dir, "generation_config.json"))
+        family = family or _read_json(os.path.join(model_dir, "config.json")).get("model_type")
     return {
         "temperature": float(temperature if temperature is not None else gen_cfg.get("temperature", DEFAULT_TEMPERATURE)),
         "top_p": float(top_p if top_p is not None else gen_cfg.get("top_p", DEFAULT_TOP_P)),
-        "top_k": int(top_k if top_k is not None else gen_cfg.get("top_k", DEFAULT_TOP_K)),
+        "top_k": int(top_k if top_k is not None else gen_cfg.get("top_k", _family_top_k(family))),
     }
 
 
@@ -205,7 +239,18 @@ class MlxModel:
 
     `constrain` (constructor, default True) restricts every reply to `format.ACTION_SCHEMA` (compact
     JSON, sorted keys) via Outlines; `generate(messages, constrain=...)` overrides it per call.
+
+    Seeding: the sampler draws from MLX's GLOBAL random stream, so `seed` is applied to the process, not
+    the instance. `seed_session()` re-seeds it from the constructor seed and runs at construction and on
+    every `reset_cache()`, so each fresh session starts from the same RNG state for the same `seed`.
+    Limitation: two `MlxModel`s in one process share that stream — run ONE model per process when
+    reproducibility matters (F3's runs are sequential).
+
+    Cache integrity: any exception during a call resets the cache (a half-updated cache is never reused);
+    after a successful call every layer's cache offset must equal the tracked token count.
     """
+
+    backend = "mlx"
 
     def __init__(self, model_path: str, *, context_cap: int = 8000, thinking: bool = False,
                  temperature: float | None = None, top_p: float | None = None, top_k: int | None = None,
@@ -226,7 +271,6 @@ class MlxModel:
         self._mx = mx
         self._sampler = make_sampler(temp=self.sampling["temperature"], top_p=self.sampling["top_p"],
                                      top_k=self.sampling["top_k"])
-        mx.random.seed(self.seed)  # the sampler draws from MLX's global stream: seed = run number
 
         # Turn-end markers are often ADDED tokens, not "special" ones (Gemma's <end_of_turn> is not in
         # all_special_ids), so consider both sets.
@@ -243,6 +287,7 @@ class MlxModel:
         self._last: tuple[str, str] | None = None   # (prompt text, reply text) of the previous call
         self._last_stop_text: str | None = None     # text of the stop token at the end of the cache
         self._outlines_index = None
+        self.seed_session()
 
     # -- prompt --------------------------------------------------------------------------------
 
@@ -257,25 +302,43 @@ class MlxModel:
     def prompt_tokens(self, messages: list[dict]) -> list[int]:
         """The tokens `generate` feeds for `messages`: the model's own tokens for its previous reply when
         `messages` continues the previous exchange (fact 2), else the canonical tokenization."""
-        return self._tokens_for(self.prompt_text(messages))
+        return self._tokens_for(self.prompt_text(messages))[0]
 
-    def _tokens_for(self, text: str) -> list[int]:
+    def _tokens_for(self, text: str) -> tuple[list[int], bool]:
+        """(tokens, spliced) for the templated `text`."""
         spliced = splice_prompt_tokens(text, self._last, self._cache_tokens, self._encode_fragment,
                                        self._last_stop_text)
         if spliced is not None:
-            return spliced
+            return spliced, True
         bos = self.tokenizer.bos_token
         # The template already wrote the BOS; only add specials when it did not (mlx_lm's own rule).
         add_special = bos is None or not text.startswith(bos)
-        return list(self.tokenizer.encode(text, add_special_tokens=add_special))
+        return list(self.tokenizer.encode(text, add_special_tokens=add_special)), False
 
     # -- cache ---------------------------------------------------------------------------------
 
+    def seed_session(self) -> None:
+        """Re-seed MLX's global random stream from the constructor seed (class docstring)."""
+        self._mx.random.seed(self.seed)
+
     def reset_cache(self) -> None:
+        """Drop the prompt cache and start a fresh session from the seeded RNG state."""
         self._cache = None
         self._cache_tokens = []
         self._last = None
         self._last_stop_text = None
+        self.seed_session()
+
+    def _check_offsets(self, expected: int) -> None:
+        """Every layer cache that exposes `.offset` must hold exactly `expected` tokens.
+
+        mlx_lm's KVCache / RotatingKVCache / QuantizedKVCache all track `.offset` (total tokens seen,
+        trimming subtracts); a cache type without it is skipped and the tracked list stays the source.
+        """
+        for i, c in enumerate(self._cache or []):
+            off = getattr(c, "offset", None)
+            if off is not None and int(off) != expected:
+                raise RuntimeError(f"prompt cache out of sync: layer {i} offset {off}, tracked {expected}")
 
     def _prepare_cache(self, toks: list[int]) -> tuple[list[int], int]:
         """Return (tokens still to prefill, cached_tokens), adjusting the cache in place."""
@@ -320,20 +383,11 @@ class MlxModel:
 
     # -- generate ------------------------------------------------------------------------------
 
-    def generate(self, messages: list[dict], *, constrain: bool | None = None) -> GenResult:
+    def _decode(self, suffix: list[int], processors) -> list[int]:
+        """Prefill `suffix` into the cache and sample until a stop token or `max_tokens`."""
         from mlx_lm.generate import generate_step, generation_stream, wired_limit
 
         mx = self._mx
-        constrain = self.constrain if constrain is None else bool(constrain)
-        text = self.prompt_text(messages)
-        toks = self._tokens_for(text)
-        n_prompt = len(toks)
-        if n_prompt > self.context_cap:
-            raise ContextOverflow(n_prompt, self.context_cap)
-
-        suffix, cached = self._prepare_cache(toks)
-        processors = [self._action_processor()] if constrain else None
-
         gen: list[int] = []
         with wired_limit(self.model, [generation_stream]):
             for token, _ in generate_step(mx.array(suffix), self.model, max_tokens=self.max_tokens,
@@ -343,22 +397,49 @@ class MlxModel:
                 if token in self.eos_ids:
                     break
         mx.clear_cache()
+        return gen
 
-        # Every yielded token was fed back into the cache by generate_step (including the stop token).
+    def generate(self, messages: list[dict], *, constrain: bool | None = None) -> GenResult:
+        constrain = self.constrain if constrain is None else bool(constrain)
+        text = self.prompt_text(messages)
+        toks, spliced = self._tokens_for(text)
+        n_prompt = len(toks)
+        if n_prompt > self.context_cap:
+            raise ContextOverflow(n_prompt, self.context_cap)  # cache untouched: nothing was fed
+
+        try:
+            suffix, cached = self._prepare_cache(toks)
+            processors = [self._action_processor()] if constrain else None
+            gen = self._decode(suffix, processors)
+            # Every yielded token was fed back into the cache by generate_step (including the stop token).
+            self._cache_tokens = toks + gen
+            self._check_offsets(len(self._cache_tokens))
+        except Exception:
+            # A failure anywhere after the cache was touched leaves it half-updated: never reuse it.
+            self.reset_cache()
+            raise
+
         stopped = bool(gen) and gen[-1] in self.eos_ids
         body = gen[:-1] if stopped else gen
         reply = self.tokenizer.decode(body)
-        self._cache_tokens = toks + gen
         self._last = (text, reply)
         self._last_stop_text = self.tokenizer.decode([gen[-1]]) if stopped else None
-        return GenResult(text=reply, prompt_tokens=n_prompt, completion_tokens=len(gen), cached_tokens=cached)
+        return GenResult(text=reply, prompt_tokens=n_prompt, completion_tokens=len(gen), cached_tokens=cached,
+                         spliced=spliced)
 
 
 # ----------------------------------------------------------------------------- llama.cpp fallback
 
 
 class LlamaCppModel:
-    """llama-cpp-python fallback over a GGUF file, same seam as `MlxModel`."""
+    """llama-cpp-python fallback over a GGUF file, same seam as `MlxModel`.
+
+    Seeding: llama.cpp's sampler RNG is per `Llama` context; `seed_session()` re-applies the constructor
+    seed (`Llama.set_seed`) at construction and on every `reset_cache()`. Cache integrity: a failure
+    mid-call resets the context (`Llama.reset`) before re-raising.
+    """
+
+    backend = "llama_cpp"
 
     def __init__(self, gguf_path: str, *, context_cap: int = 8000, thinking: bool = False,
                  temperature: float | None = None, top_p: float | None = None, top_k: int | None = None,
@@ -375,10 +456,10 @@ class LlamaCppModel:
         self.max_tokens = _check_max_tokens(max_tokens)
         self.seed = int(seed)
         self.constrain = bool(constrain)
-        self.sampling = _resolve_sampling(None, temperature, top_p, top_k)
-
         self.llm = Llama(model_path=gguf_path, n_ctx=self.context_cap + self.max_tokens, seed=self.seed,
                          n_gpu_layers=n_gpu_layers, verbose=False)
+        self.sampling = _resolve_sampling(None, temperature, top_p, top_k,
+                                          family=self.llm.metadata.get("general.architecture"))
         template = self.llm.metadata.get("tokenizer.chat_template")
         if not template:
             raise ValueError(f"{gguf_path}: GGUF carries no tokenizer.chat_template")
@@ -393,6 +474,7 @@ class LlamaCppModel:
         self.eos_ids = {self.llm.token_eos()} | ({self.turn_end_id} if self.turn_end_id is not None else set())
         self._last: tuple[str, str] | None = None
         self._outlines_index = None
+        self.seed_session()
 
     def _detok(self, ids: list[int]) -> str:
         return self.llm.detokenize(ids, special=True).decode("utf-8", "replace")
@@ -421,20 +503,24 @@ class LlamaCppModel:
         return self._render(merge_consecutive_roles(messages), True)
 
     def prompt_tokens(self, messages: list[dict]) -> list[int]:
-        return self._tokens_for(self.prompt_text(messages))
+        return self._tokens_for(self.prompt_text(messages))[0]
 
-    def _tokens_for(self, text: str) -> list[int]:
+    def _tokens_for(self, text: str) -> tuple[list[int], bool]:
         # llama.cpp evaluates a sampled token only when the next one is drawn, so the stop token is NOT in
         # its cache: the text after the reply (starting with the stop token) is tokenized in full.
         spliced = splice_prompt_tokens(text, self._last, self._cache_tokens(), self._encode_fragment, None)
         if spliced is not None:
-            return spliced
+            return spliced, True
         add_bos = not text.startswith(self._bos_text)
-        return list(self.llm.tokenize(text.encode("utf-8"), add_bos=add_bos, special=True))
+        return list(self.llm.tokenize(text.encode("utf-8"), add_bos=add_bos, special=True)), False
+
+    def seed_session(self) -> None:
+        self.llm.set_seed(self.seed)
 
     def reset_cache(self) -> None:
         self.llm.reset()
         self._last = None
+        self.seed_session()
 
     def _action_processor(self):
         from llama_cpp import LogitsProcessorList
@@ -458,7 +544,7 @@ class LlamaCppModel:
     def generate(self, messages: list[dict], *, constrain: bool | None = None) -> GenResult:
         constrain = self.constrain if constrain is None else bool(constrain)
         text = self.prompt_text(messages)
-        toks = self._tokens_for(text)
+        toks, spliced = self._tokens_for(text)
         n_prompt = len(toks)
         if n_prompt > self.context_cap:
             raise ContextOverflow(n_prompt, self.context_cap)
@@ -470,20 +556,25 @@ class LlamaCppModel:
         common = common_prefix_len(self._cache_tokens(), toks)
         cached = max(common - 1 if common == n_prompt else common, 0)
 
-        processors = self._action_processor() if constrain else None
         s = self.sampling
         gen: list[int] = []
-        for token in llm.generate(toks, temp=s["temperature"], top_p=s["top_p"], top_k=s["top_k"],
-                                  min_p=0.0, repeat_penalty=1.0, reset=True, logits_processor=processors):
-            gen.append(int(token))
-            if token in self.eos_ids or len(gen) >= self.max_tokens:
-                break
+        try:
+            processors = self._action_processor() if constrain else None
+            for token in llm.generate(toks, temp=s["temperature"], top_p=s["top_p"], top_k=s["top_k"],
+                                      min_p=0.0, repeat_penalty=1.0, reset=True, logits_processor=processors):
+                gen.append(int(token))
+                if token in self.eos_ids or len(gen) >= self.max_tokens:
+                    break
+        except Exception:
+            self.reset_cache()
+            raise
 
         stopped = bool(gen) and gen[-1] in self.eos_ids
         body = gen[:-1] if stopped else gen
         reply = llm.detokenize(body).decode("utf-8", "replace")
         self._last = (text, reply)
-        return GenResult(text=reply, prompt_tokens=n_prompt, completion_tokens=len(gen), cached_tokens=cached)
+        return GenResult(text=reply, prompt_tokens=n_prompt, completion_tokens=len(gen), cached_tokens=cached,
+                         spliced=spliced)
 
 
 # ----------------------------------------------------------------------------- entry point
@@ -496,6 +587,7 @@ def load(path: str, *, gguf_path: str | None = None, **sampling):
     `gguf_path` names the GGUF to fall back to when MLX fails; without one, a `.gguf` next to the MLX
     weights is used; otherwise the MLX error is raised. `sampling` = the wrappers' keyword arguments
     (`context_cap`, `thinking`, `temperature`, `top_p`, `top_k`, `seed`, `max_tokens`, `constrain`).
+    The returned object's `.backend` is "mlx" or "llama_cpp"; a fallback is logged as a warning.
     """
     if path.endswith(".gguf"):
         return LlamaCppModel(path, **sampling)
@@ -505,6 +597,7 @@ def load(path: str, *, gguf_path: str | None = None, **sampling):
         fallback = gguf_path or _gguf_in(path)
         if fallback is None:
             raise
+        log.warning("MLX load of %r failed (%r); falling back to llama-cpp over %s", path, mlx_err, fallback)
         try:
             return LlamaCppModel(fallback, **sampling)
         except Exception as cpp_err:

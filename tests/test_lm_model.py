@@ -9,9 +9,12 @@ the token-free suite stays green:
 """
 from __future__ import annotations
 
+import json
 import os
 import re
+import subprocess
 import sys
+import types
 
 import pytest
 
@@ -26,8 +29,98 @@ DEFAULT_TEST_MODEL = "mlx-community/gemma-3-1b-it-4bit"
 
 
 def test_gen_result_import_does_not_pull_in_mlx_or_outlines():
-    assert GenResult("x", 1, 2, 0).text == "x"
-    assert not any(m == "mlx" or m.startswith(("mlx.", "mlx_lm", "outlines", "llama_cpp")) for m in sys.modules)
+    # In a fresh interpreter, so earlier tests in this process cannot have imported the libraries.
+    code = ("import sys; from orion.lm.model import GenResult; from orion.lm import prompter; "
+            "bad = [m for m in sys.modules if m == 'mlx' or m.startswith(('mlx.', 'mlx_lm', 'outlines', 'llama_cpp'))]; "
+            "print('BAD', bad)")
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120)
+    assert out.returncode == 0, out.stderr
+    assert "BAD []" in out.stdout, out.stdout
+    assert GenResult("x", 1, 2, 0).spliced is False  # defaulted: B3's scripted generators keep working
+
+
+def test_resolve_sampling_prefers_generation_config_then_family_table(tmp_path):
+    from orion.lm.model import DEFAULT_TOP_K, FAMILY_TOP_K, _resolve_sampling
+    (tmp_path / "config.json").write_text(json.dumps({"model_type": "gemma3_text"}))
+    s = _resolve_sampling(str(tmp_path), None, None, None)
+    assert s == {"temperature": 1.0, "top_p": 0.95, "top_k": FAMILY_TOP_K["gemma"]}
+    (tmp_path / "generation_config.json").write_text(json.dumps({"top_k": 7, "temperature": 0.3}))
+    assert _resolve_sampling(str(tmp_path), None, None, None) == {"temperature": 0.3, "top_p": 0.95, "top_k": 7}
+    assert _resolve_sampling(str(tmp_path), 0.5, 0.9, 1)["top_k"] == 1  # explicit kwargs win
+    assert _resolve_sampling(None, None, None, None, family="llama")["top_k"] == DEFAULT_TOP_K
+    assert _resolve_sampling(None, None, None, None, family="gemma3")["top_k"] == 64
+
+
+class _FakeTokenizer:
+    bos_token = "<bos>"
+
+    def apply_chat_template(self, messages, **kw):
+        # like a real template, an assistant turn is closed by the stop token's text (id 0 -> "\x00")
+        return "<bos>" + "".join(m["content"] + ("\x00" if m["role"] == "assistant" else "|") for m in messages)
+
+    def encode(self, text, add_special_tokens=False):
+        return [ord(c) for c in text]
+
+    def decode(self, ids):
+        return "".join(chr(i) for i in ids)
+
+
+class _FakeLayerCache:
+    def __init__(self, offset):
+        self.offset = offset
+
+
+def _bare_mlx_model(monkeypatch):
+    """An MlxModel without MLX: only the attributes `generate` touches, with the MLX-bound methods faked."""
+    from orion.lm.model import MlxModel
+    m = MlxModel.__new__(MlxModel)
+    m.tokenizer = _FakeTokenizer()
+    m.context_cap, m.constrain, m.eos_ids, m.seed, m.thinking = 10_000, False, {0}, 3, False
+    seeds = []
+    m._mx = types.SimpleNamespace(random=types.SimpleNamespace(seed=seeds.append))
+    m._cache, m._cache_tokens, m._last, m._last_stop_text = ["old"], [1, 2, 3], None, None
+    monkeypatch.setattr(m, "_prepare_cache", lambda toks: (toks, 0))
+    return m, seeds
+
+
+def test_generate_failure_mid_decode_resets_the_cache_and_reseeds(monkeypatch):
+    m, seeds = _bare_mlx_model(monkeypatch)
+
+    def boom(suffix, processors):
+        m._cache = ["half-updated"]
+        raise RuntimeError("metal died")
+    monkeypatch.setattr(m, "_decode", boom)
+    with pytest.raises(RuntimeError, match="metal died"):
+        m.generate([{"role": "user", "content": "hi"}])
+    assert m._cache is None and m._cache_tokens == [] and m._last is None
+    assert seeds == [3]  # reset_cache() re-seeded from the constructor seed
+
+
+def test_generate_detects_a_cache_offset_out_of_sync(monkeypatch):
+    m, seeds = _bare_mlx_model(monkeypatch)
+    toks = m.prompt_tokens([{"role": "user", "content": "hi"}])
+
+    def decode_ok(suffix, processors):
+        m._cache = [_FakeLayerCache(len(toks) + 2), _FakeLayerCache(len(toks) + 1)]  # layer 1 is one short
+        return [65, 0]
+    monkeypatch.setattr(m, "_decode", decode_ok)
+    with pytest.raises(RuntimeError, match="out of sync: layer 1"):
+        m.generate([{"role": "user", "content": "hi"}])
+    assert m._cache is None and seeds == [3]
+
+    # consistent offsets: the call succeeds, bookkeeping records the stop token and the spliced flag
+    def decode_sync(suffix, processors):
+        m._cache = [_FakeLayerCache(len(toks) + 2)]
+        return [65, 0]
+    monkeypatch.setattr(m, "_decode", decode_sync)
+    r = m.generate([{"role": "user", "content": "hi"}])
+    assert (r.text, r.completion_tokens, r.spliced) == ("A", 2, False)
+    assert m._cache_tokens == toks + [65, 0] and m._last_stop_text == "\x00"
+    # the continuation reuses the model's own tokens: spliced is reported
+    monkeypatch.setattr(m, "_prepare_cache", lambda t: (t[len(m._cache_tokens):], len(m._cache_tokens)))
+    monkeypatch.setattr(m, "_decode", lambda s, p: (m._cache.__setitem__(0, _FakeLayerCache(len(m._cache_tokens) + len(s) + 1)) or [0]))
+    r2 = m.generate([{"role": "user", "content": "hi"}, {"role": "assistant", "content": "A"}, {"role": "user", "content": "x"}])
+    assert r2.spliced is True and r2.cached_tokens == len(toks) + 2
 
 
 def test_merge_consecutive_roles_concatenates_same_role_runs_with_a_blank_line():
@@ -158,7 +251,11 @@ def test_constrained_turns_extend_the_cache_exactly(model):
         assert fmt.parse_action(r.text) is not None, r.text
         if prev is not None:
             assert r.cached_tokens == prev.prompt_tokens + prev.completion_tokens, (turn, r, prev)
+            assert r.spliced is True
+        else:
+            assert r.spliced is False
         prev = r
+        assert all(c.offset == model._cache_tokens.__len__() for c in model._cache)  # offsets agree with the tracked list
         msgs = msgs + [{"role": "assistant", "content": r.text},
                        {"role": "user", "content": f"RESULT: run_cypher: [] (turn {turn + 1}). Emit final again."}]
 

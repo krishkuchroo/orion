@@ -6,6 +6,14 @@ a token count — every number in a step record is copied from the GenResult the
 
 History is append-only: a turn, once appended, is never rewritten (a rewrite would break the model's
 prompt cache, spec §5.1). Every turn the model sees comes from `orion.lm.format`.
+
+Two caps, deliberately different: this loop's `context_cap` is a BUDGET (force the final once the last
+call's prompt+completion reaches it); the model wrapper's `context_cap` (`orion.lm.model`) is the HARD
+limit, above which `generate` raises `ContextOverflow` instead of truncating. The forced-final prompt is
+always longer than the call that tripped the budget, and a 25-row RESULT can push any call over, so the
+wiring (Task F3) must set this cap at least one turn + reply below the wrapper's — `CONTEXT_MARGIN`
+(1024 tokens) is the suggested gap. If the wrapper still overflows, the session ends with a
+`context_overflow` step and zero leads; it never crashes the engine and never fabricates a final.
 """
 from __future__ import annotations
 
@@ -14,17 +22,22 @@ import time
 from orion.lm import format as fmt
 from orion.lm import slice as lm_slice
 from orion.lm import tools
+from orion.lm.model import ContextOverflow
+
+# Suggested distance between the prompter's budget cap and the wrapper's hard cap (see module docstring).
+CONTEXT_MARGIN = 1024
 
 
 def _step(step_no: int, kind: str, res, wall: float, *, query=None, row_count=None, error=None) -> dict:
+    """One steps-table row. `res` is None only for `context_overflow` (nothing was generated)."""
     return {
         "step_no": step_no,
         "kind": kind,
         "query": query,
         "row_count": row_count,
-        "prompt_tokens": res.prompt_tokens,
-        "completion_tokens": res.completion_tokens,
-        "cached_tokens": res.cached_tokens,
+        "prompt_tokens": None if res is None else res.prompt_tokens,
+        "completion_tokens": None if res is None else res.completion_tokens,
+        "cached_tokens": None if res is None else res.cached_tokens,
         "wall_seconds": wall,
         "error": error,
     }
@@ -48,6 +61,10 @@ def run_session(generate, db, repo_path: str, scan_id: str, flows: list[dict], *
     Forced final when the last call's prompt+completion tokens reach `context_cap`, when `max_actions`
     model calls have been made, or when `stop` (a threading.Event) is set: one more call after a
     `forced_final_message`; if that is not a valid `final`, leads = [].
+
+    `context_cap` here must sit at least `CONTEXT_MARGIN` below the model wrapper's hard cap (module
+    docstring). A `ContextOverflow` from `generate` on ANY call ends the session: a `context_overflow` step
+    (token fields None, `error` = the wrapper's message) and `leads = []`.
     """
     messages: list[dict] = [fmt.system_message(lm_slice.pruned_schema()), fmt.task_message(flows)]
     steps: list[dict] = []
@@ -60,7 +77,12 @@ def run_session(generate, db, repo_path: str, scan_id: str, flows: list[dict], *
         if forced:
             messages.append(fmt.forced_final_message())
             t0 = time.perf_counter()
-            res = generate(messages)
+            try:
+                res = generate(messages)
+            except ContextOverflow as exc:
+                steps.append(_step(len(steps) + 1, "context_overflow", None, time.perf_counter() - t0,
+                                   error=str(exc)))
+                return [], steps
             wall = time.perf_counter() - t0
             messages.append({"role": "assistant", "content": res.text})
             action = fmt.parse_action(res.text)
@@ -72,7 +94,12 @@ def run_session(generate, db, repo_path: str, scan_id: str, flows: list[dict], *
             return leads, steps
 
         t0 = time.perf_counter()
-        res = generate(messages)
+        try:
+            res = generate(messages)
+        except ContextOverflow as exc:
+            steps.append(_step(len(steps) + 1, "context_overflow", None, time.perf_counter() - t0,
+                               error=str(exc)))
+            return [], steps
         actions += 1
         last_total = int(res.prompt_tokens) + int(res.completion_tokens)
         messages.append({"role": "assistant", "content": res.text})
