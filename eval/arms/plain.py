@@ -6,22 +6,57 @@ from pathlib import Path
 
 from . import ArmResult
 from ..usage import normalize_usage
-from .env import plain_claude_env
+from .env import codex_env, ensure_codex_home, plain_claude_env
 from .launch import stream_subprocess
 from .prompt import TASK_PROMPT, validate_findings
 
 # The event type that carries a model-call usage summary, per CLI.
 _USAGE_EVENT = {"codex": "turn.completed", "claude": "result"}
 
+_HERE = Path(__file__).resolve().parent
+# Sandbox settings for the Claude arms (Bash network lockout); see the file's _comment.
+CLAUDE_SETTINGS = str(_HERE / "claude_settings.json")
+# Clean config homes (CLAUDE_CONFIG_DIR / CODEX_HOME) live here, gitignored; they hold only a
+# copy of the login (eval/README.md, one-time step), never the operator's plugins/settings.
+CONFIG_ROOT = str(_HERE.parent / ".config")
+
+
+def config_home(arm: str, root: str = CONFIG_ROOT) -> str:
+    return os.path.join(root, "codex" if arm == "plain-gpt" else "claude")
+
 
 def _build_cmd(arm: str, repo_dir: str, model_tag: str, effort: str) -> list[str]:
-    # model_tag / effort are accepted now; Task A6 adds the real --model / --effort flags.
+    """The frontier arm's command line. Flags verified on claude 2.1.302 / codex-cli 0.155.1
+    and smoke-tested for the network lockout on 2026-10-18 (eval/README.md)."""
     if arm == "plain-gpt":
         # Codex: non-interactive, JSON events (carry token usage), cwd = repo.
-        return ["codex", "exec", "--json", "--cd", repo_dir, TASK_PROMPT]
-    # Claude Code arms (plain-sonnet5 / plain-opus5).
-    return ["claude", "-p", TASK_PROMPT, "--output-format", "stream-json", "--verbose",
+        # workspace-write + network_access=false: the agent can write findings.json into the
+        # tree but its shell has no network (read-only also blocks the write -- measured).
+        # Plugins/apps are off because account-side remote plugins and the `codex_apps` MCP
+        # server load even under a clean CODEX_HOME; web_search is Codex's built-in search
+        # tool, which runs OUTSIDE the shell sandbox (measured 2026-10-18: it searched the web
+        # with the sandbox on). Both are answer-lookup channels.
+        cmd = ["codex", "exec", "--json", "-m", model_tag]
+        if effort:
+            cmd += ["-c", f"model_reasoning_effort={effort}"]
+        cmd += ["--sandbox", "workspace-write", "-c", "sandbox_workspace_write.network_access=false",
+                "--disable", "plugins", "--disable", "remote_plugin", "--disable", "apps",
+                "-c", "web_search=disabled",
+                "-c", "approval_policy=never",  # non-interactive: nothing can wait on a prompt
+                "--skip-git-repo-check", "--cd", repo_dir, TASK_PROMPT]
+        return cmd
+    # Claude Code arms (plain-sonnet5 / plain-opus5): pinned model + effort; no user/project/
+    # local settings, no MCP servers, no web tools; Bash sandboxed with an empty network
+    # allowlist (claude_settings.json).
+    cmd = ["claude", "-p", TASK_PROMPT, "--output-format", "stream-json", "--verbose",
+           "--model", model_tag]
+    if effort:
+        cmd += ["--effort", effort]
+    cmd += ["--setting-sources", "", "--strict-mcp-config",
+            "--disallowedTools", "WebFetch", "WebSearch",
+            "--settings", CLAUDE_SETTINGS,
             "--add-dir", repo_dir, "--permission-mode", "bypassPermissions"]
+    return cmd
 
 
 def _usage_source(arm: str) -> str:
@@ -85,15 +120,17 @@ def _capture_findings(repo_dir: str, json_out: str, on_line) -> "str | None":
 
 
 def plain_arm(*, arm, repo_dir, model_tag, effort, json_out, usage_log, shim_dir, base_env,
-              on_line, popen=subprocess.Popen, on_start=None) -> ArmResult:
+              on_line, popen=subprocess.Popen, on_start=None, config_root=CONFIG_ROOT) -> ArmResult:
     os.makedirs(os.path.dirname(json_out), exist_ok=True)
     source = _usage_source(arm)
     cmd = _build_cmd(arm, repo_dir, model_tag, effort)
+    home = config_home(arm, config_root)
     log = None
     try:
         if source == "codex":
-            env = dict(base_env)  # Codex reports usage in its own --json stream; no claude shim
-            # No shim tees Codex's stdout, so the arm keeps the raw event stream itself.
+            # Codex reports usage in its own --json stream; no claude shim. Nothing tees its
+            # stdout either, so the arm keeps the raw event stream itself.
+            env = codex_env(base_env, home=ensure_codex_home(home))
             os.makedirs(os.path.dirname(usage_log), exist_ok=True)
             log = open(usage_log, "w")
 
@@ -102,7 +139,9 @@ def plain_arm(*, arm, repo_dir, model_tag, effort, json_out, usage_log, shim_dir
                 log.flush()
                 on_line(line)
         else:
-            env = plain_claude_env(base_env, usage_log=usage_log, shim_dir=shim_dir)
+            os.makedirs(home, exist_ok=True)
+            env = plain_claude_env(base_env, usage_log=usage_log, shim_dir=shim_dir,
+                                   config_dir=home)
             _on_line = on_line
         status = stream_subprocess(cmd, env=env, cwd=repo_dir, on_line=_on_line,
                                    on_start=on_start, popen=popen)

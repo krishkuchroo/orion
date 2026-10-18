@@ -1,0 +1,15 @@
+{
+  "_comment": "Passed to every plain-* Claude arm via `claude --settings`. Sandboxes Bash (Seatbelt on macOS) with an EMPTY network allowlist. strictAllowlist is load-bearing: in bypassPermissions mode non-allowlisted hosts are otherwise let through. The claude process itself runs outside the sandbox, so api.anthropic.com needs no entry. allowUnsandboxedCommands=false removes the 'retry unsandboxed' escape hatch; failIfUnavailable makes claude exit instead of running unsandboxed when the sandbox cannot start.",
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "allowUnsandboxedCommands": false,
+    "network": {
+      "allowedDomains": [],
+      "strictAllowlist": true
+    }
+  },
+  "permissions": {
+    "deny": ["WebFetch", "WebSearch"]
+  }
+}

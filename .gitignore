@@ -13,6 +13,8 @@ venv/
 
 # Secrets / local env (commit .env.example, never .env)
 .env
+# eval harness: clean CLAUDE_CONFIG_DIR / CODEX_HOME homes hold copied logins -- never commit
+eval/.config/
 
 # Orion run artifacts
 .orion/

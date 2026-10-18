@@ -10,24 +10,26 @@ import time
 from . import db, queue, repo
 from .resources import PhaseSampler
 
-ARMS = ["orion-gemma4", "orion-gptoss20b", "plain-gemma4",
-        "plain-sonnet5", "plain-opus5", "plain-gpt"]
+# The five study arms (design 2026-10-18 §5.4). orion-lm* run in-process (Task F3 wires the
+# dispatch); plain-* are the frontier competitors (Claude Code / Codex CLI).
+ARMS = ["orion-lm", "orion-lm-base", "plain-sonnet5", "plain-opus5", "plain-gpt"]
 
-# Exact tags confirmed in Phase 0; frozen at pre-registration.
+# Exact model ids, verified against the installed CLIs on 2026-10-18 (claude 2.1.302,
+# codex-cli 0.155.1): `claude --model <id>` runs and reports the same id in its init/usage
+# events; `codex exec -m <id>` runs. Frozen at pre-registration (orion-lm-prereg-v1).
+# orion-lm* map to the local model path (set in Part F).
 MODEL_TAGS = {
-    "orion-gemma4": "gemma3:12b",
-    "orion-gptoss20b": "gpt-oss:20b",
-    "plain-gemma4": "gemma3:12b",
     "plain-sonnet5": "claude-sonnet-5",
     "plain-opus5": "claude-opus-5",
     "plain-gpt": "gpt-5.6-sol",
 }
 
-# Reasoning effort per arm (design: Claude Code arms run at xhigh). Arms absent here run
-# at the CLI default and record effort='' -- Task A6 turns these into real CLI flags.
+# Reasoning effort per frontier arm, passed as a real CLI flag (claude --effort / codex
+# -c model_reasoning_effort) and recorded in runs.effort. Pre-registration decision #7.
 EFFORT = {
     "plain-sonnet5": "xhigh",
     "plain-opus5": "xhigh",
+    "plain-gpt": "xhigh",
 }
 
 

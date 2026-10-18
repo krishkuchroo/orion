@@ -198,7 +198,7 @@ def test_run_one_logs_matched_line_and_ignores_limit_text_for_local_arm(tmp_path
     def launcher(arm, repo_meta, model_tag, on_line, *, effort, on_start):
         on_line("Claude AI usage limit reached|1")
         return ArmResult(status="error", findings_path=None, usage=[])
-    assert _run_one(conn, launcher, arm="orion-gemma4") == "error"
+    assert _run_one(conn, launcher, arm="orion-lm") == "error"
     assert _run_one(conn, launcher) == "aborted"
     msg = conn.execute("select message from events where message like '%matched:%'").fetchone()[0]
     assert "usage limit reached" in msg

@@ -2,8 +2,6 @@ import os
 import subprocess
 
 _CHECKS = [
-    ("ollama", ["ollama", "--version"]),
-    ("ollama-serve", ["curl", "-sf", "http://localhost:11434/api/tags"]),
     ("codex", ["codex", "--version"]),
     ("claude", ["claude", "--version"]),
     ("docker", ["docker", "ps"]),

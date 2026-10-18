@@ -20,14 +20,17 @@ class FakePopen:
 
 
 def test_stream_calls_on_line_and_returns_ok():
-    seen = []
+    import subprocess
+    seen, cap = [], {}
 
     def fake_popen(cmd, **kw):
+        cap.update(kw)
         return FakePopen(["a", "b", "c"])
     status = launch.stream_subprocess(["x"], env={}, cwd=".", on_line=seen.append,
                                       popen=fake_popen)
     assert status == "ok"
     assert seen == ["a", "b", "c"]
+    assert cap["stdin"] == subprocess.DEVNULL  # never inherit stdin: codex exec reads it to EOF
 
 
 def test_crashed_when_returncode_nonzero():
