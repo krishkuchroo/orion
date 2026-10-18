@@ -68,15 +68,26 @@ _SYSTEM_PROMPT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "
 CODE_OPEN = "<<<CODE>>>"
 CODE_CLOSE = "<<<END CODE>>>"
 
+# Marker injection guard. Untrusted text may itself contain `<<<END CODE>>>` (or `<<<CODE>>>`), which
+# would close the block early. Every run of three or more `<` or `>` gets a backslash after EACH
+# character (`<<<` -> `<\<\<\`, `<<<<` -> `<\<\<\<\`), so no `<<<`/`>>>` can survive — a plain
+# str.replace of the first three would leave `<<<<` as `<\<<<`, still a marker. Runs of one or two
+# are untouched (they cannot form a marker). Deterministic, so training examples stay consistent.
+_MARKER_RUN = re.compile(r"<{3,}|>{3,}")
+
+
+def _neutralise(text: str) -> str:
+    return _MARKER_RUN.sub(lambda m: "".join(ch + "\\" for ch in m.group()), text)
+
 
 def code_block(text: str) -> str:
     """Wrap untrusted repository text in CODE markers (multi-line: markers on their own lines)."""
-    return f"{CODE_OPEN}\n{text}\n{CODE_CLOSE}"
+    return f"{CODE_OPEN}\n{_neutralise(text)}\n{CODE_CLOSE}"
 
 
 def code_inline(text: str) -> str:
     """Wrap a one-line untrusted snippet in CODE markers."""
-    return f"{CODE_OPEN}{text}{CODE_CLOSE}"
+    return f"{CODE_OPEN}{_neutralise(text)}{CODE_CLOSE}"
 
 
 ACTION_RULES = (
