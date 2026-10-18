@@ -29,6 +29,7 @@ from orion.lm import prompter
 from orion.lm import slice as lm_slice
 
 SHAPE = "LM"
+MIN_CONTEXT_CAP = 512  # floor for the prompter's budget cap; below this no session can do useful work
 _CONFIDENCES: tuple[Confidence, ...] = ("LOW", "MEDIUM", "HIGH")
 # Step kinds -> progress-event names. run_cypher is a `query`; the rest of a session is `tool`, except
 # the kinds that mean the model misbehaved or the context ran out, which are `warn`.
@@ -81,9 +82,11 @@ def _str_or_none(value):
 
 
 def _path(flow: dict) -> list[dict]:
+    """Flow nodes with a `role`: first=source, last=sink, else step. A one-node path is the sink (a
+    CandidateFlow is defined by its sink call; the path always ends there)."""
     nodes = [n for n in (flow.get("nodes") or []) if isinstance(n, dict)]
     last = len(nodes) - 1
-    return [dict(n, role="source" if i == 0 else "sink" if i == last else "step") for i, n in enumerate(nodes)]
+    return [dict(n, role="sink" if i == last else "source" if i == 0 else "step") for i, n in enumerate(nodes)]
 
 
 def _node_ref(n: dict) -> str:
@@ -135,6 +138,11 @@ def _map_batch(raw_leads: list, batch: list[dict], start_index: int) -> list[Lea
 def _dedup(leads: list[Lead]) -> list[Lead]:
     """Copy of `discover._dedup` (same keys, same first-wins rule): structural on (source_uid, sink_uid),
     lexical (shape, text[:80]) fallback for leads with no graph anchor; reindexes sequentially."""
+    return [replace(lead, index=i) for i, lead in enumerate(_dedup_keep(leads))]
+
+
+def _dedup_keep(leads: list[Lead]) -> list[Lead]:
+    """The leads `_dedup` keeps, as the ORIGINAL objects (so the caller can still map them to their batch)."""
     seen_struct: set[tuple[str, str]] = set()
     seen_lex: set[tuple[str, str]] = set()
     kept: list[Lead] = []
@@ -150,7 +158,26 @@ def _dedup(leads: list[Lead]) -> list[Lead]:
                 continue
             seen_lex.add(key)
         kept.append(lead)
-    return [replace(lead, index=i) for i, lead in enumerate(kept)]
+    return kept
+
+
+def _step_hook(on_event: OnEvent, on_step, turn: int):
+    """Per-batch callback handed to the session: one progress event per step, then the caller's `on_step`
+    (a failing logger is a `warn`, never a crash). Called by the prompter the moment a step is recorded."""
+    def hook(step) -> None:
+        kind = step.get("kind") if isinstance(step, dict) else None
+        detail = f"batch {turn} step {step.get('step_no')}: {kind}" if isinstance(step, dict) else str(step)
+        if isinstance(step, dict) and step.get("query"):
+            detail += f" {step['query']}"
+        if isinstance(step, dict) and step.get("error"):
+            detail += f" [error: {step['error']}]"
+        on_event(_event(event=_STEP_EVENTS.get(kind, "tool"), turn=turn, detail=detail))
+        if on_step is not None:
+            try:
+                on_step(step)
+            except Exception as exc:
+                on_event(_event(event="warn", turn=turn, detail=f"on_step failed: {exc.__class__.__name__}: {exc}"))
+    return hook
 
 
 # ---- the stage ----------------------------------------------------------------------------------
@@ -175,17 +202,23 @@ def discover_lm(scan_id: str, repo_path: str, on_event: OnEvent, *, profile=None
     # A wrapper exposes `.generate`; a bare callable is accepted as-is. Anything else fails inside the
     # session, where it becomes an `error` event per batch rather than a crash here.
     generate = model.generate if hasattr(model, "generate") else model
-    context_cap = int(getattr(model, "context_cap", 8000)) - prompter.CONTEXT_MARGIN
+    raw_cap = int(getattr(model, "context_cap", 8000)) - prompter.CONTEXT_MARGIN
+    context_cap = max(raw_cap, MIN_CONTEXT_CAP)
     k = max(1, int(k))
     max_flows = max(0, int(max_flows))
 
     on_event(_event(event="start", detail=f"orion-lm discovery starting (k={k}, max_flows={max_flows})"))
+    if context_cap != raw_cap:
+        on_event(_event(event="warn", detail=f"prompter context_cap {raw_cap} floored to {context_cap}; "
+                                             f"the model's context_cap is too small for a useful session"))
 
     own_db = db is None
     if own_db:
         from orion.graphdb import GraphDB  # local import: the driver connects lazily, on first query
         db = GraphDB()
     leads: list[Lead] = []
+    turn_of: dict[int, int] = {}  # id(lead) -> batch number, for the post-dedup `lead` events
+    stopped = False
     try:
         if flows is None:
             try:
@@ -198,37 +231,32 @@ def discover_lm(scan_id: str, repo_path: str, on_event: OnEvent, *, profile=None
         for turn, start in enumerate(range(0, len(flows), k), start=1):
             if stop is not None and stop.is_set():
                 on_event(_event(event="warn", turn=turn, detail="stop requested; remaining batches skipped"))
+                stopped = True
                 break
             batch = flows[start:start + k]
             ids = ", ".join(str(f.get("flow_id")) for f in batch)
+            step_hook = _step_hook(on_event, on_step, turn)
             try:
-                raw_leads, steps = _session(generate, db, repo_path, scan_id, batch,
-                                            context_cap=context_cap, stop=stop)
+                # Steps reach `step_hook` as they happen, so a batch that fails mid-session still reports
+                # the steps it took; the returned `steps` are the same records and are NOT replayed.
+                raw_leads, _steps = _session(generate, db, repo_path, scan_id, batch,
+                                             context_cap=context_cap, stop=stop, on_step=step_hook)
             except Exception as exc:
                 on_event(_event(event="error", turn=turn,
                                 detail=f"batch {turn} ({ids}) failed: {exc.__class__.__name__}: {exc}"))
                 continue
-            for step in steps or []:
-                kind = step.get("kind") if isinstance(step, dict) else None
-                detail = f"batch {turn} step {step.get('step_no')}: {kind}" if isinstance(step, dict) else str(step)
-                if isinstance(step, dict) and step.get("query"):
-                    detail += f" {step['query']}"
-                if isinstance(step, dict) and step.get("error"):
-                    detail += f" [error: {step['error']}]"
-                on_event(_event(event=_STEP_EVENTS.get(kind, "tool"), turn=turn, detail=detail))
-                if on_step is not None:
-                    try:
-                        on_step(step)
-                    except Exception as exc:  # a broken logger must not cost the scan its leads
-                        on_event(_event(event="warn", turn=turn, detail=f"on_step failed: {exc.__class__.__name__}: {exc}"))
             batch_leads = _map_batch(list(raw_leads or []), batch, len(leads))
             for lead in batch_leads:
-                on_event(_event(event="lead", lead=lead.index, turn=turn, detail=lead.text))
+                turn_of[id(lead)] = turn
             leads.extend(batch_leads)
     finally:
         if own_db:
             db.close()
 
-    deduped = _dedup(leads)
-    on_event(_event(event="done", detail=f"{len(deduped)} candidate leads from {len(flows)} flows"))
+    kept = _dedup_keep(leads)
+    deduped = [replace(lead, index=i) for i, lead in enumerate(kept)]
+    for original, lead in zip(kept, deduped):  # indices match the returned list
+        on_event(_event(event="lead", lead=lead.index, turn=turn_of.get(id(original)), detail=lead.text))
+    tail = "; stopped early" if stopped else ""
+    on_event(_event(event="done", detail=f"{len(deduped)} candidate leads from {len(flows)} flows{tail}"))
     return deduped

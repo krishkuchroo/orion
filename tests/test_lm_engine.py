@@ -10,6 +10,16 @@ from orion.contracts import Lead
 from orion.lm import engine
 
 
+def scripted(leads, steps):
+    """Stand-in for `engine._session`: delivers each step via `on_step` as the real prompter does, then
+    returns `(leads, steps)` (the same records, which the engine must NOT replay)."""
+    def session(generate, db, repo_path, scan_id, batch, **kw):
+        for st in steps:
+            kw["on_step"](st)
+        return leads, steps
+    return session
+
+
 def test_lead_extension_is_backward_compatible():
     assert Lead(index=0, shape="A", text="t", evidence="e", confidence="HIGH").file is None
 
@@ -23,7 +33,7 @@ FLOWS = [{"flow_id": "F0", "rank": 0, "source_uid": "s0", "sink_uid": "k0", "sin
 def test_discover_lm_maps_leads_by_flow_id(monkeypatch):
     events, steps = [], []
     monkeypatch.setattr(engine, "_load_flows", lambda db, sid, max_flows: FLOWS)
-    monkeypatch.setattr(engine, "_session", lambda *a, **k: (
+    monkeypatch.setattr(engine, "_session", scripted(
         [{"flow_id": "F1", "file": "b.js", "function": "g", "line": 20, "cwe": "CWE-89", "confidence": "HIGH"}],
         [{"step_no": 0, "kind": "final"}]))
     leads = engine.discover_lm("s", ".", events.append, model=object(), on_step=steps.append)
@@ -70,10 +80,13 @@ def test_batches_of_k_each_get_their_own_session_and_turn(monkeypatch):
     def session(generate, db, repo_path, scan_id, batch, **kw):
         batches.append([f["flow_id"] for f in batch])
         fid = batch[0]["flow_id"]
-        return ([{"flow_id": fid, "file": "x", "function": "y", "line": 1, "cwe": "CWE-1", "confidence": "MEDIUM"}],
-                [{"step_no": 1, "kind": "run_cypher", "query": "MATCH (c:CpgCall {scan_id:$scan_id}) RETURN c"},
+        steps = [{"step_no": 1, "kind": "run_cypher", "query": "MATCH (c:CpgCall {scan_id:$scan_id}) RETURN c"},
                  {"step_no": 2, "kind": "read_code"},
-                 {"step_no": 3, "kind": "final"}])
+                 {"step_no": 3, "kind": "final"}]
+        for st in steps:
+            kw["on_step"](st)
+        return ([{"flow_id": fid, "file": "x", "function": "y", "line": 1, "cwe": "CWE-1", "confidence": "MEDIUM"}],
+                steps)
 
     monkeypatch.setattr(engine, "_session", session)
     leads = engine.discover_lm("s", ".", events.append, model=object(), k=1)
@@ -92,16 +105,22 @@ def test_session_failure_is_an_error_event_and_other_batches_still_run(monkeypat
 
     def session(generate, db, repo_path, scan_id, batch, **kw):
         if batch[0]["flow_id"] == "F0":
-            raise RuntimeError("Neo.ClientError.Statement.SyntaxError: boom")
+            kw["on_step"]({"step_no": 1, "kind": "run_cypher", "query": "MATCH (c:CpgCall {scan_id:$scan_id}) RETURN c"})
+            raise RuntimeError("Neo.ClientError.Statement.SyntaxError: boom")   # mid-session, after one step
+        final = [{"step_no": 1, "kind": "final"}]
+        kw["on_step"](final[0])
         return ([{"flow_id": "F1", "file": "b.js", "function": "g", "line": 20, "cwe": "CWE-89", "confidence": "HIGH"}],
-                [{"step_no": 1, "kind": "final"}])
+                final)
 
     monkeypatch.setattr(engine, "_session", session)
     leads = engine.discover_lm("s", ".", events.append, model=object(), k=1, on_step=steps.append)
     assert [l.source_uid for l in leads] == ["s1"]            # zero leads for the failed batch, never fabricated
     errs = [e for e in events if e["event"] == "error"]
     assert len(errs) == 1 and errs[0]["turn"] == 1 and "boom" in errs[0]["detail"]
-    assert steps == [{"step_no": 1, "kind": "final"}]
+    # the failed batch's earlier step AND the surviving batch's step each reached on_step exactly once
+    assert steps == [{"step_no": 1, "kind": "run_cypher", "query": "MATCH (c:CpgCall {scan_id:$scan_id}) RETURN c"},
+                     {"step_no": 1, "kind": "final"}]
+    assert [e["turn"] for e in events if e["event"] == "query"] == [1]
     assert events[-1]["event"] == "done"
 
 
@@ -190,3 +209,48 @@ def test_engine_never_imports_claude_cli_or_discover():
     imports = [l for l in src.splitlines() if re.match(r"\s*(from|import)\s", l)]
     assert not any("claude_cli" in l for l in imports), imports
     assert not any(re.search(r"\bdiscover\b", l) for l in imports), imports
+
+
+def test_single_node_flow_is_the_sink(monkeypatch):
+    monkeypatch.setattr(engine, "_load_flows", lambda db, sid, max_flows: FLOWS[:1])
+    monkeypatch.setattr(engine, "_session", scripted([{"flow_id": "F0", "confidence": "HIGH"}], []))
+    (lead,) = engine.discover_lm("s", ".", lambda e: None, model=object())
+    assert [n["role"] for n in lead.path] == ["sink"]
+
+
+def test_lead_events_use_post_dedup_indices(monkeypatch):
+    events = []
+    monkeypatch.setattr(engine, "_load_flows", lambda db, sid, max_flows: FLOWS)
+    monkeypatch.setattr(engine, "_session", scripted(
+        [{"flow_id": "F0", "confidence": "HIGH"}, {"flow_id": "F0", "confidence": "LOW"},   # dup collapses
+         {"flow_id": "F1", "confidence": "HIGH"}], []))
+    leads = engine.discover_lm("s", ".", events.append, model=object())
+    lead_events = [e for e in events if e["event"] == "lead"]
+    assert [e["lead"] for e in lead_events] == [l.index for l in leads] == [0, 1]
+    assert all(e["turn"] == 1 for e in lead_events)
+    assert events.index(lead_events[0]) > max(i for i, e in enumerate(events) if e["event"] in ("start",))
+
+
+def test_stop_is_reported_in_done_and_tiny_cap_is_floored_with_a_warn(monkeypatch):
+    events = []
+
+    class Tiny:
+        context_cap = 1200  # minus CONTEXT_MARGIN -> 176, below the floor
+
+        def generate(self, messages):
+            raise AssertionError("not called")
+
+    captured = {}
+
+    def session(generate, db, repo_path, scan_id, batch, **kw):
+        captured.update(kw)
+        stop.set()
+        return [], []
+
+    monkeypatch.setattr(engine, "_load_flows", lambda db, sid, max_flows: FLOWS)
+    monkeypatch.setattr(engine, "_session", session)
+    stop = threading.Event()
+    engine.discover_lm("s", ".", events.append, model=Tiny(), k=1, stop=stop)
+    assert captured["context_cap"] == engine.MIN_CONTEXT_CAP
+    assert any(e["event"] == "warn" and "floored" in e["detail"] for e in events)
+    assert events[-1]["event"] == "done" and "stopped early" in events[-1]["detail"]

@@ -55,7 +55,7 @@ def _leads_of(action: dict) -> tuple[list[dict], str | None]:
 
 def run_session(generate, db, repo_path: str, scan_id: str, flows: list[dict], *,
                 max_actions: int = 40, context_cap: int = 8000, row_limit: int = 25,
-                stop=None) -> tuple[list[dict], list[dict]]:
+                stop=None, on_step=None) -> tuple[list[dict], list[dict]]:
     """Run one session; return `(leads, steps)`.
 
     Forced final when the last call's prompt+completion tokens reach `context_cap`, when `max_actions`
@@ -65,9 +65,21 @@ def run_session(generate, db, repo_path: str, scan_id: str, flows: list[dict], *
     `context_cap` here must sit at least `CONTEXT_MARGIN` below the model wrapper's hard cap (module
     docstring). A `ContextOverflow` from `generate` on ANY call ends the session: a `context_overflow` step
     (token fields None, `error` = the wrapper's message) and `leads = []`.
+
+    `on_step(step)`, when given, receives each step record the moment it is appended, so a caller still
+    sees the steps already taken if a later `generate` or tool call raises (the returned `steps` only
+    exist on a normal return). A failing callback is swallowed; it never ends the session.
     """
     messages: list[dict] = [fmt.system_message(lm_slice.pruned_schema()), fmt.task_message(flows)]
     steps: list[dict] = []
+
+    def record(step: dict) -> None:
+        steps.append(step)
+        if on_step is not None:
+            try:
+                on_step(step)
+            except Exception:  # a broken logger must not cost the session its leads
+                pass
     actions = 0
     last_total = 0
 
@@ -80,8 +92,8 @@ def run_session(generate, db, repo_path: str, scan_id: str, flows: list[dict], *
             try:
                 res = generate(messages)
             except ContextOverflow as exc:
-                steps.append(_step(len(steps) + 1, "context_overflow", None, time.perf_counter() - t0,
-                                   error=str(exc)))
+                record(_step(len(steps) + 1, "context_overflow", None, time.perf_counter() - t0,
+                           error=str(exc)))
                 return [], steps
             wall = time.perf_counter() - t0
             messages.append({"role": "assistant", "content": res.text})
@@ -90,15 +102,15 @@ def run_session(generate, db, repo_path: str, scan_id: str, flows: list[dict], *
                 leads, err = [], "forced final did not return a valid final action"
             else:
                 leads, err = _leads_of(action)
-            steps.append(_step(len(steps) + 1, "forced_final", res, wall, error=err))
+            record(_step(len(steps) + 1, "forced_final", res, wall, error=err))
             return leads, steps
 
         t0 = time.perf_counter()
         try:
             res = generate(messages)
         except ContextOverflow as exc:
-            steps.append(_step(len(steps) + 1, "context_overflow", None, time.perf_counter() - t0,
-                               error=str(exc)))
+            record(_step(len(steps) + 1, "context_overflow", None, time.perf_counter() - t0,
+                           error=str(exc)))
             return [], steps
         actions += 1
         last_total = int(res.prompt_tokens) + int(res.completion_tokens)
@@ -109,14 +121,14 @@ def run_session(generate, db, repo_path: str, scan_id: str, flows: list[dict], *
         if action is None:
             reason = "your reply was not exactly one JSON object with an action of run_cypher, read_code or final."
             messages.append(fmt.error_message(reason))
-            steps.append(_step(step_no, "malformed", res, time.perf_counter() - t0, error=reason))
+            record(_step(step_no, "malformed", res, time.perf_counter() - t0, error=reason))
             continue
 
         kind = action["action"]
 
         if kind == "final":
             leads, err = _leads_of(action)
-            steps.append(_step(step_no, "final", res, time.perf_counter() - t0, error=err))
+            record(_step(step_no, "final", res, time.perf_counter() - t0, error=err))
             return leads, steps
 
         if kind == "run_cypher":
@@ -124,11 +136,11 @@ def run_session(generate, db, repo_path: str, scan_id: str, flows: list[dict], *
             if not isinstance(query, str) or not query.strip():
                 reason = "run_cypher needs a non-empty string field \"query\"."
                 messages.append(fmt.error_message(reason))
-                steps.append(_step(step_no, "malformed", res, time.perf_counter() - t0, error=reason))
+                record(_step(step_no, "malformed", res, time.perf_counter() - t0, error=reason))
                 continue
             result = tools.run_cypher(db, scan_id, query, limit=row_limit)
             messages.append(fmt.tool_result_message(action, result))
-            steps.append(_step(step_no, "run_cypher", res, time.perf_counter() - t0, query=query,
+            record(_step(step_no, "run_cypher", res, time.perf_counter() - t0, query=query,
                                row_count=None if "error" in result else result.get("row_count"),
                                error=result.get("error")))
             continue
@@ -136,4 +148,4 @@ def run_session(generate, db, repo_path: str, scan_id: str, flows: list[dict], *
         # read_code — tools.read_code validates file/start/end itself and answers with an error dict.
         result = tools.read_code(repo_path, action.get("file"), action.get("start"), action.get("end"))
         messages.append(fmt.tool_result_message(action, result))
-        steps.append(_step(step_no, "read_code", res, time.perf_counter() - t0, error=result.get("error")))
+        record(_step(step_no, "read_code", res, time.perf_counter() - t0, error=result.get("error")))

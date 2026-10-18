@@ -227,3 +227,25 @@ def test_token_counts_are_the_measured_ones(tmp_path):
     def g(messages): return gen(json.dumps({"action": "final", "leads": []}), p=1234, c=56)
     _, steps = prompter.run_session(g, StubDB(), str(tmp_path), "s", flows=[FLOW])
     assert (steps[0]["prompt_tokens"], steps[0]["completion_tokens"], steps[0]["cached_tokens"]) == (1234, 56, 0)
+
+
+def test_on_step_delivers_steps_already_taken_when_generate_raises(tmp_path):
+    calls, seen = [], []
+
+    def generate(messages):
+        calls.append(1)
+        if len(calls) == 1:
+            return gen(json.dumps({"action": "run_cypher", "query": Q}))
+        raise RuntimeError("model process died")
+
+    def on_step(step):
+        seen.append(step)
+        raise ValueError("broken logger")  # must not end the session or hide the step
+
+    try:
+        prompter.run_session(generate, StubDB(), str(tmp_path), "s", [FLOW], on_step=on_step)
+    except RuntimeError:
+        pass
+    else:  # the plan keeps the (leads, steps) return; a non-ContextOverflow failure still propagates
+        raise AssertionError("expected the model failure to propagate")
+    assert [s["kind"] for s in seen] == ["run_cypher"] and seen[0]["query"] == Q
