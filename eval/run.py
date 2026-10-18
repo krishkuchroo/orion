@@ -1,7 +1,10 @@
 import argparse
+import glob
+import os
+import shutil
 import subprocess
 
-from . import db, queue
+from . import db, queue, repo
 
 ARMS = ["orion-gemma4", "orion-gptoss20b", "plain-gemma4",
         "plain-sonnet5", "plain-opus5", "plain-gpt"]
@@ -30,7 +33,12 @@ def run_one(conn, *, arm, repo_meta, run_no, model_tags, ollama_url, base_env,
     model_tag = model_tags.get(arm, arm)
     rid = db.start_run(conn, arm=arm, repo=repo_meta["id"], tier=repo_meta.get("tier", ""),
                        run_no=run_no, model_tag=model_tag, cli_versions=cli_versions,
-                       orion_commit=orion_commit)
+                       orion_commit=orion_commit,
+                       commit_kind=repo_meta.get("commit_kind", ""),
+                       commit_sha=repo_meta.get("commit_sha", ""),
+                       case_id=repo_meta.get("case_id", ""),
+                       attempt_no=repo_meta.get("attempt_no", 1))
+    repo_meta = dict(repo_meta, run_no=run_no)
 
     def on_line(line):
         db.log_event(conn, rid, stage="run", level="info", message=line[:2000])
@@ -54,25 +62,46 @@ def _default_plain(**kw):
     return plain_arm(**kw)
 
 
+def run_dir_for(arm, repo_meta):
+    run_seg = str(repo_meta.get("run_no", 1))
+    if repo_meta.get("attempt_no", 1) > 1:
+        run_seg += f".a{repo_meta['attempt_no']}"
+    return os.path.join("eval", "runs", arm, repo_meta["id"], repo_meta["commit_sha"],
+                        repo_meta.get("case_id") or "_", run_seg)
+
+
 def build_launcher(*, ollama_url, base_env, shim_dir, graph_cache,
-                   _orion=_default_orion, _plain=_default_plain):
+                   _orion=_default_orion, _plain=_default_plain, _export=repo.export_tree):
     def launcher(arm, repo_meta, model_tag, on_line):
         rid = repo_meta["id"]
-        run_dir = f"eval/runs/{arm}/{rid}"
-        usage_log = f"{run_dir}/usage.jsonl"
-        if arm.startswith("orion-"):
-            json_out = f"{run_dir}/findings.orion.json"
-            status, sid = _orion(repo_dir=repo_meta["repo_dir"], ollama_url=ollama_url,
-                                 model_tag=model_tag, json_out=json_out, usage_log=usage_log,
-                                 shim_dir=shim_dir, base_env=base_env, on_line=on_line,
-                                 scan_id=graph_cache.get(rid))
-            if sid:
-                graph_cache[rid] = sid
-            return status, json_out
-        json_out = f"{run_dir}/findings.json"
-        status, _ = _plain(arm=arm, repo_dir=repo_meta["repo_dir"], ollama_url=ollama_url,
-                           model_tag=model_tag, json_out=json_out, usage_log=usage_log,
-                           shim_dir=shim_dir, base_env=base_env, on_line=on_line)
+        sha = repo_meta["commit_sha"]
+        run_dir = run_dir_for(arm, repo_meta)
+        tree = os.path.join(run_dir, "tree")
+        usage_log = os.path.join(run_dir, "usage.jsonl")
+        name = "findings.orion.json" if arm.startswith("orion-") else "findings.json"
+        json_out = os.path.join(run_dir, name)
+        try:
+            os.makedirs(run_dir, exist_ok=True)
+            _export(repo_meta["mirror_dir"], sha, tree)
+            if arm.startswith("orion-"):
+                status, sid = _orion(repo_dir=tree, ollama_url=ollama_url,
+                                     model_tag=model_tag, json_out=json_out, usage_log=usage_log,
+                                     shim_dir=shim_dir, base_env=base_env, on_line=on_line,
+                                     scan_id=graph_cache.get((rid, sha)))
+                if sid:
+                    graph_cache[(rid, sha)] = sid
+            else:
+                status, _ = _plain(arm=arm, repo_dir=tree, ollama_url=ollama_url,
+                                   model_tag=model_tag, json_out=json_out, usage_log=usage_log,
+                                   shim_dir=shim_dir, base_env=base_env, on_line=on_line)
+            # anything an arm left inside the tree is copied out before the tree is deleted
+            for f in glob.glob(os.path.join(tree, "findings*.json")) + \
+                    glob.glob(os.path.join(tree, "usage.jsonl")):
+                dst = os.path.join(run_dir, os.path.basename(f))
+                if not os.path.exists(dst):
+                    shutil.copy2(f, dst)
+        finally:
+            shutil.rmtree(tree, ignore_errors=True)
         return status, json_out
     return launcher
 
@@ -87,10 +116,18 @@ def main(argv=None):
     ap.add_argument("--manifest", default="eval/dataset/manifest.json")
     ap.add_argument("--db", default="eval/runs.db")
     ap.add_argument("--runs", type=int, default=3)
+    ap.add_argument("--mirror-root", default="eval/mirrors/")
     ap.add_argument("--ollama-url", default="http://127.0.0.1:11434")
     args = ap.parse_args(argv)
     arms = args.arm or ARMS
-    repos = _json.loads(open(args.manifest).read())["repos"]  # [{id, repo_dir, tier, ...}]
+    repos = _json.loads(open(args.manifest).read())["repos"]  # [{id, repo_url, tier, ...}]
+    for r in repos:  # mirror once per repo, then pin the commit to check out
+        r["mirror_dir"] = os.path.join(args.mirror_root, r["id"])
+        repo.mirror(r["repo_url"], r["mirror_dir"])
+        if not r.get("commit_sha"):
+            r["commit_sha"] = r.get("vulnerable_commit") or repo.vulnerable_commit(
+                r["patched_commit"], r["mirror_dir"])
+            r.setdefault("commit_kind", "vulnerable")
     repo_ids = [r["id"] for r in repos]
     meta_by_id = {r["id"]: r for r in repos}
     conn = db.connect(args.db)
