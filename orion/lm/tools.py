@@ -14,14 +14,55 @@ ROW_LIMIT = 25
 MAX_WINDOW = 200  # max lines returned by read_code
 
 _CALL = re.compile(r"\bCALL\b", re.IGNORECASE)
-_SCOPE = re.compile(r"\bscan_id\s*:\s*\$scan_id\b")
 _NODE_BODY = re.compile(r"^\s*(\w*)\s*((?::\s*\w+\s*)*)(\{.*\})?\s*$", re.DOTALL)
 # What may sit between two node patterns that are joined by a relationship: -[..]->, <-[..]-, --, etc.
 _REL_GAP = re.compile(r"^\s*<?-\s*(\[[^\]]*\])?\s*-?>?\s*$")
 
 
+# One left-to-right pass so a quote inside a comment, a `//` inside a string, or a paren inside a
+# backticked identifier cannot confuse the scanner: strings -> str, comments -> space, `ident` -> bt.
+_LEXEME = re.compile(
+    _STRING_LITERAL.pattern + r"|(?P<line>//[^\n]*)|(?P<block>/\*.*?\*/)|(?P<bt>`[^`]*`)", re.DOTALL
+)
+
+
 def _blank(query: str) -> str:
-    return _STRING_LITERAL.sub("''", query)
+    def sub(m: re.Match) -> str:
+        if m.group("line") is not None or m.group("block") is not None:
+            return " "
+        if m.group("bt") is not None:
+            return "bt"
+        return "str"
+
+    return _LEXEME.sub(sub, query)
+
+
+def _top_level_entries(props: str) -> list[str]:
+    """Split a `{k:v, ...}` map body on top-level commas (nesting-aware)."""
+    inner = props.strip()[1:-1]
+    out, depth, cur = [], 0, []
+    for ch in inner:
+        if ch in "{[(":
+            depth += 1
+        elif ch in "}])":
+            depth -= 1
+        if ch == "," and depth == 0:
+            out.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+    out.append("".join(cur))
+    return out
+
+
+def _has_scope_entry(props: str) -> bool:
+    if not props:
+        return False
+    for ent in _top_level_entries(props):
+        key, sep, val = ent.partition(":")
+        if sep and key.strip() == "scan_id" and val.strip() == "$scan_id":
+            return True
+    return False
 
 
 def _node_patterns(text: str):
@@ -40,7 +81,7 @@ def _node_patterns(text: str):
                         break
                 j += 1
             if depth != 0:
-                yield i, n, text[i + 1:]
+                yield i, n, None
                 return
             yield i, j + 1, text[i + 1:j]
             i = j + 1
@@ -51,10 +92,14 @@ def _node_patterns(text: str):
 def unscoped_pattern(query: str) -> str | None:
     """Return the first offending node pattern (as written), or None if the query is scan-scoped."""
     text = _blank(query)
+    if "`" in text or "/*" in text or "'" in text or '"' in text:
+        return "<unterminated comment, quote or backtick>"  # fail closed
     bound: set[str] = set()
     prev_end, prev_ok = -1, False
     for start, end, body in _node_patterns(text):
         shown = text[start:end]
+        if body is None:
+            return shown  # unbalanced paren: fail closed
         m = _NODE_BODY.match(body)
         if not m:
             if re.match(r"^\s*\w*\s*:", body):  # looks like a node pattern we cannot parse
@@ -65,8 +110,10 @@ def unscoped_pattern(query: str) -> str | None:
             continue
         adjacent = prev_ok and prev_end >= 0 and bool(_REL_GAP.match(text[prev_end:start]))
         if labels:
-            ok = bool(_SCOPE.search(props))
+            ok = _has_scope_entry(props)
         else:
+            # Assumption: every edge carries scan_id on both endpoints (graph bug B2 fix), so a
+            # label-less neighbour reached over any relationship (incl. variable-length) is in-scan.
             # bound variable reuse, or a neighbour reached by a relationship from a scoped node
             # (edges carry scan_id on both endpoints, so the neighbour is in-scan).
             ok = (var != "" and var in bound) or (adjacent and not props)
@@ -102,6 +149,14 @@ def run_cypher(db, scan_id: str, query: str, *, limit: int = ROW_LIMIT) -> dict:
 
 
 def read_code(repo_path: str, file: str, start: int, end: int) -> dict:
+    try:
+        start, end = int(start), int(end)
+    except (TypeError, ValueError):
+        return {"error": "start and end must be integers"}
+    if start > end:
+        return {"error": f"start ({start}) is after end ({end})"}
+    if not isinstance(file, str) or "\0" in file or "\0" in str(repo_path):
+        return {"error": "invalid path"}
     root = os.path.realpath(repo_path)
     if os.path.isabs(file):
         return {"error": f"path escapes the repo: {file}"}
@@ -110,8 +165,8 @@ def read_code(repo_path: str, file: str, start: int, end: int) -> dict:
         return {"error": f"path escapes the repo: {file}"}
     if not os.path.isfile(full):
         return {"error": f"not a file: {file}"}
-    start = max(1, int(start))
-    end = max(start, int(end))
+    start = max(1, start)
+    end = max(start, end)
     end = min(end, start + MAX_WINDOW - 1)
     try:
         with open(full, encoding="utf-8", errors="replace") as f:

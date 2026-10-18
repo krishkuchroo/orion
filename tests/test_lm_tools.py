@@ -89,3 +89,45 @@ def test_read_code_symlink_escape_and_window(tmp_path):
     out = tools.read_code(str(repo), "big.js", 1, 900)
     assert out["end"] - out["start"] < 300
     assert "error" in tools.read_code(str(repo), "missing.js", 1, 2)
+
+
+# --- review fixes: scope-guard bypasses ---
+import pytest
+
+_BAD = [
+    "MATCH (c:CpgCall {scan_id:$scan_id}) // (\nMATCH (y:CpgCall) RETURN y",
+    "MATCH (c:CpgCall {scan_id:$scan_id}) /* ( */ MATCH (y:CpgCall) RETURN y",
+    "MATCH (c:CpgCall {scan_id:$scan_id}) RETURN c.`(` AS a MATCH (y:CpgCall) RETURN y",
+    "MATCH (`x(`:CpgCall) RETURN 1",
+    "MATCH (c:CpgCall {scan_id:$scan_id}) OPTIONAL MATCH (y:CpgCall) RETURN y",
+    "MATCH (c:CpgCall {scan_id:$scan_id}) RETURN c UNION MATCH (y:CpgCall) RETURN y",
+    "MATCH (c:CpgCall {scan_id:$scan_id}) MATCH (y:CpgCall) RETURN y",
+    "MATCH (c:CpgCall {a:{scan_id:$scan_id}}) RETURN c",
+    "MATCH (c:CpgCall {scan_id:$scan_id + 'z'}) RETURN c",
+    "MATCH (c:CpgCall {scan_id:$scan_id}) /* unterminated MATCH (y:CpgCall) RETURN y",
+    "MATCH (c:CpgCall {scan_id:$scan_id} RETURN c",
+]
+
+
+@pytest.mark.parametrize("q", _BAD)
+def test_scope_bypass_probes_rejected(q):
+    db = StubDB()
+    assert "error" in tools.run_cypher(db, "s", q), q
+    assert db.ran == []
+
+
+@pytest.mark.parametrize("q", [
+    "MATCH (c:`CpgCall` {scan_id:$scan_id}) RETURN c",
+    "MATCH (c:CpgCall { scan_id : $scan_id }) RETURN c",
+    "MATCH (c:CpgCall {name:'a,b', scan_id:$scan_id}) RETURN c  // ok comment",
+    "MATCH (c:CpgCall {scan_id:$scan_id})-[:FLOWS_TO*]-(m) RETURN m",
+])
+def test_scope_probes_accepted(q):
+    assert "rows" in tools.run_cypher(StubDB(), "s", q), q
+
+
+def test_read_code_bad_args(tmp_path):
+    (tmp_path / "a.js").write_text("x\n")
+    assert "error" in tools.read_code(str(tmp_path), "a\0.js", 1, 2)
+    assert "error" in tools.read_code(str(tmp_path), "a.js", "x", 2)
+    assert "error" in tools.read_code(str(tmp_path), "a.js", 5, 2)
