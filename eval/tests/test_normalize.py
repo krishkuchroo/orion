@@ -118,3 +118,33 @@ def test_validate_path_optional_and_typed():
     assert "path" in prompt.FINDINGS_SCHEMA["properties"]["findings"]["items"]["properties"]
     assert "path" not in prompt.FINDINGS_SCHEMA["properties"]["findings"]["items"]["required"]
     assert '"path"' in prompt.TASK_PROMPT
+
+
+def test_library_names_do_not_beat_real_file():
+    v = _verdict("The Express.js app in routes/contributions.js is injectable", "")
+    assert normalize.finding(v, arm="orion-lm-base")["file"] == "routes/contributions.js"
+    v = _verdict("Node.js eval of user input", "app.js:12 eval(x)")
+    f = normalize.finding(v, arm="orion-lm-base")
+    assert f["file"] == "app.js" and f["line"] == 12
+    assert normalize.finding(_verdict("Node.js is vulnerable", ""), arm="orion-lm-base")["file"] is None
+
+
+def test_line_forms():
+    assert normalize.finding(_verdict("bug in a/b.py lines 42-50", ""), arm="orion-lm-base")["line"] == 42
+    assert normalize.finding(_verdict("bug in a/b.py L42", ""), arm="orion-lm-base")["line"] == 42
+
+
+def test_cwe_from_evidence_and_normalised():
+    assert normalize.finding(_verdict("t", "CWE 89 here"), arm="orion-lm-base")["cwe"] == "CWE-89"
+    assert normalize.finding(_verdict("CWE-089 x", ""), arm="orion-lm-base")["cwe"] == "CWE-89"
+
+
+def test_path_null_invalid_and_cross_shape_load(tmp_path):
+    base = {"file": "a.py", "function": "f", "line_start": 1, "line_end": 2,
+            "cwe": "CWE-89", "title": "t", "explanation": "e"}
+    assert prompt.validate_findings({"findings": [dict(base, path=None)]})
+    p = tmp_path / "x.json"
+    p.write_text(json.dumps([base]))
+    assert normalize.load_arm(str(p), arm="plain-opus5") == []
+    p.write_text(json.dumps({"findings": []}))
+    assert normalize.load_arm(str(p), arm="orion-lm") == []
