@@ -11,9 +11,10 @@ from orion.lm.model import GenResult
 
 
 class StubDB:
-    def run_cypher(self, scan_id, query, limit=50):
+    # Same contract as GraphDB.run_cypher(..., bounded=True): EXPLAIN reports the planner's query type.
+    def run_cypher(self, scan_id, query, limit=50, **kw):
         return {"row_count": 1, "rows": [{"c.code": "exec(userInput)"}]} if not query.startswith("EXPLAIN") \
-               else {"row_count": 0, "rows": []}
+               else {"row_count": 0, "rows": [], "query_type": "r"}
 
 
 def gen(text, p=100, c=10): return GenResult(text=text, prompt_tokens=p, completion_tokens=c, cached_tokens=0)

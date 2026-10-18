@@ -10,11 +10,12 @@ class StubDB:
         self.calls = calls
         self.queries = []
 
-    def run_cypher(self, scan_id, query, limit=50):
+    def run_cypher(self, scan_id, query, limit=50, **kw):
+        # Same contract as GraphDB.run_cypher(..., bounded=True): every answer reports the query type.
         self.queries.append(query)
         if "CandidateFlow" in query:
-            return {"row_count": len(self.flows), "rows": self.flows}
-        return {"row_count": len(self.calls), "rows": self.calls}  # CpgCall lookup
+            return {"row_count": len(self.flows), "rows": self.flows, "query_type": "r"}
+        return {"row_count": len(self.calls), "rows": self.calls, "query_type": "r"}  # CpgCall lookup
 
 
 def test_candidate_flows_parses_path_uids():
@@ -41,7 +42,8 @@ def test_flow_slice_keeps_path_order_and_scoped_escaped_query():
     assert [n["code"] for n in s["nodes"]] == ["A", "B"]
     assert s["flow_id"] == "F3"
     assert set(s["nodes"][0]) == {"file", "function", "line", "code"}
-    assert all(tools.is_scoped(q) for q in db.queries)
+    # db.queries also holds the tool's own "EXPLAIN " pre-flight of each query
+    assert all(tools.is_scoped(q.removeprefix("EXPLAIN ")) for q in db.queries)
 
 
 def test_flow_slice_empty_path_no_query():
