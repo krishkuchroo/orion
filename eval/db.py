@@ -6,14 +6,21 @@ def _utc() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS runs (
+_RUNS_DDL = """CREATE TABLE {name} (
   id INTEGER PRIMARY KEY, arm TEXT, repo TEXT, tier TEXT, run_no INTEGER,
   model_tag TEXT, cli_versions TEXT, orion_commit TEXT,
   started TEXT, ended TEXT, status TEXT,
   commit_kind TEXT, commit_sha TEXT, case_id TEXT DEFAULT '',
   attempt_no INTEGER DEFAULT 1, effort TEXT DEFAULT '',
-  UNIQUE(arm, repo, commit_sha, case_id, run_no, attempt_no));
+  UNIQUE(arm, repo, commit_sha, case_id, run_no, attempt_no))"""
+
+_FAILURES_VIEW = """CREATE VIEW IF NOT EXISTS failures AS
+  SELECT r.id AS run_id, r.arm, r.repo, r.run_no, r.status, e.stage, e.level, e.message
+  FROM runs r LEFT JOIN events e ON e.run_id = r.id AND e.level = 'error'
+  WHERE r.status != 'ok';"""
+
+_SCHEMA = """
+{runs_ddl};
 CREATE TABLE IF NOT EXISTS events (
   id INTEGER PRIMARY KEY, run_id INTEGER, ts TEXT, stage TEXT, level TEXT, message TEXT,
   FOREIGN KEY(run_id) REFERENCES runs(id));
@@ -33,11 +40,11 @@ CREATE TABLE IF NOT EXISTS steps (
 CREATE TABLE IF NOT EXISTS matches (
   id INTEGER PRIMARY KEY, run_id INTEGER, vuln_id TEXT, finding_idx INTEGER, level TEXT,
   cwe_family TEXT, path_level TEXT, FOREIGN KEY(run_id) REFERENCES runs(id));
-CREATE VIEW IF NOT EXISTS failures AS
-  SELECT r.id AS run_id, r.arm, r.repo, r.run_no, r.status, e.stage, e.level, e.message
-  FROM runs r LEFT JOIN events e ON e.run_id = r.id AND e.level = 'error'
-  WHERE r.status != 'ok';
+{failures_view}
 """
+_SCHEMA = (_SCHEMA
+          .replace("{runs_ddl}", _RUNS_DDL.format(name="IF NOT EXISTS runs"))
+          .replace("{failures_view}", _FAILURES_VIEW))
 
 
 _CURRENT_VERSION = 2
@@ -50,40 +57,41 @@ _NEW_RUN_COLS = (
     ("effort", "TEXT DEFAULT ''"),
 )
 
-_FAILURES_VIEW = """CREATE VIEW IF NOT EXISTS failures AS
-  SELECT r.id AS run_id, r.arm, r.repo, r.run_no, r.status, e.stage, e.level, e.message
-  FROM runs r LEFT JOIN events e ON e.run_id = r.id AND e.level = 'error'
-  WHERE r.status != 'ok';"""
-
 _RUN_COLS = ("id, arm, repo, tier, run_no, model_tag, cli_versions, orion_commit, started, ended,"
              " status, commit_kind, commit_sha, case_id, attempt_no, effort")
 
 
 def _migrate(conn) -> None:
-    """Upgrade an older DB in place (PRAGMA user_version ladder); a fresh DB just gets stamped."""
+    """Upgrade an older DB in place (PRAGMA user_version ladder); a fresh DB just gets stamped.
+    All-or-nothing: one explicit transaction (sqlite3 would otherwise autocommit the DDL)."""
     if conn.execute("PRAGMA user_version").fetchone()[0] >= _CURRENT_VERSION:
         return
-    have = {r[1] for r in conn.execute("PRAGMA table_info(runs)")}
-    for name, decl in _NEW_RUN_COLS:
-        if name not in have:
-            conn.execute(f"ALTER TABLE runs ADD COLUMN {name} {decl}")
-    sql = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='runs'").fetchone()[0]
-    if "UNIQUE" not in sql.upper():
-        # SQLite can't add a UNIQUE constraint in place: rebuild runs, keeping the old rows.
-        conn.execute("DROP VIEW IF EXISTS failures")
-        conn.execute("""CREATE TABLE runs_new (
-          id INTEGER PRIMARY KEY, arm TEXT, repo TEXT, tier TEXT, run_no INTEGER,
-          model_tag TEXT, cli_versions TEXT, orion_commit TEXT,
-          started TEXT, ended TEXT, status TEXT,
-          commit_kind TEXT, commit_sha TEXT, case_id TEXT DEFAULT '',
-          attempt_no INTEGER DEFAULT 1, effort TEXT DEFAULT '',
-          UNIQUE(arm, repo, commit_sha, case_id, run_no, attempt_no))""")
-        conn.execute(f"INSERT INTO runs_new({_RUN_COLS}) SELECT {_RUN_COLS} FROM runs")
-        conn.execute("DROP TABLE runs")
-        conn.execute("ALTER TABLE runs_new RENAME TO runs")
-        conn.execute(_FAILURES_VIEW)
-    conn.execute(f"PRAGMA user_version = {_CURRENT_VERSION}")
-    conn.commit()
+    old_iso = conn.isolation_level
+    conn.isolation_level = None
+    conn.execute("BEGIN")
+    try:
+        have = {r[1] for r in conn.execute("PRAGMA table_info(runs)")}
+        for name, decl in _NEW_RUN_COLS:
+            if name not in have:
+                conn.execute(f"ALTER TABLE runs ADD COLUMN {name} {decl}")
+        sql = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='runs'").fetchone()[0]
+        if "UNIQUE" not in sql.upper():
+            # SQLite can't add a UNIQUE constraint in place: rebuild runs, keeping the old rows.
+            conn.execute("DROP VIEW IF EXISTS failures")
+            conn.execute("DROP TABLE IF EXISTS runs_new")
+            conn.execute(_RUNS_DDL.format(name="runs_new"))
+            conn.execute(f"INSERT INTO runs_new({_RUN_COLS}) SELECT {_RUN_COLS} FROM runs")
+            conn.execute("DROP TABLE runs")
+            conn.execute("ALTER TABLE runs_new RENAME TO runs")
+            conn.execute(_FAILURES_VIEW)
+        conn.execute(f"PRAGMA user_version = {_CURRENT_VERSION}")
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    finally:
+        conn.isolation_level = old_iso
 
 
 def connect(path: str = "eval/runs.db") -> sqlite3.Connection:

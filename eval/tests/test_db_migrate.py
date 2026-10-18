@@ -32,14 +32,55 @@ def test_log_step_roundtrips(tmp_path):
     row = conn.execute("SELECT kind, row_count FROM steps WHERE run_id=?", (rid,)).fetchone()
     assert row == ("run_cypher", 3)
 
-def test_v1_db_upgrades_in_place(tmp_path):
-    # Simulate a v1 DB (no commit cols, no steps/matches), then connect() upgrades it.
-    p = str(tmp_path / "old.db")
+def _make_v1(p):
     raw = sqlite3.connect(p)
-    raw.executescript("CREATE TABLE runs (id INTEGER PRIMARY KEY, arm TEXT, repo TEXT, tier TEXT,"
-                       " run_no INTEGER, model_tag TEXT, cli_versions TEXT, orion_commit TEXT,"
-                       " started TEXT, ended TEXT, status TEXT);")
-    raw.execute("INSERT INTO runs(arm) VALUES('legacy')"); raw.commit(); raw.close()
+    raw.executescript(
+        "CREATE TABLE runs (id INTEGER PRIMARY KEY, arm TEXT, repo TEXT, tier TEXT,"
+        " run_no INTEGER, model_tag TEXT, cli_versions TEXT, orion_commit TEXT,"
+        " started TEXT, ended TEXT, status TEXT);"
+        "CREATE TABLE events (id INTEGER PRIMARY KEY, run_id INTEGER, ts TEXT, stage TEXT,"
+        " level TEXT, message TEXT, FOREIGN KEY(run_id) REFERENCES runs(id));"
+        "CREATE VIEW failures AS SELECT r.id AS run_id, r.arm, r.repo, r.run_no, r.status,"
+        " e.stage, e.level, e.message FROM runs r LEFT JOIN events e ON e.run_id = r.id"
+        " AND e.level = 'error' WHERE r.status != 'ok';")
+    for i, st in enumerate(["ok", "crashed", "hung"], 1):
+        raw.execute("INSERT INTO runs(arm,repo,run_no,status) VALUES('legacy','r',?,?)", (i, st))
+    raw.execute("INSERT INTO events(run_id,ts,stage,level,message) VALUES(2,'t','s','error','boom')")
+    raw.commit(); raw.close()
+
+
+def test_v1_db_upgrades_in_place(tmp_path):
+    import pytest
+    p = str(tmp_path / "old.db")
+    _make_v1(p)
     conn = db.connect(p)
-    assert conn.execute("SELECT arm FROM runs").fetchone()[0] == "legacy"  # data preserved
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert conn.execute("SELECT count(*) FROM runs").fetchone()[0] == 3
     assert {"commit_kind", "commit_sha"} <= {r[1] for r in conn.execute("PRAGMA table_info(runs)")}
+    assert conn.execute("SELECT count(*) FROM events").fetchone()[0] == 1
+    assert {r[0] for r in conn.execute("SELECT run_id FROM failures")} == {2, 3}
+    assert conn.execute("SELECT DISTINCT case_id, attempt_no FROM runs").fetchall() == [("", 1)]
+    kw = dict(arm="n", repo="r", tier="t", run_no=1, model_tag="m", cli_versions="",
+              orion_commit="c", commit_sha="s")
+    db.start_run(conn, **kw)
+    with pytest.raises(sqlite3.IntegrityError):
+        db.start_run(conn, **kw)
+    # second connect is a no-op
+    conn.close()
+    conn2 = db.connect(p)
+    assert conn2.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert conn2.execute("SELECT count(*) FROM runs").fetchone()[0] == 4
+
+
+def test_failed_migration_rolls_back(tmp_path, monkeypatch):
+    import pytest
+    p = str(tmp_path / "old.db")
+    _make_v1(p)
+    monkeypatch.setattr(db, "_FAILURES_VIEW", "CREATE VIEW broken AS SELECT nope FROM nothing")
+    with pytest.raises(sqlite3.Error):
+        db.connect(p)
+    raw = sqlite3.connect(p)
+    assert raw.execute("PRAGMA user_version").fetchone()[0] == 0
+    names = {r[0] for r in raw.execute("SELECT name FROM sqlite_master")}
+    assert "runs_new" not in names and "failures" in names
+    assert "commit_kind" not in {r[1] for r in raw.execute("PRAGMA table_info(runs)")}
