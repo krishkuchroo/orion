@@ -190,3 +190,26 @@ def test_main_plans_both_commits_and_resumes_after_abort(tmp_path, monkeypatch):
     assert calls == [("plain-opus5", "v1", "vulnerable", 1, "aborted"),
                      ("plain-opus5", "v1", "vulnerable", 1, "ok"),
                      ("plain-opus5", "p1", "patched", 1, "ok")]
+
+
+def test_run_one_logs_matched_line_and_ignores_limit_text_for_local_arm(tmp_path):
+    conn = db.connect(str(tmp_path / "t.db"))
+
+    def launcher(arm, repo_meta, model_tag, on_line, *, effort, on_start):
+        on_line("Claude AI usage limit reached|1")
+        return ArmResult(status="error", findings_path=None, usage=[])
+    assert _run_one(conn, launcher, arm="orion-gemma4") == "error"
+    assert _run_one(conn, launcher) == "aborted"
+    msg = conn.execute("select message from events where message like '%matched:%'").fetchone()[0]
+    assert "usage limit reached" in msg
+
+
+def test_run_one_keyboard_interrupt_finishes_aborted_and_reraises(tmp_path):
+    import pytest
+    conn = db.connect(str(tmp_path / "t.db"))
+
+    def launcher(arm, repo_meta, model_tag, on_line, *, effort, on_start):
+        raise KeyboardInterrupt
+    with pytest.raises(KeyboardInterrupt):
+        _run_one(conn, launcher)
+    assert conn.execute("select status from runs").fetchone()[0] == "aborted"

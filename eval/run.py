@@ -35,16 +35,23 @@ EFFORT = {
 # reached", "5-hour limit reached", Codex "You've hit your usage limit", HTTP 429), not text
 # copied from a real event -- eval/tests/fixtures/limit_{claude,codex}.json carry "captured": false.
 # Replace them with the first real limit event seen in Phase 0 and tighten the match to it.
-_LIMIT_RE = re.compile(r"usage limit|rate limit|limit reached|hit your limit|"
-                       r"(?:http|status|code)\W{0,3}429|\b429\b.{0,3}too many requests", re.I)
+_HTTP_429 = r"(?:http|status|code)\W{0,3}429|\b429\b.{0,3}too many requests"
+# raw (non-JSON) lines: only specific CLI phrasings; "limit reached" needs usage/rate/plan on the
+# same line so "context limit reached" / "max turns limit reached" stay real failures
+_RAW_RE = re.compile(r"usage limit|rate[- ]limit(?:ed| exceeded| reached| hit)|hit your limit|"
+                     r"(?:usage|rate|plan)\b.*limit reached|limit reached.*\b(?:usage|rate|plan)\b|"
+                     + _HTTP_429, re.I)
+# error/result-shaped structured fields (error subtypes like error_rate_limit): bare "rate limit" ok
+_EVENT_RE = re.compile(_RAW_RE.pattern + r"|rate limit", re.I)
 _EVENT_FIELDS = ("subtype", "error", "message", "result", "reason")
+_SOURCES = ("claude", "codex")
 
 
 def _line_signals_limit(line: str) -> bool:
     try:
         ev = json.loads(line)
     except ValueError:
-        return bool(_LIMIT_RE.search(line))  # raw CLI stderr / plain text
+        return bool(_RAW_RE.search(line))  # raw CLI stderr / plain text
     if not isinstance(ev, dict):
         return False
     # structured events: only error/result-shaped ones, so the model's own prose about
@@ -54,15 +61,28 @@ def _line_signals_limit(line: str) -> bool:
         return False
     text = " ".join(v if isinstance(v, str) else json.dumps(v)
                     for v in (ev.get(k) for k in _EVENT_FIELDS) if v)
-    return bool(_LIMIT_RE.search(text.replace("_", " ")))
+    return bool(_EVENT_RE.search(text.replace("_", " ")))
+
+
+def classify_match(status: str, lines: list, *, source: str):
+    """(final_status, matched_line_or_None). Only the Claude/Codex CLIs have a subscription usage
+    limit: any other source (local-model arms) returns the status unchanged."""
+    if status == "ok" or source not in _SOURCES:
+        return status, None
+    for l in lines:
+        if _line_signals_limit(l):
+            return "aborted", l
+    return status, None
 
 
 def classify_exit(status: str, lines: list, *, source: str) -> str:
-    """'aborted' when a non-ok run's output carries a usage/rate-limit signature (the model did not
-    fail; the subscription ran out), otherwise the original status. `source` is claude|codex."""
-    if status == "ok":
-        return status
-    return "aborted" if any(_line_signals_limit(l) for l in lines) else status
+    """'aborted' when a non-ok claude/codex run's output carries a usage/rate-limit signature (the
+    model did not fail; the subscription ran out), otherwise the original status."""
+    return classify_match(status, lines, source=source)[0]
+
+
+def _source_for(arm: str) -> str:
+    return {"plain-gpt": "codex", "plain-sonnet5": "claude", "plain-opus5": "claude"}.get(arm, "lm")
 
 
 def git_head(path: str = ".") -> str:
@@ -104,6 +124,11 @@ def run_one(conn, *, arm, repo_meta, run_no, model_tags, base_env,
     t0 = time.monotonic()
     try:
         res = launcher(arm, repo_meta, model_tag, on_line, effort=effort, on_start=on_start)
+    except KeyboardInterrupt:  # operator interrupt is not the model's miss
+        _log_resource(conn, rid, sampler["s"], t0)
+        db.log_event(conn, rid, stage="run", level="warn", message="interrupted by operator")
+        db.finish_run(conn, rid, "aborted")
+        raise
     except Exception as e:
         _log_resource(conn, rid, sampler["s"], t0)
         db.log_event(conn, rid, stage="run", level="error", message=str(e)[:2000])
@@ -129,10 +154,11 @@ def run_one(conn, *, arm, repo_meta, run_no, model_tags, base_env,
                      message=f"recording run result failed: {e!r}"[:2000])
         db.finish_run(conn, rid, "error")
         return "error"
-    final = classify_exit(res.status, lines, source="codex" if arm == "plain-gpt" else "claude")
+    final, matched = classify_match(res.status, lines, source=_source_for(arm))
     if final != res.status:
         db.log_event(conn, rid, stage="run", level="warn",
-                     message=f"usage limit hit ({res.status} -> {final}); not scored, will resume")
+                     message=f"usage limit hit ({res.status} -> {final}); not scored, will resume;"
+                             f" matched: {matched[:500]}")
     db.finish_run(conn, rid, final)
     return final
 
@@ -238,7 +264,7 @@ def main(argv=None, sleep=time.sleep):
             repo.mirror(r["repo_url"], r["mirror_dir"])
             if r.get("vulnerable_commit") and r.get("patched_commit"):
                 commits = [(r["vulnerable_commit"], "vulnerable"), (r["patched_commit"], "patched")]
-            else:  # no pair: commit_sha (or the vulnerable side) is the vulnerable commit
+            else:  # no pair (commit_sha-only row is forced to kind 'vulnerable'): commit_sha (or the vulnerable side) is the vulnerable commit
                 sha = r.get("commit_sha") or r.get("vulnerable_commit") or repo.vulnerable_commit(
                     r["patched_commit"], r["mirror_dir"])
                 commits = [(sha, "vulnerable")]

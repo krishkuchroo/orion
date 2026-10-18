@@ -40,10 +40,10 @@ def test_pending_skips_terminal_but_returns_aborted(tmp_path):
 
 def test_pending_uses_latest_attempt(tmp_path):
     conn = db.connect(str(tmp_path / "t.db"))
+    _start(conn, "error", "s", attempt=2)  # newer attempt inserted first: ORDER BY must decide
     _start(conn, "aborted", "s", attempt=1)
-    _start(conn, "error", "s", attempt=2)
-    _start(conn, "ok", "t", attempt=1)
     _start(conn, "aborted", "t", attempt=2)
+    _start(conn, "ok", "t", attempt=1)
     assert queue.pending(conn, [("a", "r", "s", "", 1), ("a", "r", "t", "", 1)]) == [("a", "r", "t", "", 1)]
 
 
@@ -87,3 +87,18 @@ def test_classify_exit_never_overrides_ok_or_model_text():
     line = json.dumps({"type": "assistant", "message": {"content": [{"type": "text",
                        "text": "this endpoint lacks a rate limit"}]}})
     assert run.classify_exit("error", [line], source="claude") == "error"
+
+
+def test_classify_exit_generic_limit_text_stays_error():
+    from eval import run
+    for txt in ("context limit reached", "memory limit reached", "max turns limit reached",
+                "neo4j: transaction memory limit exceeded"):
+        assert run.classify_exit("error", [txt], source="claude") == "error"
+    assert run.classify_exit("error", ["plan usage limit reached"], source="claude") == "aborted"
+
+
+def test_classify_exit_only_for_claude_and_codex():
+    from eval import run
+    for src in ("lm", "ollama", ""):
+        assert run.classify_exit("error", ["Claude AI usage limit reached|1", "HTTP 429"],
+                                 source=src) == "error"
