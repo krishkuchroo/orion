@@ -88,3 +88,13 @@ def test_total_does_not_double_count_reasoning():
 def test_total_treats_none_as_zero():
     assert usage.total({"uncached_in": None, "cache_read": None, "cache_write": None,
                         "out": 5, "reasoning": None}) == 5
+
+
+def test_normalize_codex_uncached_never_negative():
+    raw = {"type": "turn.completed", "usage": {"input_tokens": 5, "cached_input_tokens": 9}}
+    assert usage.normalize_usage(raw, source="codex")["uncached_in"] == 0
+
+
+def test_normalize_claude_ignores_non_dict_model_usage():
+    raw = {"modelUsage": {"a": "junk"}, "usage": {"input_tokens": 7}}
+    assert usage.normalize_usage(raw, source="claude")["uncached_in"] == 7

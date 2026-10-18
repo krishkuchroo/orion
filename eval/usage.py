@@ -32,8 +32,8 @@ def parse_codex_event(event: dict):
 # per model) and top-level `usage` (snake_case). normalize_usage sums modelUsage when
 # present and falls back to top-level `usage` when absent.
 #
-# Reasoning double-count: the fixture has no total_tokens, so it was decided by
-# measurement. Prompt "How many primes are below 2000?" with a one-token answer ("303")
+# Reasoning double-count: the fixture has no total_tokens, so it is inferred from one
+# non-zero-reasoning sample (no total_tokens to confirm). Prompt "How many primes are below 2000?" with a one-token answer ("303")
 # gave output_tokens=38 and reasoning_output_tokens=31. A trivial reply costs ~5 output
 # tokens ("ok" run: output_tokens=5, reasoning=0), so 38 = 31 reasoning + ~7 visible:
 # reasoning is ALREADY INCLUDED in output_tokens. total() therefore never adds it again.
@@ -48,6 +48,7 @@ def _sum_present(values):
 
 def _normalize_claude(raw: dict) -> dict:
     mu = raw.get("modelUsage")
+    mu = {k: v for k, v in mu.items() if isinstance(v, dict)} if isinstance(mu, dict) else None
     if mu:
         rows = [{
             "uncached_in": m.get("inputTokens"),
@@ -71,7 +72,7 @@ def _normalize_claude(raw: dict) -> dict:
 def _normalize_codex(raw: dict) -> dict:
     u = raw.get("usage") or {}
     inp, cached = u.get("input_tokens"), u.get("cached_input_tokens")
-    uncached = inp - cached if inp is not None and cached is not None else None
+    uncached = max(0, inp - cached) if inp is not None and cached is not None else None
     return {
         "uncached_in": uncached,
         "cache_read": cached,
