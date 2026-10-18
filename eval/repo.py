@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 
 
@@ -11,7 +12,10 @@ def mirror(repo_url: str, mirror_dir: str, *, run=_default_run) -> None:
     if os.path.isdir(mirror_dir):
         run(["git", "-C", mirror_dir, "fetch", "--all", "--tags", "--prune"])
     else:
-        run(["git", "clone", "--bare", repo_url, mirror_dir])
+        tmp = f"{mirror_dir}.tmp"
+        shutil.rmtree(tmp, ignore_errors=True)  # leftover partial clone
+        run(["git", "clone", "--bare", repo_url, tmp])
+        os.rename(tmp, mirror_dir)
 
 
 def vulnerable_commit(fix_sha: str, mirror_dir: str, *, run=_default_run) -> str:
@@ -24,6 +28,7 @@ def export_tree(mirror_dir: str, sha: str, dest: str, *, run=_default_run) -> No
     Known limits: export-ignore files and submodules are not exported.
     """
     tar = f"{dest}.tar"
+    shutil.rmtree(dest, ignore_errors=True)  # stale tree from an earlier attempt
     os.makedirs(dest, exist_ok=True)
     try:
         run(["git", "-C", mirror_dir, "archive", "--format=tar", "-o", tar, sha])

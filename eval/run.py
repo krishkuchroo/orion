@@ -3,6 +3,7 @@ import glob
 import os
 import shutil
 import subprocess
+import tempfile
 
 from . import db, queue, repo
 
@@ -35,7 +36,7 @@ def run_one(conn, *, arm, repo_meta, run_no, model_tags, ollama_url, base_env,
                        run_no=run_no, model_tag=model_tag, cli_versions=cli_versions,
                        orion_commit=orion_commit,
                        commit_kind=repo_meta.get("commit_kind", ""),
-                       commit_sha=repo_meta.get("commit_sha", ""),
+                       commit_sha=repo_meta["commit_sha"],
                        case_id=repo_meta.get("case_id", ""),
                        attempt_no=repo_meta.get("attempt_no", 1))
     repo_meta = dict(repo_meta, run_no=run_no)
@@ -62,21 +63,36 @@ def _default_plain(**kw):
     return plain_arm(**kw)
 
 
-def run_dir_for(arm, repo_meta):
+def run_dir_for(arm, repo_meta, root=os.path.join("eval", "runs")):
     run_seg = str(repo_meta.get("run_no", 1))
     if repo_meta.get("attempt_no", 1) > 1:
         run_seg += f".a{repo_meta['attempt_no']}"
-    return os.path.join("eval", "runs", arm, repo_meta["id"], repo_meta["commit_sha"],
+    return os.path.join(root, arm, repo_meta["id"], repo_meta["commit_sha"],
                         repo_meta.get("case_id") or "_", run_seg)
 
 
+def _leak_guard(tree):
+    d = os.path.dirname(tree)
+    while True:
+        for marker in ("CLAUDE.md", ".git"):
+            if os.path.exists(os.path.join(d, marker)):
+                raise RuntimeError(f"tree {tree} sits under {d}, which contains {marker}; "
+                                   "agents would read it (answer leak). Use --tree-root outside any repo.")
+        parent = os.path.dirname(d)
+        if parent == d:
+            return
+        d = parent
+
+
 def build_launcher(*, ollama_url, base_env, shim_dir, graph_cache,
-                   _orion=_default_orion, _plain=_default_plain, _export=repo.export_tree):
+                   _orion=_default_orion, _plain=_default_plain, _export=repo.export_tree, tree_root=None):
+    tree_root = tree_root or os.path.join(tempfile.gettempdir(), "orion-eval-trees")
     def launcher(arm, repo_meta, model_tag, on_line):
         rid = repo_meta["id"]
         sha = repo_meta["commit_sha"]
-        run_dir = run_dir_for(arm, repo_meta)
-        tree = os.path.join(run_dir, "tree")
+        run_dir = os.path.abspath(run_dir_for(arm, repo_meta))
+        tree = os.path.abspath(os.path.join(run_dir_for(arm, repo_meta, tree_root), "tree"))
+        _leak_guard(tree)
         usage_log = os.path.join(run_dir, "usage.jsonl")
         name = "findings.orion.json" if arm.startswith("orion-") else "findings.json"
         json_out = os.path.join(run_dir, name)
@@ -116,18 +132,27 @@ def main(argv=None):
     ap.add_argument("--manifest", default="eval/dataset/manifest.json")
     ap.add_argument("--db", default="eval/runs.db")
     ap.add_argument("--runs", type=int, default=3)
+    ap.add_argument("--tree-root", default=os.path.join(tempfile.gettempdir(), "orion-eval-trees"))
     ap.add_argument("--mirror-root", default="eval/mirrors/")
     ap.add_argument("--ollama-url", default="http://127.0.0.1:11434")
     args = ap.parse_args(argv)
     arms = args.arm or ARMS
     repos = _json.loads(open(args.manifest).read())["repos"]  # [{id, repo_url, tier, ...}]
+    good = []
     for r in repos:  # mirror once per repo, then pin the commit to check out
-        r["mirror_dir"] = os.path.join(args.mirror_root, r["id"])
-        repo.mirror(r["repo_url"], r["mirror_dir"])
-        if not r.get("commit_sha"):
-            r["commit_sha"] = r.get("vulnerable_commit") or repo.vulnerable_commit(
-                r["patched_commit"], r["mirror_dir"])
-            r.setdefault("commit_kind", "vulnerable")
+        try:
+            r["mirror_dir"] = os.path.join(args.mirror_root, r["id"])
+            if not (r.get("commit_sha") or r.get("vulnerable_commit") or r.get("patched_commit")):
+                raise ValueError("manifest row has none of commit_sha/vulnerable_commit/patched_commit")
+            repo.mirror(r["repo_url"], r["mirror_dir"])
+            if not r.get("commit_sha"):
+                r["commit_sha"] = r.get("vulnerable_commit") or repo.vulnerable_commit(
+                    r["patched_commit"], r["mirror_dir"])
+                r.setdefault("commit_kind", "vulnerable")
+            good.append(r)
+        except Exception as e:
+            print(f"SKIPPING repo {r.get('id')}: {e}", flush=True)
+    repos = good
     repo_ids = [r["id"] for r in repos]
     meta_by_id = {r["id"]: r for r in repos}
     conn = db.connect(args.db)
@@ -135,7 +160,8 @@ def main(argv=None):
     orion_commit = git_head()
     graph_cache = {}
     launcher = build_launcher(ollama_url=args.ollama_url, base_env=dict(os.environ),
-                              shim_dir=_shim_dir(), graph_cache=graph_cache)
+                              shim_dir=_shim_dir(), graph_cache=graph_cache,
+                              tree_root=args.tree_root)
     todo = queue.pending(conn, queue.plan(arms, repo_ids, args.runs))
     for arm, repo_id, n in todo:
         run_one(conn, arm=arm, repo_meta=meta_by_id[repo_id], run_no=n,

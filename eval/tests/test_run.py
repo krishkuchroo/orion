@@ -8,7 +8,7 @@ def test_run_one_records_status_from_launcher(tmp_path):
         on_line('{"type":"result"}')
         return "ok", str(tmp_path / "f.json")
     status = run.run_one(conn, arm="plain-opus5",
-                         repo_meta={"id": "r1", "tier": "headline"}, run_no=1,
+                         repo_meta={"id": "r1", "tier": "headline", "commit_sha": "c1"}, run_no=1,
                          model_tags={}, ollama_url="u", base_env={}, orion_commit="c",
                          cli_versions="claude=2.1.210", launcher=launcher)
     assert status == "ok"
@@ -22,7 +22,7 @@ def test_run_one_catches_launcher_exception(tmp_path):
     def boom(arm, repo_meta, model_tag, on_line):
         raise RuntimeError("launch failed")
     status = run.run_one(conn, arm="orion-gemma4",
-                         repo_meta={"id": "r1", "tier": "headline"}, run_no=1,
+                         repo_meta={"id": "r1", "tier": "headline", "commit_sha": "c1"}, run_no=1,
                          model_tags={"orion-gemma4": "gemma3:12b"}, ollama_url="u",
                          base_env={}, orion_commit="c", cli_versions="", launcher=boom)
     assert status == "error"

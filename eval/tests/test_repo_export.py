@@ -1,3 +1,4 @@
+import os
 import subprocess
 
 from eval import repo
@@ -32,9 +33,13 @@ def test_mirror_clones_when_absent_and_fetches_when_present(tmp_path):
         seen.append(cmd)
         return ""
     m = tmp_path / "m"
-    repo.mirror("https://x/y.git", str(m), run=run)
-    assert seen[-1] == ["git", "clone", "--bare", "https://x/y.git", str(m)]
-    m.mkdir()
+    def run_ok(cmd):
+        seen.append(cmd)
+        os.makedirs(cmd[-1])
+        return ""
+    repo.mirror("https://x/y.git", str(m), run=run_ok)
+    assert m.is_dir() and not (tmp_path / "m.tmp").exists()    # renamed on success
+    assert seen[-1] == ["git", "clone", "--bare", "https://x/y.git", f"{m}.tmp"]
     repo.mirror("https://x/y.git", str(m), run=run)
     assert seen[-1][:4] == ["git", "-C", str(m), "fetch"]
 
@@ -53,3 +58,23 @@ def test_export_tree_real_git_has_no_dotgit(tmp_path):
     repo.export_tree(str(tmp_path / "m"), sha, str(tmp_path / "t"))
     assert (tmp_path / "t" / "a.js").exists() and not (tmp_path / "t" / ".git").exists()
     assert not (tmp_path / "t.tar").exists()
+
+
+def test_mirror_partial_clone_is_not_a_mirror(tmp_path):
+    m = tmp_path / "m"
+
+    def run_fail(cmd):
+        os.makedirs(cmd[-1])
+        raise RuntimeError("network")
+    try:
+        repo.mirror("u", str(m), run=run_fail)
+    except RuntimeError:
+        pass
+    assert not m.exists()                                      # partial stays at m.tmp only
+    seen = []
+    def run_ok(c):
+        seen.append(c)
+        os.makedirs(c[-1])
+        return ""
+    repo.mirror("u", str(m), run=run_ok)   # retry re-clones (stale .tmp cleared), not fetch
+    assert seen[0][1] == "clone" and m.is_dir()

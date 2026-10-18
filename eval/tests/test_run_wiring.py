@@ -12,7 +12,7 @@ def _meta(commit, **kw):
 
 def test_build_launcher_dispatches_exports_and_cleans_up(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    called = {"orion_scan_ids": [], "exports": [], "repo_dirs": []}
+    called = {"orion_scan_ids": [], "exports": [], "repo_dirs": [], "all_paths": []}
 
     def fake_export(mirror, sha, dest, **kw):
         called["exports"].append((mirror, sha, dest))
@@ -22,6 +22,7 @@ def test_build_launcher_dispatches_exports_and_cleans_up(tmp_path, monkeypatch):
     def fake_orion(**kw):
         called["orion_scan_ids"].append(kw["scan_id"])
         called["repo_dirs"].append(kw["repo_dir"])
+        called["all_paths"] += [kw["repo_dir"], kw["json_out"], kw["usage_log"]]
         assert os.path.exists(os.path.join(kw["repo_dir"], "a.js"))
         open(kw["json_out"], "w").write("[]")
         return "ok", "built-" + os.path.basename(os.path.dirname(os.path.dirname(kw["repo_dir"])))
@@ -29,10 +30,11 @@ def test_build_launcher_dispatches_exports_and_cleans_up(tmp_path, monkeypatch):
     def fake_plain(**kw):
         called["plain"] = kw["arm"]
         called["repo_dirs"].append(kw["repo_dir"])
+        called["all_paths"] += [kw["repo_dir"], kw["json_out"], kw["usage_log"]]
         open(kw["json_out"], "w").write("[]")
         return "ok", "path"
     cache = {}
-    launcher = run.build_launcher(ollama_url="u", base_env={}, shim_dir="/s", graph_cache=cache,
+    launcher = run.build_launcher(ollama_url="u", base_env={}, shim_dir="/s", graph_cache=cache, tree_root=str(tmp_path / 'trees'),
                                   _orion=fake_orion, _plain=fake_plain, _export=fake_export)
     s1, out1 = launcher("orion-gemma4", _meta("c1"), "gemma3:12b", lambda l: None)
     launcher("orion-gptoss20b", _meta("c1", run_no=2), "gptoss", lambda l: None)
@@ -44,14 +46,17 @@ def test_build_launcher_dispatches_exports_and_cleans_up(tmp_path, monkeypatch):
     assert called["orion_scan_ids"][0] is None
     assert len(cache) == 2 and ("r1", "c1") in cache and ("r1", "c2") in cache
     assert called["plain"] == "plain-opus5"
-    run_dir = "eval/runs/orion-gemma4/r1/c1/_/1"
-    assert called["exports"][0] == ("/m", "c1", f"{run_dir}/tree")
-    assert called["repo_dirs"][0] == f"{run_dir}/tree"
-    assert not os.path.exists(f"{run_dir}/tree")            # tree deleted
+    run_dir = str(tmp_path / "eval/runs/orion-gemma4/r1/c1/_/1")
+    tree = str(tmp_path / "trees/orion-gemma4/r1/c1/_/1/tree")
+    assert called["exports"][0] == ("/m", "c1", tree)
+    assert called["repo_dirs"][0] == tree
+    assert not os.path.exists(tree)                          # tree deleted
     assert os.path.exists(f"{run_dir}/findings.orion.json")  # findings kept
     assert out1 == f"{run_dir}/findings.orion.json"
-    assert out3 == "eval/runs/plain-opus5/r1/c1/_/1.a2/findings.json"
+    assert out3 == str(tmp_path / "eval/runs/plain-opus5/r1/c1/_/1.a2/findings.json")
     assert os.path.exists(out3)
+    assert all(os.path.isabs(p) for p in called["all_paths"])
+    assert not any(p.startswith(str(tmp_path / "eval")) for p in called["repo_dirs"])
 
 
 def test_build_launcher_deletes_tree_on_failure(tmp_path, monkeypatch):
@@ -62,12 +67,20 @@ def test_build_launcher_deletes_tree_on_failure(tmp_path, monkeypatch):
 
     def boom(**kw):
         raise RuntimeError("x")
-    launcher = run.build_launcher(ollama_url="u", base_env={}, shim_dir="/s", graph_cache={},
+    launcher = run.build_launcher(ollama_url="u", base_env={}, shim_dir="/s", graph_cache={}, tree_root=str(tmp_path / 'trees'),
                                   _plain=boom, _export=fake_export)
     with pytest.raises(RuntimeError):
         launcher("plain-opus5", _meta("c1", case_id="k"), "opus", lambda l: None)
-    assert not os.path.exists("eval/runs/plain-opus5/r1/c1/k/1/tree")
+    assert not os.path.exists(tmp_path / "trees/plain-opus5/r1/c1/k/1/tree")
 
 
 def test_git_head_returns_string():
     assert isinstance(run.git_head("."), str)
+
+
+def test_leak_guard_rejects_tree_under_repo_marker(tmp_path):
+    (tmp_path / "CLAUDE.md").write_text("x")
+    launcher = run.build_launcher(ollama_url="u", base_env={}, shim_dir="/s", graph_cache={},
+                                  tree_root=str(tmp_path / "t"), _export=lambda *a, **k: None)
+    with pytest.raises(RuntimeError, match="CLAUDE.md"):
+        launcher("plain-opus5", _meta("c1"), "opus", lambda l: None)
