@@ -23,6 +23,11 @@ Which runs count (never changes anywhere in this module):
   * caught_L1 for (vuln, run) = any `matches` row for that vuln in that run (L1 or L2);
     caught_L2 = a row with level == 'L2'. A run's caught count = number of distinct matched
     vuln_ids (0/1 for the one-bug-per-commit dataset).
+  * One scored row per run slot: the highest attempt_no of (arm, repo, commit_sha, case_id, run_no).
+  * The bootstrap is PAIRED: its clusters are the repos with token-bearing vulnerable runs in both
+    arms; a repo seen in one arm only is excluded and listed (`unmatched_repos`).
+  * pair-correct needs the manifest's commit pairs (vuln_id, vulnerable_sha, patched_sha) so a repo
+    with two CVEs scores each against its own patched commit; without them it is None.
 
 Nothing here estimates a missing value. Dollars are None without a price table; `mde` is a stub.
 This file is the analysis script the spec says to commit and hash into the prereg tag
@@ -46,11 +51,23 @@ _Z95 = 1.959963984540054
 
 # ---- reading the tables --------------------------------------------------------------------------
 
+_LATEST_ATTEMPT_SQL = ("attempt_no = (SELECT MAX(r2.attempt_no) FROM runs r2 WHERE r2.arm = runs.arm"
+                       " AND r2.repo = runs.repo AND r2.commit_sha IS runs.commit_sha"
+                       " AND r2.case_id IS runs.case_id AND r2.run_no = runs.run_no)")
+
+
 def _runs(conn, arm, commit_kind):
-    """Scored CVE runs (case_id == '') of one arm and commit kind, oldest first."""
+    """Scored CVE runs (case_id == '') of one arm and commit kind, oldest first.
+
+    Attempts: a run slot (arm, repo, commit_sha, case_id, run_no) is scored at most once, by its
+    HIGHEST attempt_no. Invariant from the harness (eval/queue.py): only an `aborted` run (usage
+    limit, not the model's miss) gets a fresh attempt_no, so every other terminal status is
+    already the slot's last attempt; the filter makes that explicit and defensive. A slot whose
+    latest attempt is aborted/running contributes nothing.
+    """
     cur = conn.execute(
         f"SELECT id, repo, run_no, commit_sha FROM runs WHERE arm=? AND commit_kind=? AND case_id=''"
-        f" AND {_SCORED_SQL} ORDER BY id", (arm, commit_kind))
+        f" AND {_SCORED_SQL} AND {_LATEST_ATTEMPT_SQL} ORDER BY id", (arm, commit_kind))
     return [{"id": i, "repo": r, "run_no": n, "sha": s} for i, r, n, s in cur.fetchall()]
 
 
@@ -125,13 +142,17 @@ def efficiency(conn, arm):
 
 
 def far_detail(conn, arm):
+    """{FAR, false_alarms, n_runs}: n_runs = scored patched-commit runs (the spec's N*R when every
+    slot was run). A crashed/hung/error patched run is scored and, having no matches, counts as NO
+    false alarm, so failures lower FAR; n_runs and the per-status counts are disclosed alongside."""
     runs = _runs(conn, arm, "patched")
     fa = sum(1 for r in runs if _caught(conn, r["id"])["l1"])
     return {"FAR": (fa / len(runs)) if runs else None, "false_alarms": fa, "n_runs": len(runs)}
 
 
 def far(conn, arm):
-    """FAR_a = sum 1[any L1 match on patched_v] / (N*R) over scored patched-commit runs."""
+    """FAR_a = sum 1[any L1 match on patched_v] / n over the n scored patched-commit runs
+    (spec: N*R; a non-ok patched run counts as no false alarm, see far_detail)."""
     return far_detail(conn, arm)["FAR"]
 
 
@@ -157,19 +178,24 @@ def _log_ratio(ca, ta, cb, tb):
 
 
 def _draws(conn, arm_a, arm_b, *, B, seed):
+    """Paired design: the clusters are the repos with scored vulnerable runs (with token data) in
+    BOTH arms. A repo present in only one arm is not a pair; it is left out of the point estimate
+    and the resampling and listed in `unmatched_repos`."""
     sa, sb = _repo_sums(conn, arm_a), _repo_sums(conn, arm_b)
-    repos = sorted(set(sa) | set(sb))
+    repos = sorted(set(sa) & set(sb))
+    unmatched = sorted(set(sa) ^ set(sb))
     n = len(repos)
-    ca = np.array([sa.get(r, (0, 0))[0] for r in repos], float)
-    ta = np.array([sa.get(r, (0, 0))[1] for r in repos], float)
-    cb = np.array([sb.get(r, (0, 0))[0] for r in repos], float)
-    tb = np.array([sb.get(r, (0, 0))[1] for r in repos], float)
+    ca = np.array([sa[r][0] for r in repos], float)
+    ta = np.array([sa[r][1] for r in repos], float)
+    cb = np.array([sb[r][0] for r in repos], float)
+    tb = np.array([sb[r][1] for r in repos], float)
     point = float(_log_ratio(ca.sum(), ta.sum(), cb.sum(), tb.sum())) if n else math.nan
-    if n < 2:
-        return None, point, n
-    idx = np.random.default_rng(seed).integers(0, n, size=(B, n))
-    draws = _log_ratio(ca[idx].sum(axis=1), ta[idx].sum(axis=1), cb[idx].sum(axis=1), tb[idx].sum(axis=1))
-    return draws, point, n
+    draws = None
+    if n >= 2:
+        idx = np.random.default_rng(seed).integers(0, n, size=(B, n))
+        draws = _log_ratio(ca[idx].sum(axis=1), ta[idx].sum(axis=1), cb[idx].sum(axis=1), tb[idx].sum(axis=1))
+    return {"draws": draws, "point": point, "n_repos": n, "unmatched_repos": unmatched,
+            "n_unmatched_repos": len(unmatched)}
 
 
 def _ci(draws, alpha):
@@ -196,16 +222,21 @@ def paired_bootstrap(conn, arm_a, arm_b, *, B=10_000, seed=0, alpha=0.05):
     """Paired cluster bootstrap of log(E_a / E_b): repos are resampled with replacement and both
     arms' runs for a repo move together; E is recomputed per arm from the resampled runs.
 
-    Returns {"low","high","point","B","seed","n_repos","alpha","n_undefined","frac_undefined",
-    "p_value"}. A draw where an arm caught nothing has an undefined ratio: it is kept as +-inf
-    (both arms -> nan) and counted in n_undefined, never dropped silently. low/high are None when
-    fewer than two repos are available (nothing to resample).
+    Returns {"low","high","point","B","seed","n_repos","n_unmatched_repos","unmatched_repos",
+    "alpha","n_undefined","frac_undefined","p_value"}. n_repos counts PAIRED repos (scored
+    vulnerable runs with token data in both arms); repos seen in only one arm are excluded from the
+    point estimate and the resampling and listed in unmatched_repos. A draw where an arm caught
+    nothing has an undefined ratio: it is kept as +-inf (both arms -> nan) and counted in
+    n_undefined, never dropped silently. low/high are None when fewer than two paired repos exist.
     """
-    draws, point, n = _draws(conn, arm_a, arm_b, B=B, seed=seed)
-    out = {"point": point, "B": B, "seed": seed, "n_repos": n, "alpha": alpha}
+    d = _draws(conn, arm_a, arm_b, B=B, seed=seed)
+    draws = d["draws"]
+    out = {"point": d["point"], "B": B, "seed": seed, "n_repos": d["n_repos"],
+           "n_unmatched_repos": d["n_unmatched_repos"], "unmatched_repos": d["unmatched_repos"],
+           "alpha": alpha}
     if draws is None:
         out.update({"low": None, "high": None, "n_undefined": None, "frac_undefined": None,
-                    "p_value": None, "note": "fewer than two repos with token data in either arm"})
+                    "p_value": None, "note": "fewer than two paired repos with token data"})
         return out
     undefined = int(np.sum(~np.isfinite(draws)))
     lo, hi = _ci(draws, alpha)
@@ -238,9 +269,8 @@ def decisions(conn, lm_arm, others, *, far_margin=0.05, B=10_000, seed=0, alpha=
     far_lm = far_detail(conn, lm_arm)
     comps, raw = {}, {}
     for other in others:
-        draws, point, n = _draws(conn, lm_arm, other, B=B, seed=seed)
-        comps[other] = {"draws": draws, "point": point, "n_repos": n}
-        raw[other] = _p_value(draws) if draws is not None else 1.0
+        comps[other] = _draws(conn, lm_arm, other, B=B, seed=seed)
+        raw[other] = _p_value(comps[other]["draws"]) if comps[other]["draws"] is not None else 1.0
     adj = holm(raw)
     order = sorted(others, key=lambda o: raw[o])
     m, still_rejecting, out = len(others), True, {}
@@ -256,7 +286,8 @@ def decisions(conn, lm_arm, others, *, far_margin=0.05, B=10_000, seed=0, alpha=
                   else far_lm["FAR"] <= fo["FAR"] + far_margin)
         out[other] = {
             "efficiency_ci": {"low": lo, "high": hi, "point": c["point"], "alpha": step_alpha,
-                              "n_repos": c["n_repos"], "B": B, "seed": seed,
+                              "n_repos": c["n_repos"], "n_unmatched_repos": c["n_unmatched_repos"],
+                              "unmatched_repos": c["unmatched_repos"], "B": B, "seed": seed,
                               "n_undefined": int(np.sum(~np.isfinite(draws))) if draws is not None else None},
             "efficiency_ci_above_zero": above,
             "p_value": raw[other] if draws is not None else None,
@@ -360,12 +391,48 @@ def _path_levels(dicts):
     return out
 
 
-def _arm_secondary(conn, arm, *, k, prices):
+def pair_correct(conn, arm, pairs):
+    """Pair-correct per (vuln, run_no), from the manifest's commit pairs
+    `pairs = [(vuln_id, vulnerable_sha, patched_sha), ...]` (F1 supplies the loader).
+
+    caught      = a `matches` row with THAT vuln_id on the arm's scored run with
+                  commit_sha == vulnerable_sha and this run_no;
+    false alarm = any L1 match on the arm's scored run with commit_sha == patched_sha and this
+                  run_no;
+    pair-correct = caught AND NOT false alarm.
+    A repo holding two CVEs therefore scores each CVE against its own patched commit.
+    Returns {pair_correct (mean over vulns of the mean over their paired run_nos), n_vulns,
+    n_pairs, n_unpaired (run_nos where either side has no scored run), n_vulns_without_runs}.
+    """
+    vsha, psha = {}, {}
+    for r in _runs(conn, arm, "vulnerable"):
+        vsha.setdefault(r["sha"], {})[r["run_no"]] = r["id"]
+    for r in _runs(conn, arm, "patched"):
+        psha.setdefault(r["sha"], {})[r["run_no"]] = r["id"]
+    per_vuln, n_pairs, n_unpaired, no_runs = [], 0, 0, 0
+    for vuln_id, v_sha, p_sha in pairs:
+        vr, pr = vsha.get(v_sha, {}), psha.get(p_sha, {})
+        run_nos = sorted(set(vr) | set(pr))
+        if not run_nos:
+            no_runs += 1
+            continue
+        vals = []
+        for rn in run_nos:
+            if rn not in vr or rn not in pr:
+                n_unpaired += 1
+                continue
+            caught = str(vuln_id) in _caught(conn, vr[rn])["l1"]
+            fa = bool(_caught(conn, pr[rn])["l1"])
+            vals.append(caught and not fa)
+            n_pairs += 1
+        if vals:
+            per_vuln.append(_mean(vals))
+    return {"pair_correct": _mean(per_vuln), "n_vulns": len(per_vuln), "n_pairs": n_pairs,
+            "n_unpaired": n_unpaired, "n_vulns_without_runs": no_runs}
+
+
+def _arm_secondary(conn, arm, *, k, prices, pairs):
     vruns, pruns = _runs(conn, arm, "vulnerable"), _runs(conn, arm, "patched")
-    patched_fa = {}
-    for r in pruns:
-        key = (r["repo"], r["run_no"])
-        patched_fa[key] = patched_fa.get(key, False) or bool(_caught(conn, r["id"])["l1"])
     vulns, paths, fields, no_tok = {}, [], [], 0
     for r in vruns:
         c = _caught(conn, r["id"])
@@ -375,12 +442,9 @@ def _arm_secondary(conn, arm, *, k, prices):
             no_tok += 1
         else:
             fields.append(f)
-        pc_key = (r["repo"], r["run_no"])
-        vulns.setdefault((r["repo"], r["sha"]), []).append({
-            "l1": bool(c["l1"]), "l2": bool(c["l2"]),
-            "pair": (bool(c["l1"]) and not patched_fa[pc_key]) if pc_key in patched_fa else None})
+        vulns.setdefault((r["repo"], r["sha"]), []).append({"l1": bool(c["l1"]), "l2": bool(c["l2"])})
     per_vuln = list(vulns.values())
-    pair_vals = [_mean([x["pair"] for x in rs]) for rs in per_vuln]
+    pc = pair_correct(conn, arm, pairs) if pairs is not None else None
     tok_fields = ({key: sum(f[key] for f in fields) for key in fields[0]} if fields else None)
     walls, rss = _resource_stats(conn, [r["id"] for r in vruns + pruns])
     return {
@@ -389,8 +453,8 @@ def _arm_secondary(conn, arm, *, k, prices):
         "n_vulns": len(per_vuln), "n_vuln_runs": len(vruns), "n_patched_runs": len(pruns),
         "recall_l1": _mean([_mean([x["l1"] for x in rs]) for rs in per_vuln]),
         "recall_l2": _mean([_mean([x["l2"] for x in rs]) for rs in per_vuln]),
-        "pair_correct": _mean(pair_vals),
-        "n_unpaired_runs": sum(1 for rs in per_vuln for x in rs if x["pair"] is None),
+        "pair_correct": pc["pair_correct"] if pc else None,     # None (not 0) without commit pairs
+        "pair_correct_detail": pc,
         f"pass_at_{k}": _mean([pass_at_k([x["l1"] for x in rs], k) for rs in per_vuln]),
         f"pass_pow_{k}": _mean([pass_pow_k([x["l1"] for x in rs], k) for rs in per_vuln]),
         "n_vulns_under_k_runs": sum(1 for rs in per_vuln if len(rs) < k),
@@ -404,13 +468,15 @@ def _arm_secondary(conn, arm, *, k, prices):
     }
 
 
-def secondary(conn, *, prices=None, k=3, seed=0):
+def secondary(conn, *, prices=None, pairs=None, k=3, seed=0):
     """Secondary (reported, not confirmatory) metrics per arm. `prices` = {arm: {field: $/1M tokens}}
-    with fields uncached_in / cache_read / cache_write / out; without it dollars is None."""
-    return {"arms": {arm: _arm_secondary(conn, arm, k=k, prices=prices) for arm in _arms(conn)},
+    with fields uncached_in / cache_read / cache_write / out; without it dollars is None.
+    `pairs` = the manifest's [(vuln_id, vulnerable_sha, patched_sha), ...]; without it pair_correct
+    is None (see pair_correct)."""
+    return {"arms": {arm: _arm_secondary(conn, arm, k=k, prices=prices, pairs=pairs) for arm in _arms(conn)},
             "k": k, "seed": seed,
             "notes": ["recall/pair-correct/pass@k: unit = vulnerability (mean of its runs), then mean over vulns",
-                      "pair-correct pairs a vulnerable run with the patched run(s) of the same (repo, run_no)",
+                      "pair-correct needs the manifest commit pairs (pairs=); each CVE is scored against its own patched commit",
                       "youden_j and ppi_precision are filled by eval/owasp.py and eval/judge.py",
                       "efficiency and tokens leave out runs with no token data (n_no_token_data)"]}
 
@@ -544,8 +610,9 @@ def script_hash():
         return hashlib.sha256(fh.read()).hexdigest()
 
 
-def render(conn, lm_arm, others, *, prices=None, B=10_000, seed=0, far_margin=0.05, svg_path=None):
-    sec = secondary(conn, prices=prices, seed=seed)
+def render(conn, lm_arm, others, *, prices=None, pairs=None, B=10_000, seed=0, far_margin=0.05,
+           svg_path=None):
+    sec = secondary(conn, prices=prices, pairs=pairs, seed=seed)
     dec = decisions(conn, lm_arm, [o for o in others if o in sec["arms"]], far_margin=far_margin, B=B, seed=seed)
     out = [f"# Orion-LM scoring report (report.py sha256 {script_hash()[:12]}, B={B}, seed={seed})", "",
            "## Primary", "", "| arm | E (caught per 1M tokens) | caught | tokens | runs | no token data | FAR | patched runs |",
@@ -555,11 +622,19 @@ def render(conn, lm_arm, others, *, prices=None, B=10_000, seed=0, far_margin=0.
         out.append(f"| {arm} | {_fmt(e['E'])} | {e['caught']} | {e['tokens']} | {e['n_runs']} | "
                    f"{e['n_no_token_data']} | {_fmt(f['FAR'])} | {f['n_runs']} |")
     out += ["", f"## Decision rule: {lm_arm} vs frontier (Holm step-down, alpha={dec['alpha']}, FAR margin {far_margin})", "",
-            "| vs | log(E_lm/E_X) | Holm CI | Holm p | undefined draws | FAR_lm | FAR_X | beats |", "|---|---|---|---|---|---|---|---|"]
+            "| vs | log(E_lm/E_X) | CI (percentile) | CI level (Holm alpha/(m-i)) | Holm p | paired repos | unmatched repos | undefined draws | FAR_lm | FAR_X | beats |",
+            "|---|---|---|---|---|---|---|---|---|---|---|"]
     for other, c in dec["comparisons"].items():
         ci = c["efficiency_ci"]
-        out.append(f"| {other} | {_fmt(ci['point'])} | [{_fmt(ci['low'])}, {_fmt(ci['high'])}] @{_fmt(ci['alpha'])} | "
-                   f"{_fmt(c['holm_p'])} | {ci['n_undefined']} | {_fmt(c['far_lm'])} | {_fmt(c['far_other'])} | {c['beats']} |")
+        out.append(f"| {other} | {_fmt(ci['point'])} | [{_fmt(ci['low'])}, {_fmt(ci['high'])}] | "
+                   f"{1 - ci['alpha']:.4g} (alpha {_fmt(ci['alpha'])}) | {_fmt(c['holm_p'])} | {ci['n_repos']} | "
+                   f"{ci['n_unmatched_repos']} | {ci['n_undefined']} | {_fmt(c['far_lm'])} | {_fmt(c['far_other'])} | {c['beats']} |")
+    out += ["", "Coverage behind the rule (a run with no token data is in neither efficiency sum; a vuln with "
+            f"fewer than {sec['k']} runs has no pass@{sec['k']}):", "",
+            f"| arm | vulnerable runs | no token data | vulns | vulns under {sec['k']} runs | patched runs |", "|---|---|---|---|---|---|"]
+    for arm, s in sec["arms"].items():
+        out.append(f"| {arm} | {s['n_vuln_runs']} | {s['n_no_token_data']} | {s['n_vulns']} | "
+                   f"{s['n_vulns_under_k_runs']} | {s['n_patched_runs']} |")
     out += ["", "## Secondary", "", "| arm | recall L1 | recall L2 | pair-correct | pass@3 | pass^3 | wall s (mean) | peak RSS MB (max) | dollars |",
             "|---|---|---|---|---|---|---|---|---|"]
     for arm, s in sec["arms"].items():
@@ -574,24 +649,38 @@ def render(conn, lm_arm, others, *, prices=None, B=10_000, seed=0, far_margin=0.
     return "\n".join(out)
 
 
+def open_readonly(path):
+    """Open an existing runs DB read-only (sqlite URI mode=ro). The report never creates or migrates
+    a database: a missing file is an error, not an empty report."""
+    import os
+    import sqlite3
+    from urllib.request import pathname2url
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"runs DB not found: {path}")
+    return sqlite3.connect(f"file:{pathname2url(os.path.abspath(path))}?mode=ro", uri=True)
+
+
 def main(argv=None):
     import argparse
-    from eval import db
-    ap = argparse.ArgumentParser(description="Orion-LM scoring report")
+    ap = argparse.ArgumentParser(description="Orion-LM scoring report (reads the runs DB read-only)")
     ap.add_argument("db", nargs="?", default="eval/runs.db")
     ap.add_argument("--lm", default="orion-lm")
     ap.add_argument("--vs", nargs="*", default=["plain-sonnet5", "plain-opus5", "plain-gpt"])
     ap.add_argument("--B", type=int, default=10_000)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--prices", help="JSON file {arm: {uncached_in, cache_read, cache_write, out}} in $/1M tokens")
+    ap.add_argument("--pairs", help="JSON file [[vuln_id, vulnerable_sha, patched_sha], ...] for pair-correct")
     ap.add_argument("--svg", help="write the Pareto SVG here")
     a = ap.parse_args(argv)
-    prices = None
+    prices = pairs = None
     if a.prices:
         with open(a.prices) as fh:
             prices = json.load(fh)
-    conn = db.connect(a.db)
-    print(render(conn, a.lm, a.vs, prices=prices, B=a.B, seed=a.seed, svg_path=a.svg))
+    if a.pairs:
+        with open(a.pairs) as fh:
+            pairs = [tuple(p) for p in json.load(fh)]
+    conn = open_readonly(a.db)
+    print(render(conn, a.lm, a.vs, prices=prices, pairs=pairs, B=a.B, seed=a.seed, svg_path=a.svg))
     return 0
 
 

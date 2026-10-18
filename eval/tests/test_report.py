@@ -213,11 +213,87 @@ def test_bootstrap_undefined_draws_are_reported_not_dropped(tmp_path):
     assert out["point"] == math.inf and out["high"] == math.inf and out["low"] == math.inf
 
 
-def test_bootstrap_requires_shared_repos(tmp_path):
+def test_bootstrap_needs_two_paired_repos(tmp_path):
     conn = db.connect(str(tmp_path / "t.db"))
     seed(conn, "orion-lm", "r1", "v1", caught=True, tokens=1)
     out = report.paired_bootstrap(conn, "orion-lm", "plain-opus5", B=10)
-    assert out["n_repos"] == 1 and out["low"] is None and out["high"] is None
+    assert out["n_repos"] == 0 and out["n_unmatched_repos"] == 1 and out["unmatched_repos"] == ["r1"]
+    assert out["low"] is None and out["high"] is None and math.isnan(out["point"])
+
+
+def test_bootstrap_pairs_on_repo_intersection(tmp_path):
+    conn = db.connect(str(tmp_path / "t.db"))
+    for i in range(6):                       # 6 paired repos, exact 2x everywhere
+        seed(conn, "orion-lm", f"r{i}", f"v{i}", caught=True, tokens=500_000)
+        seed(conn, "plain-opus5", f"r{i}", f"v{i}", caught=True, tokens=1_000_000)
+    seed(conn, "orion-lm", "only-lm", "vx", caught=False, tokens=50_000_000)      # lm-only repo
+    seed(conn, "plain-opus5", "only-opus", "vy", caught=True, tokens=1)           # opus-only repo
+    out = report.paired_bootstrap(conn, "orion-lm", "plain-opus5", B=100)
+    assert out["n_repos"] == 6 and out["n_unmatched_repos"] == 2
+    assert out["unmatched_repos"] == ["only-lm", "only-opus"]
+    assert out["point"] == math.log(2.0) and out["low"] == out["high"] == math.log(2.0)
+    assert out["n_undefined"] == 0
+    d = report.decisions(conn, "orion-lm", ["plain-opus5"], B=100)["comparisons"]["plain-opus5"]
+    assert d["efficiency_ci"]["n_repos"] == 6 and d["efficiency_ci"]["unmatched_repos"] == ["only-lm", "only-opus"]
+
+
+def test_only_highest_attempt_is_scored(tmp_path):
+    conn = db.connect(str(tmp_path / "t.db"))
+    # attempt 1 aborted (usage limit) with a catch logged, attempt 2 ok: the slot counts once
+    a1 = db.start_run(conn, arm="orion-lm", repo="r1", tier="headline", run_no=1, model_tag="m",
+                      cli_versions="", orion_commit="c", commit_kind="vulnerable", commit_sha="v1", attempt_no=1)
+    db.finish_run(conn, a1, "aborted")
+    _match(conn, a1, "r1")
+    a2 = db.start_run(conn, arm="orion-lm", repo="r1", tier="headline", run_no=1, model_tag="m",
+                      cli_versions="", orion_commit="c", commit_kind="vulnerable", commit_sha="v1", attempt_no=2)
+    db.finish_run(conn, a2, "ok")
+    db.log_agent_call(conn, a2, session_id="s", stage="run", input_tokens=1_000_000, output_tokens=0,
+                      cache_read=0, cache_write=0, turns_used=1, turn_limit=None, peak_context=None,
+                      exit_reason="ok", error_head=None)
+    _match(conn, a2, "r1")
+    assert [r["id"] for r in report._runs(conn, "orion-lm", "vulnerable")] == [a2]
+    assert report.efficiency_detail(conn, "orion-lm")["n_runs"] == 1
+    assert abs(report.efficiency(conn, "orion-lm") - 1.0) < 1e-6
+    # defensive: even two scored attempts (should not happen) count once, the latest
+    a3 = db.start_run(conn, arm="orion-lm", repo="r1", tier="headline", run_no=1, model_tag="m",
+                      cli_versions="", orion_commit="c", commit_kind="vulnerable", commit_sha="v1", attempt_no=3)
+    db.finish_run(conn, a3, "crashed")
+    assert [r["id"] for r in report._runs(conn, "orion-lm", "vulnerable")] == [a3]
+
+
+def test_pair_correct_scores_each_cve_against_its_own_patched_commit(tmp_path):
+    conn = db.connect(str(tmp_path / "t.db"))
+    # one repo, two CVEs A and B, one run each; both caught; only B's patched run has a false alarm
+    va = _run(conn, "orion-lm", "repo", "va")
+    vb = _run(conn, "orion-lm", "repo", "vb")
+    _match(conn, va, "A")
+    _match(conn, vb, "B")
+    _run(conn, "orion-lm", "repo", "pa", kind="patched")
+    pb = _run(conn, "orion-lm", "repo", "pb", kind="patched")
+    _match(conn, pb, "B")
+    pairs = [("A", "va", "pa"), ("B", "vb", "pb")]
+    pc = report.pair_correct(conn, "orion-lm", pairs)
+    assert pc == {"pair_correct": 0.5, "n_vulns": 2, "n_pairs": 2, "n_unpaired": 0, "n_vulns_without_runs": 0}
+    # a catch credited to the wrong vuln_id on the vulnerable run is not a catch for this pair
+    assert report.pair_correct(conn, "orion-lm", [("A", "vb", "pa")])["pair_correct"] == 0.0
+    # missing side -> unpaired, never 0; unknown pair -> no runs
+    pc = report.pair_correct(conn, "orion-lm", [("A", "va", "nope"), ("Z", "zz", "zz")])
+    assert pc["pair_correct"] is None and pc["n_unpaired"] == 1 and pc["n_vulns_without_runs"] == 1
+    sec = report.secondary(conn, pairs=pairs)["arms"]["orion-lm"]
+    assert sec["pair_correct"] == 0.5 and sec["pair_correct_detail"]["n_pairs"] == 2
+    assert report.secondary(conn)["arms"]["orion-lm"]["pair_correct"] is None     # no pairs -> None, not 0
+
+
+def test_open_readonly_never_creates_a_db(tmp_path):
+    import pytest, sqlite3
+    with pytest.raises(FileNotFoundError):
+        report.open_readonly(str(tmp_path / "absent.db"))
+    assert not (tmp_path / "absent.db").exists()
+    db.connect(str(tmp_path / "t.db")).close()
+    conn = report.open_readonly(str(tmp_path / "t.db"))
+    with pytest.raises(sqlite3.OperationalError):
+        conn.execute("INSERT INTO events(run_id) VALUES (1)")
+    assert report.efficiency(conn, "orion-lm") is None
 
 
 def test_beats_combines_ci_and_far_margin(tmp_path):
@@ -272,11 +348,12 @@ def test_secondary_metrics(tmp_path):
                         graph_nodes=None, graph_edges=None, loc=None)
     db.log_resource(conn, rid, phase="build", wall_seconds=99.0, peak_rss_mb=900.0,
                     graph_nodes=1, graph_edges=1, loc=1)
-    sec = report.secondary(conn)
+    sec = report.secondary(conn, pairs=[("v1", "v1", "p1")])
     s = sec["arms"]["orion-lm"]
     assert abs(s["recall_l1"] - 2 / 3) < 1e-12
     assert abs(s["recall_l2"] - 1 / 3) < 1e-12
     assert abs(s["pair_correct"] - 1 / 3) < 1e-12           # run1: caught+clean; run2: caught+FA; run3: miss
+    assert s["pair_correct_detail"]["n_pairs"] == 3
     assert s["pass_at_3"] == 1.0 and s["pass_pow_3"] == 0.0
     assert s["n_vulns"] == 1 and s["n_vuln_runs"] == 3 and s["n_patched_runs"] == 3
     assert s["path_levels"]["fix_traversal"] == 1.0 and s["path_levels"]["entry_hit"] == 0.0
