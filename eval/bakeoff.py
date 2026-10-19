@@ -1,14 +1,19 @@
 """Bake-off harness: run each candidate model through `train.devscore.judge` on one seeded dev sample.
 
-`peak_rss_mb` is sampled while the model loads and runs (psutil, `eval.resources.PhaseSampler`); None when
-nothing could be sampled. It is never estimated. `train_cutoff` is whatever string the caller supplies.
+`peak_rss_mb` is the child process's own `ru_maxrss` high-water mark, so each candidate runs in a FRESH
+subprocess (`run_all` / `--one`). An in-process run (`isolated=False`, used by tests) records None, because a
+process-wide high-water mark would include earlier candidates. It is never estimated. `train_cutoff` is
+whatever string the caller supplies.
 """
 from __future__ import annotations
 
-import os
+import argparse
+import json
 import random
+import resource
+import subprocess
+import sys
 
-from eval.resources import PhaseSampler
 from orion.lm import model as lm_model
 from train import devscore
 
@@ -32,15 +37,36 @@ def sample_dev(dev_examples, *, sample_n: int, seed: int) -> list[dict]:
     return out
 
 
+def _maxrss_mb() -> float:
+    raw = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return raw / (1024 * 1024) if sys.platform == "darwin" else raw / 1024  # bytes on macOS, KB on Linux
+
+
 def run_candidate(model_path, dev_examples, *, schema_text=None, load=lm_model.load,
-                  sample_n=300, seed=0, train_cutoff=None) -> dict:
+                  sample_n=300, seed=0, train_cutoff=None, isolated=False) -> dict:
     sample = sample_dev(dev_examples, sample_n=sample_n, seed=seed)
-    with PhaseSampler(os.getpid(), interval=0.5) as sampler:
-        sampler._sample_once()
-        model = load(model_path)
-        scores = devscore.judge(model.generate, sample, schema_text=schema_text)
-        sampler._sample_once()
-    return {**scores, "model": str(model_path), "peak_rss_mb": sampler.peak_rss_mb, "train_cutoff": train_cutoff}
+    model = load(model_path)
+    scores = devscore.judge(model.generate, sample, schema_text=schema_text)
+    return {**scores, "model": str(model_path), "peak_rss_mb": _maxrss_mb() if isolated else None,
+            "train_cutoff": train_cutoff}
+
+
+def _subprocess_run(cmd: list[str]) -> str:
+    return subprocess.run(cmd, check=True, capture_output=True, text=True).stdout
+
+
+def run_all(candidates, dev_path, *, sample_n=300, seed=0, train_cutoffs=None, run=_subprocess_run) -> list[dict]:
+    """One fresh child process per candidate (`python -m eval.bakeoff --one ...`); `run(cmd) -> stdout`
+    is injectable. The row is the last JSON line the child prints."""
+    rows = []
+    for path in candidates:
+        cmd = [sys.executable, "-m", "eval.bakeoff", "--one", str(path), "--dev", str(dev_path),
+               "--sample-n", str(sample_n), "--seed", str(seed)]
+        cutoff = (train_cutoffs or {}).get(path)
+        if cutoff is not None:
+            cmd += ["--train-cutoff", cutoff]
+        rows.append(json.loads(run(cmd).strip().splitlines()[-1]))
+    return rows
 
 
 def _cell(v) -> str:
@@ -56,3 +82,21 @@ def table(rows) -> str:
     for r in rows:
         lines.append("| " + " | ".join(_cell(r.get(c)) for c in COLUMNS) + " |")
     return "\n".join(lines)
+
+
+def main(argv=None) -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--one", required=True, help="model path: score this one candidate, print its row as JSON")
+    ap.add_argument("--dev", required=True, help="dev examples JSONL")
+    ap.add_argument("--sample-n", type=int, default=300)
+    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--train-cutoff", default=None)
+    a = ap.parse_args(argv)
+    with open(a.dev, encoding="utf-8") as f:
+        dev = [json.loads(ln) for ln in f if ln.strip()]
+    row = run_candidate(a.one, dev, sample_n=a.sample_n, seed=a.seed, train_cutoff=a.train_cutoff, isolated=True)
+    print(json.dumps(row))
+
+
+if __name__ == "__main__":
+    main()

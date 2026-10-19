@@ -51,7 +51,7 @@ def judge(generate, dev_examples, *, schema_text=None) -> dict:
         schema_text = lm_slice.pruned_schema()
     rows = [r for r in dev_examples if r.get("split", "dev") == "dev"]
     acc = {"tokens": 0, "completion": 0, "seconds": 0.0}
-    flagged_by: dict[tuple, bool] = {}
+    flagged_by: dict[str, dict[str, list[bool]]] = {}
     by_label: dict[str, list[bool]] = {"vulnerable": [], "patched": [], "negative": []}
     parse_fail = overflow = 0
     for r in rows:
@@ -59,10 +59,11 @@ def judge(generate, dev_examples, *, schema_text=None) -> dict:
         parse_fail += pf
         overflow += ov
         by_label.setdefault(r["label"], []).append(flagged)
-        flagged_by[(r["pair_id"], r["label"])] = flagged
-    pairs = sorted({p for p, lab in flagged_by if lab == "vulnerable"} &
-                   {p for p, lab in flagged_by if lab == "patched"})
-    correct = sum(1 for p in pairs if flagged_by[(p, "vulnerable")] and not flagged_by[(p, "patched")])
+        flagged_by.setdefault(r["pair_id"], {}).setdefault(r["label"], []).append(flagged)
+    # A pair is scored only when it has both sides; it is correct iff every vulnerable row is flagged
+    # and every patched row is silent (Stage 1 and Stage 2 can share a pair_id, so rows repeat).
+    pairs = [d for d in flagged_by.values() if d.get("vulnerable") and d.get("patched")]
+    correct = sum(1 for d in pairs if all(d["vulnerable"]) and not any(d["patched"]))
     vul, pat, neg = by_label["vulnerable"], by_label["patched"], by_label["negative"]
     return {
         "n": len(rows),

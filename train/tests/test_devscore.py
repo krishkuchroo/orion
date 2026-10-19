@@ -71,3 +71,22 @@ def test_unparseable_forced_final_is_no_lead_and_overflow_counted():
 
     out = devscore.judge(over, ex, schema_text="S")
     assert out["vuln_recall"] == 0.0 and out["context_overflow"] == 1
+
+
+def test_pair_correct_aggregates_duplicate_rows_per_pair():
+    """Every vulnerable row flagged AND every patched row silent; one-sided pairs are excluded."""
+    flag = json.dumps({"action": "final", "leads": [LEAD]})
+    quiet = json.dumps({"action": "final", "leads": []})
+    replies = iter([quiet, flag, quiet,          # P: vuln flagged, vuln missed, patched silent -> wrong
+                    flag, flag, quiet,           # R: two vuln flagged, patched silent -> correct
+                    flag])                       # S: vulnerable only -> excluded
+    exs = [{"pair_id": "P", "label": "vulnerable", "case": CASE, "lead": LEAD},
+           {"pair_id": "P", "label": "vulnerable", "case": CASE, "lead": LEAD},
+           {"pair_id": "P", "label": "patched", "case": CASE, "lead": None},
+           {"pair_id": "R", "label": "vulnerable", "case": CASE, "lead": LEAD},
+           {"pair_id": "R", "label": "vulnerable", "case": CASE, "lead": LEAD},
+           {"pair_id": "R", "label": "patched", "case": CASE, "lead": None},
+           {"pair_id": "S", "label": "vulnerable", "case": CASE, "lead": LEAD}]
+    out = devscore.judge(lambda m: GenResult(text=next(replies), prompt_tokens=1, completion_tokens=1, cached_tokens=0),
+                         exs, schema_text="S")
+    assert out["pair_correct"] == 0.5

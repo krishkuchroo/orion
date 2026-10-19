@@ -40,7 +40,7 @@ def test_run_candidate_fields_and_loaded_path():
                                 train_cutoff="2025-01")
     assert FIELDS <= set(out) and out["model"] == "m/a" and paths == ["m/a"]
     assert out["train_cutoff"] == "2025-01" and out["n"] == 4 and len(log) == 4
-    assert out["peak_rss_mb"] is None or out["peak_rss_mb"] > 0
+    assert out["peak_rss_mb"] is None  # in-process: a whole-process high-water mark would mislead
     assert bakeoff.run_candidate("m/a", _dev(3), schema_text="S", load=load, sample_n=4)["train_cutoff"] is None
 
 
@@ -61,3 +61,29 @@ def test_table_names_every_model():
              "peak_rss_mb": 4096.0, "train_cutoff": "2025-06"}]
     t = bakeoff.table(rows)
     assert "gemma-e4b" in t and "granite-8b" in t and "n/a" in t and "4096" in t
+
+
+def test_isolated_uses_ru_maxrss(monkeypatch):
+    import resource
+    import sys
+
+    class RU:
+        ru_maxrss = 3 * 1024 * 1024  # bytes on macOS, KB on Linux: both give 3 MB / 3072 MB below
+
+    monkeypatch.setattr(resource, "getrusage", lambda who: RU)
+    out = bakeoff.run_candidate("m", _dev(1), schema_text="S", load=lambda p: Scripted([]), isolated=True)
+    assert out["peak_rss_mb"] == (3.0 if sys.platform == "darwin" else 3072.0)
+
+
+def test_run_all_spawns_one_child_per_candidate_and_parses_json():
+    cmds = []
+
+    def runner(cmd):
+        cmds.append(cmd)
+        m = cmd[cmd.index("--one") + 1]
+        return "noise line\n" + json.dumps({"model": m, "n": 1, "peak_rss_mb": 12.5})
+
+    rows = bakeoff.run_all(["a", "b"], "dev.jsonl", sample_n=7, seed=3, train_cutoffs={"a": "2025-01"}, run=runner)
+    assert [r["model"] for r in rows] == ["a", "b"] and len(cmds) == 2
+    assert "eval.bakeoff" in cmds[0] and "--sample-n" in cmds[0] and "7" in cmds[0]
+    assert "--train-cutoff" in cmds[0] and "--train-cutoff" not in cmds[1]
