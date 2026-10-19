@@ -708,6 +708,8 @@ Before writing the assertions, check how `eval.match.l1` reads an answer key: th
 - [ ] **Step 2: Run it and confirm it fails.** **Step 3: Implement.** **Step 4: Run it and confirm it passes.**
 - [ ] **Step 5: Commit:** `git commit -m "train: pair test (flag vuln, silent at fix on patched, anti-spray) + ReST-EM rounds for Stage-2 traces"`
 
+> **Status (2026-10-18):** functions and tests shipped (`train/rounds.py`). Rounds skipped: no templates yet (`train/templates/queries.json` is Krish's). Built as: `pair_test` uses `eval.match.l1_fix_site` (the Stage 2 fix site is the gold flow's sink, a single line); `rollout_round` takes a required `repo_for(pair_id, side)` and an optional `on_event`, skips pairs whose scans are gone (`scan_missing`), and never trains. The caller rebuilds Stage 2 scans and retrains from the base model each round.
+
 ---
 
 ## Execution order and gates
