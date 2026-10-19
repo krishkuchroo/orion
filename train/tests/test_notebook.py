@@ -53,7 +53,7 @@ def test_hyperparameters_in_one_constants_cell():
     code = _code()
     names = ["LORA_R", "LORA_ALPHA", "LORA_DROPOUT", "LEARNING_RATE", "EPOCHS", "BATCH_SIZE",
              "GRAD_ACCUM", "MAX_SEQ_LEN", "TARGET_MODULES", "SEED"]
-    holders = [s for s in code if "LORA_R" in s and "=" in s]
+    holders = [s for s in code if "\nLORA_R =" in "\n" + s]
     assert len(holders) == 1
     for n in names:
         assert f"\n{n} =" in "\n" + holders[0], n
