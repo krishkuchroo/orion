@@ -49,9 +49,9 @@ def test_build_writes_examples_ledger_and_resumes(tmp_path, hermetic_git):
     rows = _lines(tmp_path / "out.jsonl")
     assert {r["label"] for r in rows} >= {"vulnerable", "patched"} and all(r["split"] == "train" for r in rows)
     led = _lines(tmp_path / "led.jsonl")
-    assert [l["status"] for l in led] == ["ok", "snapshot_failed"] and led[0]["seconds_fetch"] is not None
-    assert led[0]["bytes"] > 0 and led[0]["seconds_index"] is not None and led[0]["n_examples"] == len(rows)
-    assert led[0]["n_files"] == 1 and led[1]["bytes"] is None and led[1]["reason"]
+    assert [l["status"] for l in led] == ["ok", "snapshot_failed"] and led[0]["seconds_network"] > 0
+    assert led[0]["bytes_clone"] > 0 and led[0]["bytes_delta"] == led[0]["bytes_clone"] and led[0]["seconds_index"] is not None and led[0]["n_examples"] == len(rows)
+    assert led[0]["n_files"] == 1 and led[1]["bytes_clone"] is None and led[1]["bytes_delta"] is None and led[1]["reason"]
     assert not any((tmp_path / "w").iterdir())          # snapshots deleted
     t = _run(pairs, splits, tmp_path)
     assert len(_lines(tmp_path / "led.jsonl")) == 2 and t["pairs"] == 0   # resumed, nothing redone
@@ -70,7 +70,7 @@ def test_one_snapshot_serves_all_pairs_of_a_repo_and_missing_fix_is_recorded(tmp
     assert len(calls) == 1
     led = {l["id"]: l for l in _lines(tmp_path / "led.jsonl")}
     assert led["A"]["status"] == led["B"]["status"] == "ok" and led["C"]["status"] == "commit_missing"
-    assert led["B"]["seconds_fetch"] > 0 and t["status"] == {"ok": 2, "commit_missing": 1}
+    assert led["B"]["seconds_network"] > 0 and led["B"]["bytes_clone"] >= led["A"]["bytes_clone"] and led["B"]["bytes_delta"] == led["B"]["bytes_clone"] - led["A"]["bytes_clone"] and t["status"] == {"ok": 2, "commit_missing": 1}
 
 
 def test_unknown_cwe_is_skipped_without_fetching(tmp_path):
@@ -112,3 +112,27 @@ def test_main_refuses_without_frozen_splits(tmp_path, capsys):
     pairs = tmp_path / "pairs.json"
     pairs.write_text("[]")
     assert stage1.main(["--pairs", str(pairs), "--splits", str(tmp_path / "none.json")]) == 2
+
+
+def test_resume_reconciles_out_jsonl_after_a_crash(tmp_path, hermetic_git):
+    """Examples written but no ledger line (crash), plus a torn last line: rerun leaves one copy per pair."""
+    src, fix = _repo(tmp_path / "src")
+    pairs = [_pair("A", src.path, fix)]
+    _run(pairs, {"A": "train"}, tmp_path)
+    out, led = tmp_path / "out.jsonl", tmp_path / "led.jsonl"
+    n = len(_lines(out))
+    led.write_text("")                                   # crash: examples on disk, ledger line never written
+    out.write_text(out.read_text() + '{"pair_id": "A", "lab')   # and a torn final line
+    _run(pairs, {"A": "train"}, tmp_path)
+    rows = _lines(out)
+    assert len(rows) == n and len({(r["label"], r["case"]["snippets"][0]["function"]) for r in rows}) == n
+    assert [l["id"] for l in _lines(led)] == ["A"]
+
+
+def test_reconcile_keeps_rows_of_ledgered_pairs(tmp_path, hermetic_git):
+    src, fix = _repo(tmp_path / "src")
+    _run([_pair("A", src.path, fix)], {"A": "train"}, tmp_path)
+    n = len(_lines(tmp_path / "out.jsonl"))
+    _run([_pair("A", src.path, fix), _pair("B", src.path, fix)], {"A": "train", "B": "train"}, tmp_path)
+    assert {r["pair_id"] for r in _lines(tmp_path / "out.jsonl")} == {"A", "B"}
+    assert sum(r["pair_id"] == "A" for r in _lines(tmp_path / "out.jsonl")) == n

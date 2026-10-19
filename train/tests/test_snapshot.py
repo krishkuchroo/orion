@@ -86,3 +86,13 @@ def test_show_timeout_raises(tmp_path):
 
 def test_default_timeouts():
     assert snapshot.CLONE_TIMEOUT_S == 900 and snapshot.SHOW_TIMEOUT_S == 120
+
+
+def test_fetch_replaces_a_stale_dest(tmp_path, repo):
+    """A work dir left by a hard kill must not make every later fetch of that repo fail."""
+    src, c1, _ = repo
+    snap = tmp_path / "snap"
+    (snap / "junk").mkdir(parents=True)
+    (snap / "junk" / "f").write_text("stale")
+    out = snapshot.fetch(f"file://{src.path}", c1, str(snap), globs=["*.py"])
+    assert out["ok"] and (snap / "a.py").read_text() == "v1\n" and not (snap / "junk").exists()

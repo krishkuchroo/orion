@@ -19,6 +19,15 @@ More than MAX_MULTI changed functions is "sprawling"; nothing changed outside te
 
 The patched example is built on a copy of `vuln_idx` with the patched text of the changed files applied, so the caller's
 index is never mutated (a later `cases_from` sees the pristine vulnerable tree).
+
+Ledger timing / size fields (one line per pair, null when not measured):
+  seconds_network  wall time of all git work for this pair: its share of the clone (the repo's first pair only),
+                   checkout, resolve_commits, fix_hunks and every snapshot.show (lazy blob fetches included)
+  bytes_clone      total on-disk size of the repo's shared snapshot after this pair; cumulative per repo, NOT per pair
+  bytes_delta      growth of the snapshot during this pair (for a repo's first pair this includes the clone)
+  seconds_index    RepoIndex build time on the vulnerable tree
+`build` first reconciles out_jsonl with the ledger (rows of pairs without a ledger line and a torn last line are
+dropped, atomic rewrite), so a crash never leaves duplicate or torn example rows.
 """
 from __future__ import annotations
 
@@ -404,38 +413,77 @@ def _skip_checkout(run):
 
 
 def _ledger_row(pair_id: str, status: str, reason=None, **kw) -> dict:
-    row = {"id": pair_id, "status": status, "reason": reason, "seconds_fetch": None, "bytes": None,
-           "seconds_index": None, "n_files": None, "n_skipped": None, "n_examples": None, "tiers": None}
+    row = {"id": pair_id, "status": status, "reason": reason, "seconds_network": None, "bytes_clone": None,
+           "bytes_delta": None, "seconds_index": None, "n_files": None, "n_skipped": None, "n_examples": None,
+           "tiers": None}
     row.update(kw)
     return row
 
 
-def _one_pair(pair: dict, split: str, dest: str, fetch_s: float | None, *, budget, n_negatives, seed, r1, run
-              ) -> tuple[list[dict], dict]:
+def _reconcile(out_jsonl: str, ledger: str) -> None:
+    """Crash repair before resuming: keep only `out_jsonl` rows whose pair has a ledger line and that parse
+    (drops examples of a pair that crashed before its ledger line, and a torn last line). Atomic rewrite."""
+    if not os.path.exists(out_jsonl):
+        return
+    done, keep = _done_ids(ledger), []
+    with open(out_jsonl) as fh:
+        for line in fh:
+            try:
+                if json.loads(line)["pair_id"] in done:
+                    keep.append(line if line.endswith("\n") else line + "\n")
+            except (ValueError, KeyError, TypeError):
+                continue
+    tmp = out_jsonl + ".tmp"
+    with open(tmp, "w") as fh:
+        fh.writelines(keep)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, out_jsonl)
+
+
+def _one_pair(pair: dict, split: str, dest: str, clone_s: float, size_before: int, *, budget, n_negatives,
+              seed, run) -> tuple[list[dict], dict]:
     """Resolve, check out the vulnerable commit, index, label. Raises SnapshotError/CalledProcessError for
-    git failures (the caller records snapshot_failed)."""
-    res = resolve_commits(pair, dest, run=r1)
-    if res["status"] != "ok":
-        return [], _ledger_row(pair["id"], res["status"], res["reason"], seconds_fetch=fetch_s)
-    t0 = time.monotonic()
-    r1(["git", "-C", dest, "checkout", "--quiet", "--force", res["vulnerable"]])
-    fetch_s = (fetch_s or 0.0) + (time.monotonic() - t0)
-    size = _dir_bytes(dest)
-    hunks = fix_hunks(dest, res["vulnerable"], res["patched"], fix_shas=res["fix_shas"], run=r1)
-    t0 = time.monotonic()
-    idx = RepoIndex(dest)
-    seconds_index = time.monotonic() - t0
-    patched_text = {}
-    for h in hunks:
-        f = h["file"]
-        if f and f not in patched_text and posixpath.splitext(f)[1].lower() in LANG_BY_EXT:
-            patched_text[f] = show(dest, res["patched"], f, run=run)
-    examples, rec = cases_from(pair, hunks, idx, patched_text, budget=budget, n_negatives=n_negatives, seed=seed)
+    git failures (the caller records snapshot_failed). `seconds_network` is the wall time of every git call
+    of this pair (clone share + checkout + resolve + diff + show), so lazy blob fetches are counted."""
+    spent = [clone_s]
+
+    def timed(cmd, timeout=None):
+        t0 = time.monotonic()
+        try:
+            return run(cmd, timeout=timeout)
+        finally:
+            spent[0] += time.monotonic() - t0
+
+    r1 = lambda cmd: timed(cmd, timeout=snapshot.CLONE_TIMEOUT_S)  # noqa: E731 - build/fixmap runners take (cmd)
+
+    def row(status, reason=None, **kw):
+        size = _dir_bytes(dest)
+        return _ledger_row(pair["id"], status, reason, seconds_network=spent[0], bytes_clone=size,
+                           bytes_delta=size - size_before, **kw)
+
+    try:
+        res = resolve_commits(pair, dest, run=r1)
+        if res["status"] != "ok":
+            return [], row(res["status"], res["reason"])
+        r1(["git", "-C", dest, "checkout", "--quiet", "--force", res["vulnerable"]])
+        hunks = fix_hunks(dest, res["vulnerable"], res["patched"], fix_shas=res["fix_shas"], run=r1)
+        patched_text = {}
+        for h in hunks:
+            f = h["file"]
+            if f and f not in patched_text and posixpath.splitext(f)[1].lower() in LANG_BY_EXT:
+                patched_text[f] = show(dest, res["patched"], f, run=timed)
+        t0 = time.monotonic()
+        idx = RepoIndex(dest)
+        seconds_index = time.monotonic() - t0
+        examples, rec = cases_from(pair, hunks, idx, patched_text, budget=budget, n_negatives=n_negatives,
+                                   seed=seed)
+    except (SnapshotError, subprocess.SubprocessError, OSError) as exc:
+        return [], row("snapshot_failed", snapshot._head(exc))
     for e in examples:
         e["split"] = split
-    return examples, _ledger_row(pair["id"], rec["status"], rec["reason"], seconds_fetch=fetch_s, bytes=size,
-                                 seconds_index=seconds_index, n_files=len(idx.files),
-                                 n_skipped=len(idx.skipped), n_examples=len(examples), tiers=rec["tiers"])
+    return examples, row(rec["status"], rec["reason"], seconds_index=seconds_index, n_files=len(idx.files),
+                         n_skipped=len(idx.skipped), n_examples=len(examples), tiers=rec["tiers"])
 
 
 def build(pairs: list[dict], splits: dict[str, str], *, work_root: str, out_jsonl: str, ledger: str,
@@ -447,7 +495,7 @@ def build(pairs: list[dict], splits: dict[str, str], *, work_root: str, out_json
     (SIGINT) finishes the current pair, then stops. Examples are written before the ledger line, so a crash
     between the two re-does that pair (duplicate examples) rather than losing it."""
     run = run or snapshot._default_run
-    r1 = lambda cmd: run(cmd, timeout=snapshot.CLONE_TIMEOUT_S)  # noqa: E731 - build/fixmap runners take (cmd)
+    _reconcile(out_jsonl, ledger)
     done = _done_ids(ledger)
     todo = [p for p in pairs if p["id"] not in done]
     groups: dict[str, list[dict]] = {}
@@ -481,6 +529,7 @@ def build(pairs: list[dict], splits: dict[str, str], *, work_root: str, out_json
             for url, group in groups.items():
                 dest = os.path.join(work_root, _safe(url))
                 snap = None     # fetch result, once tried
+                size_before = 0
                 try:
                     for pair in group:
                         if stop["flag"]:
@@ -497,20 +546,18 @@ def build(pairs: list[dict], splits: dict[str, str], *, work_root: str, out_json
                             snap = fetch(url, "HEAD", dest, globs=_globs(group), run=_skip_checkout(run))
                             first_fetch = snap["seconds"]
                         else:
-                            first_fetch = None
+                            first_fetch = 0.0
                         if not snap["ok"]:
                             record(pair, _ledger_row(pair["id"], "snapshot_failed", snap["error"],
-                                                     seconds_fetch=first_fetch), [])
+                                                     seconds_network=first_fetch), [])
                             continue
                         try:
-                            examples, row = _one_pair(pair, split, dest, first_fetch, budget=budget,
-                                                      n_negatives=n_negatives, seed=seed, r1=r1, run=run)
-                        except (SnapshotError, subprocess.SubprocessError, OSError) as exc:
-                            examples, row = [], _ledger_row(pair["id"], "snapshot_failed",
-                                                            snapshot._head(exc), seconds_fetch=first_fetch)
+                            examples, row = _one_pair(pair, split, dest, first_fetch, size_before,
+                                                      budget=budget, n_negatives=n_negatives, seed=seed, run=run)
+                            size_before = row["bytes_clone"]
                         except Exception as exc:  # noqa: BLE001 - one bad pair must not stop an overnight run
                             examples, row = [], _ledger_row(pair["id"], "error", f"{type(exc).__name__}: {exc}"[:1500],
-                                                            seconds_fetch=first_fetch)
+                                                            seconds_network=first_fetch)
                         record(pair, row, examples)
                 finally:
                     shutil.rmtree(dest, ignore_errors=True)
