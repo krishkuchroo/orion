@@ -213,5 +213,6 @@ def parse_action(text: str) -> dict | None:
 
 
 def dumps_action(action: dict) -> str:
-    """Canonical action text — the training target (`train/examples.py`)."""
-    return json.dumps(action, sort_keys=True, separators=(",", ":"))
+    """Canonical action text — the training target (`train/examples.py`). Non-ASCII stays raw
+    (`ensure_ascii=False`): the constrained decoder's JSON grammar cannot emit `\\uXXXX` escapes."""
+    return json.dumps(action, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
