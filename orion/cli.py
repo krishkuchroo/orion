@@ -94,10 +94,6 @@ def _run_scan(args: argparse.Namespace) -> int:
     from . import config, discover, embed, graph_build, graphdb, report, verify
     from .monitor import run_logger, tail
 
-    needs_build = not args.scan_id
-    scan_id = args.scan_id or graph_build.scan_id_for(args.repo)
-    run_dir = _run_dir(scan_id)
-
     # The lm sink profile must be in the graph, so it is chosen BEFORE the build and handed to
     # graph_build.build(profile=). select_profile ignores the language today (it only keys on
     # package.json/express), so passing none here mirrors the discovery-profile pick below; build
@@ -106,6 +102,13 @@ def _run_scan(args: argparse.Namespace) -> int:
     if lm_engine and args.repo:
         from .graph import profiles
         lm_profile = profiles.with_lm_sinks(profiles.select_profile(args.repo))
+
+    needs_build = not args.scan_id
+    # The lm profile changes the CandidateFlows, so its graph gets its own scan_id (scan_id_for adds
+    # the profile name); the claude path calls scan_id_for exactly as before.
+    scan_id_kwargs = {"profile": lm_profile} if lm_profile is not None else {}
+    scan_id = args.scan_id or graph_build.scan_id_for(args.repo, **scan_id_kwargs)
+    run_dir = _run_dir(scan_id)
 
     # In --watch mode the foreground `tail` is the one rendering progress (reading the same
     # JSONL), so the background pipeline's own logger stays quiet to avoid printing every event

@@ -87,10 +87,16 @@ def _commit_sha(repo: str) -> str:
     return "nocommit"
 
 
-def scan_id_for(repo_path: str) -> str:
-    """Deterministic scan identity for a repo (abspath + commit)."""
+def scan_id_for(repo_path: str, profile: profiles.Profile | None = None) -> str:
+    """Deterministic scan identity for a repo (abspath + commit), plus the profile name when the
+    build uses a profile other than the one `select_profile` picks (e.g. `with_lm_sinks`): such a
+    profile changes the CandidateFlows, so it must not share -- and clear -- the default partition.
+    No profile, or the auto-selected one, gives exactly the original abspath|commit id."""
     abspath = os.path.abspath(repo_path)
-    return hashlib.sha1(f"{abspath}|{_commit_sha(abspath)}".encode("utf-8")).hexdigest()
+    key = f"{abspath}|{_commit_sha(abspath)}"
+    if profile is not None and profile.name != profiles.select_profile(repo_path).name:
+        key += f"|{profile.name}"
+    return hashlib.sha1(key.encode("utf-8")).hexdigest()
 
 
 def build(repo_path: str, language: str | None = None,
@@ -123,8 +129,9 @@ def build(repo_path: str, language: str | None = None,
 
     `profile`, when given, is used instead of `profiles.select_profile(...)` for BOTH the taint-source
     model and the pathfind sink vocabulary (e.g. `profiles.with_lm_sinks(...)`); None keeps the
-    auto-selected profile exactly as before."""
-    scan_id = scan_id or scan_id_for(repo_path)
+    auto-selected profile exactly as before. A non-default `profile` also gets its own scan_id (see
+    `scan_id_for`)."""
+    scan_id = scan_id or scan_id_for(repo_path, profile)
     frontend, display_language = joern_adapter.resolve_language(repo_path, language)
     if on_event is not None:
         warn = _ambiguity_warning(repo_path, language, frontend)

@@ -64,9 +64,11 @@ def test_build_accepts_explicit_profile(monkeypatch, tmp_path):
     select_calls, seen = [], []
     _stub_build(monkeypatch, tmp_path, select_calls, seen)
     lm = profiles.with_lm_sinks(profiles.EXPRESS)
-    graph_build.build(str(tmp_path), profile=lm)
+    sid = graph_build.build(str(tmp_path), profile=lm)
     assert seen == [lm]
-    assert select_calls == []
+    # select_profile is consulted only to NAME the scan: a non-default profile gets its own scan_id
+    # (it changes the CandidateFlows); the build itself runs on the explicit profile.
+    assert sid == graph_build.scan_id_for(str(tmp_path), profile=lm) != graph_build.scan_id_for(str(tmp_path))
 
 
 def test_build_without_profile_still_selects(monkeypatch, tmp_path):

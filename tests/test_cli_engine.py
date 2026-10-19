@@ -161,7 +161,7 @@ def _stub_build(monkeypatch) -> dict:
         return "sid"
 
     monkeypatch.setattr(graph_build, "build", _build)
-    monkeypatch.setattr(graph_build, "scan_id_for", lambda repo: "sid")
+    monkeypatch.setattr(graph_build, "scan_id_for", lambda repo, profile=None: "sid")
     return captured
 
 
