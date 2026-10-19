@@ -149,47 +149,79 @@ def _chunks(rows: list, size: int):
         yield rows[i:i + step]
 
 
-def _run_write(tx, cypher: str, rows: list) -> None:
-    tx.run(cypher, rows=rows)
+class PersistMismatch(RuntimeError):
+    """Neo4j's write counters disagree with the batch: fewer edges than rows means an endpoint was
+    missing (MATCH...CREATE created nothing, silently); more means a key matched several nodes.
+    Raised only in strict mode (config.persist_strict()); otherwise persist reports and the build
+    warns. Raised after every job ran, so the partial partition is left for inspection."""
+
+
+def _run_write(tx, cypher: str, rows: list):
+    """Run one job and return its write counters (nodes_created / relationships_created)."""
+    return tx.run(cypher, rows=rows).consume().counters
+
+
+def _keyed_node_jobs(node_rows: dict[str, list[dict]]) -> list[tuple[str, str, list]]:
+    """(label, cypher, rows) chunks for every node label, split to chunk size."""
+    return [(label, _node_create(label), chunk)
+            for label, rows in node_rows.items()
+            for chunk in _chunks(rows, config.PERSIST_CHUNK_SIZE)]
+
+
+def _keyed_edge_jobs(edge_rows: dict[tuple, list[dict]]) -> list[tuple[str, str, list]]:
+    """(rel type, cypher, rows) chunks for every edge group, split to chunk size."""
+    return [(sig[0], _edge_create(*sig), chunk)
+            for sig, rows in edge_rows.items()
+            for chunk in _chunks(rows, config.PERSIST_CHUNK_SIZE)]
 
 
 def _node_jobs(nodes) -> list[tuple[str, list]]:
     """(cypher, rows) chunks for every node label -- deduped by NODE_KEY, then split to chunk size."""
-    return [(_node_create(label), chunk)
-            for label, rows in _node_rows(nodes).items()
-            for chunk in _chunks(rows, config.PERSIST_CHUNK_SIZE)]
+    return [(cypher, rows) for _key, cypher, rows in _keyed_node_jobs(_node_rows(nodes))]
 
 
 def _edge_jobs(edges) -> list[tuple[str, list]]:
     """(cypher, rows) chunks for every edge group -- non-FLOWS_TO deduped, then split to chunk size."""
-    return [(_edge_create(*sig), chunk)
-            for sig, rows in _edge_rows(edges).items()
-            for chunk in _chunks(rows, config.PERSIST_CHUNK_SIZE)]
+    return [(cypher, rows) for _key, cypher, rows in _keyed_edge_jobs(_edge_rows(edges))]
 
 
-def _run_jobs(driver, jobs: list[tuple[str, list]], concurrency: int) -> None:
+def _run_jobs(driver, jobs: list[tuple[str, list]], concurrency: int) -> list:
     """Run each (cypher, rows) job as its own managed write transaction -- bounded per-tx state and
     incremental commits (item 3). With concurrency > 1, jobs fan across a bounded thread pool, each
     on its OWN session (item 5): node jobs are disjoint (distinct brand-new nodes, no lock overlap),
     and edge jobs use managed transactions that auto-retry a transient deadlock (concurrent CREATEs
     touching a shared endpoint's relationships). A job that raises propagates -- never a silent
-    partial load. concurrency <= 1 keeps the old single-session sequential behavior."""
+    partial load. concurrency <= 1 keeps the old single-session sequential behavior.
+    Returns each job's write counters, in job order."""
     if not jobs:
-        return
+        return []
     if concurrency <= 1:
         with driver.session(database=config.NEO4J_DATABASE) as s:
-            for cypher, rows in jobs:
-                s.execute_write(_run_write, cypher, rows)
-        return
+            return [s.execute_write(_run_write, cypher, rows) for cypher, rows in jobs]
 
-    def _one(job: tuple[str, list]) -> None:
+    def _one(job: tuple[str, list]):
         cypher, rows = job
         with driver.session(database=config.NEO4J_DATABASE) as s:
-            s.execute_write(_run_write, cypher, rows)
+            return s.execute_write(_run_write, cypher, rows)
 
     with ThreadPoolExecutor(max_workers=concurrency) as ex:
-        for _ in ex.map(_one, jobs):   # forces completion + re-raises the first job's exception
-            pass
+        return list(ex.map(_one, jobs))   # forces completion + re-raises the first job's exception
+
+
+def _tally(keyed_jobs: list[tuple[str, str, list]], counters: list, attr: str) -> dict[str, dict]:
+    """{key: {"expected": rows sent, "written": what Neo4j says it created}} per label / rel type."""
+    out: dict[str, dict] = {}
+    for (key, _cypher, rows), c in zip(keyed_jobs, counters):
+        t = out.setdefault(key, {"expected": 0, "written": 0})
+        t["expected"] += len(rows)
+        t["written"] += getattr(c, attr)
+    return out
+
+
+def _mismatches(counts: dict) -> list[str]:
+    return [f"{kind} {key}: expected {t['expected']}, written {t['written']}"
+            for kind in ("nodes", "edges")
+            for key, t in counts[kind].items() if t["expected"] != t["written"]]
 
 
 def flows_count(scan_id: str) -> int:
@@ -205,7 +237,7 @@ def flows_count(scan_id: str) -> int:
         driver.close()
 
 
-def persist(batch: Batch) -> dict:
+def persist(batch: Batch, *, strict: bool | None = None) -> dict:
     """Clear the scan partition and load the batch (nodes then edges) as CHUNKED, optionally PARALLEL
     writes: bounded per-transaction state + incremental commits (item 3), fanned across a session
     pool of `config.PERSIST_CONCURRENCY` (item 5). Nodes are loaded before edges (edges MATCH their
@@ -217,10 +249,16 @@ def persist(batch: Batch) -> dict:
     crash raises and aborts the scan before discovery runs, so discovery never sees a half-loaded
     graph. The narrow exposure is querying a crashed partition via --scan-id before rebuilding.
 
+    Every job's write counters are compared with the rows it sent: `counts` holds expected/written
+    per node label and rel type, `mismatches` one line per disagreement. With `strict` (default
+    `config.persist_strict()`) a mismatch raises PersistMismatch; otherwise the caller warns.
+
     Returns a summary incl. a `timings` split (clear/nodes/edges seconds) the build log surfaces."""
     driver = GraphDatabase.driver(config.NEO4J_URI, auth=config.NEO4J_AUTH)
     timings: dict[str, float] = {}
     conc = config.PERSIST_CONCURRENCY
+    node_jobs = _keyed_node_jobs(_node_rows(batch.nodes))
+    edge_jobs = _keyed_edge_jobs(_edge_rows(batch.edges))
     try:
         with driver.session(database=config.NEO4J_DATABASE) as s:
             _ensure_indexes(s)                    # idempotent NODE_KEY range indexes, before the load
@@ -228,12 +266,19 @@ def persist(batch: Batch) -> dict:
         _clear(driver, batch.scan_id)
         timings["clear"] = time.monotonic() - t
         t = time.monotonic()
-        _run_jobs(driver, _node_jobs(batch.nodes), conc)    # nodes first (edge endpoints must exist)
+        # nodes first (edge endpoints must exist)
+        node_counters = _run_jobs(driver, [(c, r) for _k, c, r in node_jobs], conc)
         timings["nodes"] = time.monotonic() - t
         t = time.monotonic()
-        _run_jobs(driver, _edge_jobs(batch.edges), conc)
+        edge_counters = _run_jobs(driver, [(c, r) for _k, c, r in edge_jobs], conc)
         timings["edges"] = time.monotonic() - t
     finally:
         driver.close()
+    counts = {"nodes": _tally(node_jobs, node_counters, "nodes_created"),
+              "edges": _tally(edge_jobs, edge_counters, "relationships_created")}
+    mismatches = _mismatches(counts)
+    if mismatches and (config.persist_strict() if strict is None else strict):
+        raise PersistMismatch(f"persist of {batch.scan_id} wrote a different number of rows than the "
+                              "batch holds: " + "; ".join(mismatches))
     return {"scan_id": batch.scan_id, "nodes": len(batch.nodes), "edges": len(batch.edges),
-            "timings": timings}
+            "timings": timings, "counts": counts, "mismatches": mismatches}

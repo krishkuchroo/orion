@@ -61,6 +61,18 @@ def _ambiguity_warning(repo_path: str, language: str | None,
                           f"-- override with `orion scan --language <frontend>` if wrong"))
 
 
+def _persist_warning(summary) -> ProgressEvent | None:
+    """A 'build'/'warn' event when persist's write counters disagree with the batch, else None. An
+    edge whose endpoint is missing is skipped by MATCH...CREATE without any error, so this is the
+    only place a normal (non-strict) run hears about it. Pure -- testable on a real summary."""
+    mismatches = summary.get("mismatches") if isinstance(summary, dict) else None
+    if not mismatches:
+        return None
+    return _event("build", "warn",
+                  detail="persist wrote a different number of rows than the batch holds -- "
+                         + "; ".join(mismatches))
+
+
 def _commit_sha(repo: str) -> str:
     """The checked-out commit of `repo`, or 'nocommit' if it is not a git repo / git is absent.
     Degrades to the sentinel rather than crashing — a plain directory is a valid scan target."""
@@ -186,6 +198,9 @@ def build(repo_path: str, language: str | None = None,
     else:
         summary, _ = _timed(on_event, "persist", lambda: persist.persist(batch))
     if on_event is not None:
+        warn = _persist_warning(summary)
+        if warn is not None:
+            on_event(warn)
         # Surface persist's own clear/nodes/edges split when the persist layer reports it (it does
         # once the chunked/parallel persister lands); harmless no-op until then.
         timings = summary.get("timings") if isinstance(summary, dict) else None
