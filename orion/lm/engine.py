@@ -1,6 +1,8 @@
 """`discover_lm`: the in-process Orion-LM discovery stage, signature-parallel to `discover.discover`.
 
-Reads the scan's :CandidateFlow slices (orion.lm.slice), works them in rank order in batches of `k`, runs
+Reads the scan's :CandidateFlow slices (orion.lm.slice), enriches each into a CodeCase (orion.lm.cases:
+the sink's function plus source/caller/callee snippets from one RepoIndex built per scan), works them in
+rank order in batches of `k` (DEFAULT_K = 1: one case per session), runs
 one `prompter.run_session` per batch against an already-loaded model (`model.generate`), and maps the
 model's final `leads` onto `contracts.Lead` (shape "LM") with `file/function/line/cwe/path` filled and
 `source_uid`/`sink_uid` copied from the flow the lead names by `flow_id` -- so the shared structural
@@ -23,12 +25,16 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime, timezone
+import time
 
 from orion.contracts import Confidence, Lead, OnEvent, ProgressEvent
-from orion.lm import prompter
+from orion.lm import cases, prompter
 from orion.lm import slice as lm_slice
+from orion.lm.cases import CaseBudget
+from orion.lm.codeindex import RepoIndex
 
 SHAPE = "LM"
+DEFAULT_K = 1  # one enriched case per session
 MIN_CONTEXT_CAP = 512  # floor for the prompter's budget cap; below this no session can do useful work
 _CONFIDENCES: tuple[Confidence, ...] = ("LOW", "MEDIUM", "HIGH")
 # Step kinds -> progress-event names. run_cypher is a `query`; the rest of a session is `tool`, except
@@ -180,16 +186,47 @@ def _step_hook(on_event: OnEvent, on_step, turn: int):
     return hook
 
 
+def _enrich(flows: list[dict], repo_path: str, on_event: OnEvent, budget: CaseBudget,
+            index: RepoIndex | None) -> list[dict]:
+    """Flows -> CodeCases. The index is built once; any failure degrades to the bare flow, never drops it."""
+    if not flows:
+        return flows
+    if index is None:
+        t0 = time.perf_counter()
+        try:
+            index = RepoIndex(repo_path)
+        except Exception as exc:
+            on_event(_event(event="warn", detail=f"code index failed: {exc.__class__.__name__}: {exc}; "
+                                                 f"judging path-only cases"))
+            return flows
+        on_event(_event(event="tool", detail=f"index: {len(index.files)} files, {len(index.skipped)} skipped, "
+                                             f"{time.perf_counter() - t0:.2f}s"))
+    out = []
+    for flow in flows:
+        try:
+            out.append(cases.case_from_flow(flow, index, budget=budget))
+        except Exception as exc:
+            on_event(_event(event="warn", detail=f"enrichment failed for {flow.get('flow_id')}: "
+                                                 f"{exc.__class__.__name__}: {exc}; judged path-only"))
+            out.append(flow)
+    return out
+
+
 # ---- the stage ----------------------------------------------------------------------------------
 
-def discover_lm(scan_id: str, repo_path: str, on_event: OnEvent, *, profile=None, model=None, k: int = 5,
-                max_flows: int = 50, on_step=None, stop=None, flows=None, db=None) -> list[Lead]:
+def discover_lm(scan_id: str, repo_path: str, on_event: OnEvent, *, profile=None, model=None, k: int = DEFAULT_K,
+                max_flows: int = 50, on_step=None, stop=None, flows=None, db=None,
+                case_budget: CaseBudget | None = None, index: RepoIndex | None = None) -> list[Lead]:
     """Run the Orion-LM discovery stage and return deduped `list[Lead]` (shape "LM").
 
     `model` is an already-loaded wrapper (`orion.lm.model.load(...)`): only its `.generate(messages)` is
     used, and the prompter's budget cap is set `prompter.CONTEXT_MARGIN` below its `context_cap` (8000
     when the object has none). `flows` bypasses the graph read (slice-shaped dicts, e.g. an OWASP case
     file); either way only the top `max_flows` are worked, in order, in batches of `k`, one session each.
+    Every flow becomes a CodeCase via `cases.case_from_flow` (budget `case_budget`, default CaseBudget())
+    before batching; `index` is a prebuilt RepoIndex, else one is built over `repo_path` once per call and
+    reported as an `index: ...` tool event. A flow whose enrichment raises is judged path-only (a `warn`
+    event), never dropped.
     `stop` (threading.Event) is checked before each batch and forwarded to the session. `db` is an open
     GraphDB; None constructs one (and closes it at the end). `profile` is accepted for signature parity
     with `discover.discover` and is not used: the LM prompt is framework-agnostic by construction.
@@ -227,6 +264,7 @@ def discover_lm(scan_id: str, repo_path: str, on_event: OnEvent, *, profile=None
                 on_event(_event(event="error", detail=f"loading CandidateFlows failed: {exc.__class__.__name__}: {exc}"))
                 flows = []
         flows = list(flows)[:max_flows]
+        flows = _enrich(flows, repo_path, on_event, case_budget or CaseBudget(), index)
 
         for turn, start in enumerate(range(0, len(flows), k), start=1):
             if stop is not None and stop.is_set():
