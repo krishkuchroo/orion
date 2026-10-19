@@ -14,7 +14,7 @@ def mirror(repo_url: str, mirror_dir: str, *, run=_default_run) -> None:
     else:
         tmp = f"{mirror_dir}.tmp"
         shutil.rmtree(tmp, ignore_errors=True)  # leftover partial clone
-        run(["git", "clone", "--bare", repo_url, tmp])
+        run(["git", "clone", "--bare", "--", repo_url, tmp])
         os.rename(tmp, mirror_dir)
 
 

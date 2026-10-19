@@ -39,7 +39,7 @@ def test_mirror_clones_when_absent_and_fetches_when_present(tmp_path):
         return ""
     repo.mirror("https://x/y.git", str(m), run=run_ok)
     assert m.is_dir() and not (tmp_path / "m.tmp").exists()    # renamed on success
-    assert seen[-1] == ["git", "clone", "--bare", "https://x/y.git", f"{m}.tmp"]
+    assert seen[-1] == ["git", "clone", "--bare", "--", "https://x/y.git", f"{m}.tmp"]   # a "-..." url is never an option
     repo.mirror("https://x/y.git", str(m), run=run)
     assert seen[-1][:4] == ["git", "-C", str(m), "fetch"]
 

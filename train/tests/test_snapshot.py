@@ -43,7 +43,7 @@ def test_fetch_runs_the_three_git_steps_in_order(tmp_path):
                    run=lambda cmd, timeout=None: calls.append(cmd) or "")
     d = str(tmp_path / "d")
     assert calls == [
-        ["git", "clone", "--filter=blob:none", "--no-checkout", "--quiet", "file:///x", d],
+        ["git", "clone", "--filter=blob:none", "--no-checkout", "--quiet", "--", "file:///x", d],   # M10: never an option
         ["git", "-C", d, "sparse-checkout", "set", "--no-cone", "*.py", "*.js"],
         ["git", "-C", d, "checkout", "--quiet", "abc"],
     ]

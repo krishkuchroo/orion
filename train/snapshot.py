@@ -53,7 +53,7 @@ def fetch(repo_url: str, sha: str, dest: str, *, globs: list[str], run=None,
     shutil.rmtree(dest, ignore_errors=True)   # dest is a runner-owned work dir; a stale one (hard kill) is replaced
     t0 = time.monotonic()
     try:
-        run(["git", "clone", "--filter=blob:none", "--no-checkout", "--quiet", repo_url, dest],
+        run(["git", "clone", "--filter=blob:none", "--no-checkout", "--quiet", "--", repo_url, dest],
             timeout=timeout)
         run(["git", "-C", dest, "sparse-checkout", "set", "--no-cone", *globs], timeout=timeout)
         run(["git", "-C", dest, "checkout", "--quiet", sha], timeout=timeout)
