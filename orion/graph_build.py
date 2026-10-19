@@ -18,7 +18,7 @@ import time
 from datetime import datetime, timezone
 
 from .contracts import OnEvent, ProgressEvent
-from .graph import deps, joern_adapter, pathfind, persist, profiles, reachability
+from .graph import deps, joern_adapter, pathfind, persist, profiles, reachability, scans
 
 
 def _event(phase: str, event: str, *, detail: str = "") -> ProgressEvent:
@@ -71,6 +71,16 @@ def _persist_warning(summary) -> ProgressEvent | None:
     return _event("build", "warn",
                   detail="persist wrote a different number of rows than the batch holds -- "
                          + "; ".join(mismatches))
+
+
+def _record_counts(summary, **precompute) -> dict:
+    """What the scan record keeps: rows written per label / rel type, persist's mismatches, and the
+    precompute summaries."""
+    counts = summary.get("counts", {}) if isinstance(summary, dict) else {}
+    return {"nodes": {k: t["written"] for k, t in counts.get("nodes", {}).items()},
+            "edges": {k: t["written"] for k, t in counts.get("edges", {}).items()},
+            "mismatches": summary.get("mismatches", []) if isinstance(summary, dict) else [],
+            "precompute": precompute}
 
 
 def _commit_sha(repo: str) -> str:
@@ -184,6 +194,9 @@ def build(repo_path: str, language: str | None = None,
         on_event(_event("build", "timing",
                         detail=f"pathfind: {flows['flows']} candidate flows from {flows['sources']} "
                                f"sources to {flows['sinks']} sink hits"))
+    # The scan record says 'building' BEFORE persist clears the partition and 'complete' only after it
+    # returns, so a build that dies in between leaves a record `--scan-id` refuses.
+    scans.mark_building(scan_id, commit=_commit_sha(os.path.abspath(repo_path)), profile=profile.name)
     if on_batch is not None:
         # Overlap the batch consumer (semantic index) with persist (item 4). on_batch reads the
         # in-memory batch, so it does not wait on persist; persist's label-scoped clear won't wipe
@@ -204,6 +217,8 @@ def build(repo_path: str, language: str | None = None,
         th.join()
     else:
         summary, _ = _timed(on_event, "persist", lambda: persist.persist(batch))
+    scans.mark_complete(scan_id, _record_counts(summary, reachability=reach, centrality=cent,
+                                                pathfind=flows))
     if on_event is not None:
         warn = _persist_warning(summary)
         if warn is not None:

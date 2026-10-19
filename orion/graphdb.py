@@ -121,9 +121,11 @@ class GraphDB:
         `db.schema.*` procedures (no APOC — Orion's compose stack doesn't install it). This is
         Orion's own frozen CPG vocabulary (schema.py's NODE_KEY set), not the target repo's
         structure, so the shape is identical regardless of which repo was scanned; unlike
-        run_cypher/semantic_search it is intentionally not scan_id-scoped."""
+        run_cypher/semantic_search it is intentionally not scan_id-scoped. The :OrionScan
+        bookkeeping record (graph/scans.py) is not part of that vocabulary and is left out."""
         with self._driver.session(database=config.NEO4J_DATABASE) as s:
-            node_properties = [dict(r) for r in s.run("CALL db.schema.nodeTypeProperties()")]
+            node_properties = [dict(r) for r in s.run("CALL db.schema.nodeTypeProperties()")
+                               if scans.RECORD not in r["nodeLabels"]]
             relationship_properties = [dict(r) for r in s.run("CALL db.schema.relTypeProperties()")]
             return {
                 "node_properties": node_properties,

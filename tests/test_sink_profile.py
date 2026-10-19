@@ -57,6 +57,8 @@ def _stub_build(monkeypatch, tmp_path, select_calls, pathfind_seen):
 
     monkeypatch.setattr(graph_build.pathfind, "pathfind", fake_pathfind)
     monkeypatch.setattr(graph_build.persist, "persist", lambda b: {})
+    monkeypatch.setattr(graph_build.scans, "mark_building", lambda *a, **k: None)   # no Neo4j here
+    monkeypatch.setattr(graph_build.scans, "mark_complete", lambda *a, **k: None)
     monkeypatch.setattr(graph_build, "_ambiguity_warning", lambda *a, **k: None)
 
 
