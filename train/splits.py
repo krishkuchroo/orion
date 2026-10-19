@@ -1,6 +1,7 @@
 """Deterministic by-repo splits: pair id -> "train" | "dev" | "oldcve".
 
-Every pair of a repo lands in one split, so dev / old-CVE never share a repo with training.
+Every pair of a repo lands in one split, so dev / old-CVE never share a repo with training. A repo is its
+lowercased ``repo_canonical`` (else ``repo``), so a renamed repo's raw spellings are one repo.
 ``oldcve`` is drawn only from repos whose pairs all come from the ready-made old-CVE sources
 (OpenSSF CVE Benchmark, CWE-Bench-Java; spec §5.4); ``dev`` from the remaining repos.
 
@@ -25,10 +26,14 @@ def _take(frac: float, n: int) -> int:
     return 0 if frac <= 0 or n == 0 else min(n, max(1, round(frac * n)))
 
 
+def _repo(p: dict) -> str:
+    return (p.get("repo_canonical") or p["repo"]).lower()
+
+
 def assign(pairs: list[dict], *, seed: int = 0, dev_frac: float = 0.15, oldcve_frac: float = 0.20) -> dict[str, str]:
     by_repo: dict[str, list[dict]] = {}
     for p in pairs:
-        by_repo.setdefault(p["repo"], []).append(p)
+        by_repo.setdefault(_repo(p), []).append(p)
     repos = sorted(by_repo, key=lambda r: (_rank(seed, r), r))
     eligible = [r for r in repos if all(p.get("source") in OLDCVE_SOURCES for p in by_repo[r])]
     oldcve = set(eligible[:_take(oldcve_frac, len(eligible))])

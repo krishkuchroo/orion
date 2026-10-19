@@ -43,3 +43,14 @@ def test_write_then_load_roundtrip_and_refusals(tmp_path):
         splits.write(str(path), a, seed=0)                  # a frozen split is never overwritten
     with pytest.raises(ValueError):
         splits.load(str(path), pairs + [{"id": "NEW", "repo": "o/new", "source": "osv"}])
+
+
+def test_raw_spellings_of_one_canonical_repo_land_in_one_split():
+    """Final review I3: a renamed repo (several raw `repo` spellings, one `repo_canonical`) is one repo."""
+    pairs = [{"id": f"P{i}", "repo": f"o/r{i}", "source": "osv"} for i in range(40)]
+    spellings = ["httpie/cli", "httpie/httpie", "jakubroztocil/httpie", "HTTPie/CLI"]
+    pairs += [{"id": f"H{i}", "repo": r, "repo_canonical": "httpie/cli" if i % 2 else "HTTPie/cli", "source": "osv"}
+              for i, r in enumerate(spellings * 3)]
+    for seed in range(20):              # whichever split the repo lands in, all of its pairs go there
+        a = splits.assign(pairs, seed=seed)
+        assert len({a[f"H{i}"] for i in range(12)}) == 1, seed
