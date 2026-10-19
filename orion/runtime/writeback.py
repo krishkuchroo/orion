@@ -20,8 +20,15 @@ from .base import WritePlan
 # NODE_KEY label in a destructive clause (that is the mechanical guarantee the static graph, and its
 # 217/1075 FLOWS_TO parity, cannot be perturbed).
 CLEAR_EDGES = "MATCH (:CpgMethod {scan_id:$scan_id})-[r:OBSERVED_CALL]->() DELETE r"
-CLEAR_PROPS = ("MATCH (n {scan_id:$scan_id}) WHERE n.executed IS NOT NULL "
-               "REMOVE n.executed, n.hit_count")
+# The only labels SET_CALLS / SET_METHODS stamp. Per-label (a label-less {scan_id} match is an
+# AllNodesScan over every scan) and batched: `{label}` is filled per label, `{{ }}` are Cypher braces.
+RUNTIME_LABELS = ("CpgCall", "CpgMethod")
+CLEAR_PROPS = ("MATCH (n:`{label}` {{scan_id:$scan_id}}) WHERE n.executed IS NOT NULL "
+               "WITH n LIMIT $batch REMOVE n.executed, n.hit_count RETURN count(n) AS n")
+UNREACHABLE_EXECUTED = ("MATCH (n:`{label}` {{scan_id:$scan_id}}) "
+                        "WHERE n.executed = true AND n.reachable_from_entry = false "
+                        "RETURN count(n) AS u")
+_CLEAR_BATCH = 10000
 SET_CALLS = ("UNWIND $rows AS row MATCH (c:CpgCall {scan_id:$scan_id, uid:row.uid}) "
              "SET c.executed = true, c.hit_count = row.hits")
 SET_METHODS = ("UNWIND $rows AS row MATCH (m:CpgMethod {scan_id:$scan_id, full_name:row.full_name}) "
@@ -35,7 +42,10 @@ CREATE_EDGES = ("UNWIND $rows AS row "
 def _clear(session, scan_id: str) -> None:
     """Remove any prior runtime enrichment for this scan (idempotent re-run)."""
     session.run(CLEAR_EDGES, scan_id=scan_id)
-    session.run(CLEAR_PROPS, scan_id=scan_id)
+    for label in RUNTIME_LABELS:
+        cypher = CLEAR_PROPS.format(label=label)
+        while session.run(cypher, scan_id=scan_id, batch=_CLEAR_BATCH).single()["n"]:
+            pass
 
 
 def static_pairs(session, scan_id: str) -> set[tuple[str, str]]:
@@ -51,10 +61,8 @@ def static_pairs(session, scan_id: str) -> set[tuple[str, str]]:
 def unreachable_executed(session, scan_id: str) -> int:
     """Count nodes runtime executed that the static BFS marked reachable_from_entry=false (the U
     metric): guesses overturned with ground truth. Read after writeback stamps `executed`."""
-    rec = session.run(
-        "MATCH (n {scan_id:$scan_id}) WHERE n.executed = true AND n.reachable_from_entry = false "
-        "RETURN count(n) AS u", scan_id=scan_id).single()
-    return int(rec["u"]) if rec else 0
+    return sum(int(session.run(UNREACHABLE_EXECUTED.format(label=label), scan_id=scan_id).single()["u"])
+               for label in RUNTIME_LABELS)
 
 
 def apply_plan(scan_id: str, plan: WritePlan) -> dict:

@@ -29,6 +29,7 @@ from concurrent.futures import ThreadPoolExecutor
 from neo4j import GraphDatabase
 
 from .. import config
+from . import scans
 from .schema import NODE_KEY, Batch
 
 
@@ -53,6 +54,7 @@ def _ensure_indexes(session) -> None:
     # persist block on that too. Cheap when an index already exists (returns immediately); seconds unit.
     for label in NODE_KEY:
         session.run("CALL db.awaitIndex($name, 300)", name=_index_name(label))
+    scans.ensure_scan_indexes(session)    # scan_id-only lookups (the clear) need their own index
 
 
 def _node_create(label: str) -> str:
@@ -129,16 +131,14 @@ def _edge_rows(edges) -> dict[tuple, list[dict]]:
     return out
 
 
-def _clear(driver, scan_id: str) -> None:
+def _clear(driver, scan_id: str) -> dict[str, int]:
     """Clear ONLY this scan's graph-label nodes (the NODE_KEY labels), not every node carrying the
     scan_id. This deliberately SPARES the semantic-index `:Chunk` nodes (same scan_id): once the
     clear is label-scoped, the embed step can run CONCURRENTLY with persist (item 4) without persist
-    wiping the chunks embed just wrote. One managed transaction; DETACH removes their edges too."""
-    labels = list(NODE_KEY.keys())
-    with driver.session(database=config.NEO4J_DATABASE) as s:
-        s.execute_write(lambda tx: tx.run(
-            "MATCH (n {scan_id:$sid}) WHERE any(l IN labels(n) WHERE l IN $labels) DETACH DELETE n",
-            sid=scan_id, labels=labels))
+    wiping the chunks embed just wrote. It also spares the scan's :OrionScan record. Per label, in
+    batched transactions over a scan_id index (scans.delete_scan); DETACH removes their edges too.
+    Returns {label: nodes deleted}."""
+    return scans.delete_scan(driver, scan_id, NODE_KEY)
 
 
 def _chunks(rows: list, size: int):
