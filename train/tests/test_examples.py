@@ -68,7 +68,7 @@ def test_export_never_writes_dev_or_oldcve_into_train(tmp_path):
     s1 = tmp_path / "s1.jsonl"
     _write(s1, rows)
     out = tmp_path / "out"
-    counts = examples.export(str(s1), None, None, out_dir=str(out), schema_text="S", shares={"stage1": 1.0}, seed=0)
+    counts = examples.export(str(s1), None, None, out_dir=str(out), schema_text="S", shares={"stage1": 1.0}, seed=0, allow_placeholder=True)
     tr = [json.loads(l) for l in (out / "train.jsonl").read_text().splitlines()]
     dv = [json.loads(l) for l in (out / "dev.jsonl").read_text().splitlines()]
     assert {r["meta"]["pair_id"] for r in tr} == {f"train-{i}" for i in range(3)}
@@ -85,11 +85,11 @@ def test_export_stage2_traces_cypher_rows_and_missing_split(tmp_path):
     _write(s2, [trace])
     cy = [{"messages": [], "target": "{}", "meta": {"pair_id": "c", "split": "dev"}}]
     c = examples.export(str(s1), str(s2), cy, out_dir=str(tmp_path / "o"), schema_text="S",
-                        shares={"stage1": 0.5, "stage2": 0.5, "cypher": 0.0}, seed=0)
+                        shares={"stage1": 0.5, "stage2": 0.5, "cypher": 0.0}, seed=0, allow_placeholder=True)
     assert c["train"] == 2 and c["dev"] == 1
     _write(s2, [{**trace, "meta": {"pair_id": "b"}}])
     with pytest.raises(ValueError):
-        examples.export(str(s1), str(s2), None, out_dir=str(tmp_path / "o2"), schema_text="S", shares={"stage1": 1}, seed=0)
+        examples.export(str(s1), str(s2), None, out_dir=str(tmp_path / "o2"), schema_text="S", shares={"stage1": 1}, seed=0, allow_placeholder=True)
 
 
 def test_export_rejects_pair_with_conflicting_splits(tmp_path):
@@ -100,7 +100,7 @@ def test_export_rejects_pair_with_conflicting_splits(tmp_path):
                  "meta": {"pair_id": "P", "split": "dev"}}])
     with pytest.raises(ValueError, match="P"):
         examples.export(str(s1), str(s2), None, out_dir=str(tmp_path / "o"), schema_text="S",
-                        shares={"stage1": 0.5, "stage2": 0.5}, seed=0)
+                        shares={"stage1": 0.5, "stage2": 0.5}, seed=0, allow_placeholder=True)
     assert not (tmp_path / "o" / "train.jsonl").exists()
 
 
@@ -108,7 +108,7 @@ def test_export_default_schema_is_runtime_pruned_schema(tmp_path):
     from orion.lm import slice as lm_slice
     s1 = tmp_path / "s1.jsonl"
     _write(s1, [{"pair_id": "P", "label": "patched", "tier": "single", "case": CASE, "lead": None, "split": "train"}])
-    examples.export(str(s1), None, None, out_dir=str(tmp_path / "o"), shares={"stage1": 1.0}, seed=0)
+    examples.export(str(s1), None, None, out_dir=str(tmp_path / "o"), shares={"stage1": 1.0}, seed=0, allow_placeholder=True)
     row = json.loads((tmp_path / "o" / "train.jsonl").read_text().splitlines()[0])
     assert row["messages"][0] == fmt.system_message(lm_slice.pruned_schema())
 
@@ -118,20 +118,20 @@ def test_export_requires_pair_id_on_stage_rows_but_not_cypher(tmp_path):
     s1 = tmp_path / "s1.jsonl"
     _write(s1, [{**good, "pair_id": ""}])
     with pytest.raises(ValueError, match="pair_id"):
-        examples.export(str(s1), None, None, out_dir=str(tmp_path / "a"), schema_text="S", shares={"stage1": 1.0}, seed=0)
+        examples.export(str(s1), None, None, out_dir=str(tmp_path / "a"), schema_text="S", shares={"stage1": 1.0}, seed=0, allow_placeholder=True)
     _write(s1, [{k: v for k, v in good.items() if k != "pair_id"}])
     with pytest.raises(ValueError, match="pair_id"):
-        examples.export(str(s1), None, None, out_dir=str(tmp_path / "b"), schema_text="S", shares={"stage1": 1.0}, seed=0)
+        examples.export(str(s1), None, None, out_dir=str(tmp_path / "b"), schema_text="S", shares={"stage1": 1.0}, seed=0, allow_placeholder=True)
     _write(s1, [good])
     s2 = tmp_path / "s2.jsonl"
     _write(s2, [{"case": CASE, "actions": [{"action": "final", "leads": []}], "results": [], "meta": {"split": "train"}}])
     with pytest.raises(ValueError, match="pair_id"):
         examples.export(str(s1), str(s2), None, out_dir=str(tmp_path / "c"), schema_text="S",
-                        shares={"stage1": 0.5, "stage2": 0.5}, seed=0)
+                        shares={"stage1": 0.5, "stage2": 0.5}, seed=0, allow_placeholder=True)
     assert not (tmp_path / "c" / "train.jsonl").exists()
     cy = [{"messages": [], "target": "{}", "meta": {"split": "train"}}]
     c = examples.export(str(s1), None, cy, out_dir=str(tmp_path / "d"), schema_text="S",
-                        shares={"stage1": 0.5, "cypher": 0.5}, seed=0)
+                        shares={"stage1": 0.5, "cypher": 0.5}, seed=0, allow_placeholder=True)
     assert c["train"] == 2
 
 
@@ -144,10 +144,31 @@ def test_export_total_defaults_to_all_train_rows_logs_and_reports_used(tmp_path,
     _write(s2, [{**row, "pair_id": f"b{i}", "tier": "graph"} for i in range(50)])
     shares = {"stage1": 0.8, "stage2": 0.2}
     with caplog.at_level(logging.WARNING):
-        c = examples.export(str(s1), str(s2), None, out_dir=str(tmp_path / "o"), schema_text="S", shares=shares, seed=0)
+        c = examples.export(str(s1), str(s2), None, out_dir=str(tmp_path / "o"), schema_text="S", shares=shares, seed=0, allow_placeholder=True)
     assert c["used"] == {"stage1": 840, "stage2": 50} and c["train"] == 890      # total = 1050
     assert c["available"]["train"] == {"stage1": 1000, "stage2": 50}
     assert "'stage1' down-sampled" in caplog.text and "'stage2' shortfall" in caplog.text
     c = examples.export(str(s1), str(s2), None, out_dir=str(tmp_path / "p"), schema_text="S", shares=shares, seed=0,
-                        total=250)
+                        total=250, allow_placeholder=True)
     assert c["used"] == {"stage1": 200, "stage2": 50} and c["train"] == 250
+
+
+def test_export_refuses_a_placeholder_prompt_and_records_the_system_hash(tmp_path, monkeypatch):
+    """Final review M9: no training on the placeholder system prompt (unless a dry run says so), and every
+    export records which system message it was built with: in the counts and a `<out>.prompt.sha256` sidecar."""
+    import hashlib
+    s1 = tmp_path / "s1.jsonl"
+    _write(s1, [{"pair_id": "P", "label": "patched", "tier": "single", "case": CASE, "lead": None, "split": "train"}])
+    monkeypatch.setattr(fmt, "system_prompt_text", lambda: "PLACEHOLDER — Krish writes it")
+    with pytest.raises(ValueError, match="PLACEHOLDER"):
+        examples.export(str(s1), None, None, out_dir=str(tmp_path / "a"), schema_text="S", shares={"stage1": 1.0}, seed=0)
+    assert not (tmp_path / "a").exists()
+    c = examples.export(str(s1), None, None, out_dir=str(tmp_path / "b"), schema_text="S", shares={"stage1": 1.0},
+                        seed=0, allow_placeholder=True)
+    want = hashlib.sha256(fmt.system_message("S")["content"].encode("utf-8")).hexdigest()
+    assert c["system_sha256"] == want
+    for name in ("train.jsonl", "dev.jsonl"):
+        assert (tmp_path / "b" / f"{name}.prompt.sha256").read_text() == want + "\n"
+    monkeypatch.setattr(fmt, "system_prompt_text", lambda: "You are Orion-LM.")    # a real prompt: no override
+    c = examples.export(str(s1), None, None, out_dir=str(tmp_path / "c"), schema_text="S", shares={"stage1": 1.0}, seed=0)
+    assert c["system_sha256"] == hashlib.sha256(fmt.system_message("S")["content"].encode("utf-8")).hexdigest() != want

@@ -439,7 +439,7 @@ def test_a_case_with_a_trace_is_written_only_as_the_trace_and_export_has_no_conf
     s1.write_text("")
     out = tmp_path / "out"
     examples.export(str(s1), a["out_jsonl"], [], out_dir=str(out), schema_text="SCHEMA",
-                    shares={"stage2": 1.0}, seed=0)
+                    shares={"stage2": 1.0}, seed=0, allow_placeholder=True)
     sft = read(str(out / "dev.jsonl"))
     assert sft
     targets: dict[str, set[str]] = {}

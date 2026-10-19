@@ -10,6 +10,7 @@ which is what training teaches.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -98,15 +99,23 @@ def _write(path: str, rows: list[dict]) -> None:
 
 
 def export(stage1_jsonl, stage2_jsonl, cypher_rows, *, out_dir, schema_text=None, shares, seed,
-           total: int | None = None) -> dict:
+           total: int | None = None, allow_placeholder: bool = False) -> dict:
     """Write `train.jsonl` (mixed by `shares`) and `dev.jsonl` (all dev rows, unmixed). `oldcve` is
     never written; a dev pair never reaches train. Every row needs a split, and every pair_id must have
     ONE split across all inputs, or export raises. `schema_text` defaults to the runtime's
     `slice.pruned_schema()`. `total` (train rows to mix) defaults to every available train row of the
     groups with a positive share, so a small group is used whole (shortfall logged) instead of capping the
-    others; `used` in the returned counts is the rows each group contributed."""
+    others; `used` in the returned counts is the rows each group contributed.
+
+    A system prompt that still starts with `PLACEHOLDER` raises unless `allow_placeholder=True` (dry runs).
+    `system_sha256` (sha256 of the system message every row starts with) is returned and written next to
+    each output file as `<out>.prompt.sha256`, so a training set always says which prompt it was built with."""
+    if not allow_placeholder and fmt.system_prompt_text().startswith("PLACEHOLDER"):
+        raise ValueError("orion/lm/system_prompt.txt is still the PLACEHOLDER: training on it would skew the system "
+                         "turn against evaluation; pass allow_placeholder=True only for a dry run")
     if schema_text is None:
         schema_text = lm_slice.pruned_schema()
+    system_sha256 = hashlib.sha256(fmt.system_message(schema_text)["content"].encode("utf-8")).hexdigest()
     pair_splits: dict[str, set[str]] = {}
     by_split: dict[str, dict[str, list[dict]]] = {"train": {}, "dev": {}}
     dropped = 0
@@ -149,7 +158,11 @@ def export(stage1_jsonl, stage2_jsonl, cypher_rows, *, out_dir, schema_text=None
     dev = [r for g in sorted(by_split["dev"]) for r in by_split["dev"][g]]
     rng.shuffle(dev)
     os.makedirs(out_dir, exist_ok=True)
-    _write(os.path.join(out_dir, "train.jsonl"), train)
-    _write(os.path.join(out_dir, "dev.jsonl"), dev)
+    for name, rows in (("train.jsonl", train), ("dev.jsonl", dev)):
+        path = os.path.join(out_dir, name)
+        _write(path, rows)
+        with open(path + ".prompt.sha256", "w", encoding="utf-8") as f:
+            f.write(system_sha256 + "\n")
     return {"train": len(train), "dev": len(dev), "oldcve_dropped": dropped,
-            "available": {s: {g: len(v) for g, v in gs.items()} for s, gs in by_split.items()}, "used": used}
+            "available": {s: {g: len(v) for g, v in gs.items()} for s, gs in by_split.items()}, "used": used,
+            "system_sha256": system_sha256}
