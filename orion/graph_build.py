@@ -73,6 +73,19 @@ def _persist_warning(summary) -> ProgressEvent | None:
                          + "; ".join(mismatches))
 
 
+def _precompute(on_event: OnEvent | None, label: str, fn) -> dict:
+    """Run one build-time precompute step (reachability / centrality / pathfind) under `_timed`. These
+    are ranking HINTS, so a failure must not cost the scan its graph: it becomes a 'build'/'error'
+    event and {"error": ...} (kept in the scan record), and the build carries on without it."""
+    try:
+        result, _ = _timed(on_event, label, fn)
+        return result
+    except Exception as exc:  # noqa: BLE001 -- a hint step is never fatal to the build
+        if on_event is not None:
+            on_event(_event("build", "error", detail=f"{label} failed, continuing without it: {exc}"))
+        return {"error": f"{type(exc).__name__}: {exc}"}
+
+
 def _record_counts(summary, **precompute) -> dict:
     """What the scan record keeps: rows written per label / rel type, persist's mismatches, and the
     precompute summaries."""
@@ -173,24 +186,27 @@ def build(repo_path: str, language: str | None = None,
     # Build-time precompute (Item 1): tag every method/call with entry-point reachability + hop
     # distance, mutating batch.nodes props IN PLACE. Must run BEFORE the on_batch thread below, which
     # reads the same batch concurrently -- doing it here keeps the mutation single-threaded and the
-    # new props are picked up by persist's `SET n += row.props`. Pure/in-memory: never fatal to a build.
-    reach, _ = _timed(on_event, "reachability", lambda: reachability.tag_reachability(batch))
-    if on_event is not None:
+    # new props are picked up by persist's `SET n += row.props`. Pure/in-memory: never fatal to a build
+    # (each step is guarded by _precompute: a failure is an 'error' event + a note in the scan record).
+    reach = _precompute(on_event, "reachability", lambda: reachability.tag_reachability(batch))
+    if on_event is not None and "error" not in reach:
         on_event(_event("build", "timing",
                         detail=f"reachability: {reach['reached_methods']}/{reach['total_methods']} methods, "
                                f"{reach['reached_calls']}/{reach['total_calls']} calls reachable from an entry point"))
     # Item 3a: betweenness centrality over the reachable call graph (chokepoint / blast-radius score).
     # Runs AFTER reachability (reads reachable_from_entry) and, like it, mutates batch props in place
     # before the on_batch thread. networkx; never fatal.
-    cent, _ = _timed(on_event, "centrality", lambda: reachability.tag_centrality(batch))
-    if on_event is not None:
+    cent = _precompute(on_event, "centrality", lambda: reachability.tag_centrality(batch))
+    if on_event is not None and "error" not in cent:
         on_event(_event("build", "timing",
                         detail=f"centrality: {cent['nodes']} reachable nodes, "
                                f"max betweenness {cent['max_centrality']:.3f}"))
     # Item 2: precompute ranked source->sink candidate flows as :CandidateFlow nodes. Runs after
     # centrality (ranks by it) and before the on_batch thread; profile supplies the sink vocabulary.
-    flows, _ = _timed(on_event, "pathfind", lambda: pathfind.pathfind(batch, profile))
-    if on_event is not None:
+    flows = _precompute(on_event, "pathfind", lambda: pathfind.pathfind(batch, profile))
+    if "error" in flows:   # never persist a half-emitted flow list; `orion reanalyze` can redo it
+        batch.nodes[:] = [(label, p) for label, p in batch.nodes if label != "CandidateFlow"]
+    elif on_event is not None:
         on_event(_event("build", "timing",
                         detail=f"pathfind: {flows['flows']} candidate flows from {flows['sources']} "
                                f"sources to {flows['sinks']} sink hits"))

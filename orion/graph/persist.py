@@ -237,6 +237,23 @@ def flows_count(scan_id: str) -> int:
         driver.close()
 
 
+def add_nodes(nodes, *, strict: bool | None = None) -> dict:
+    """CREATE `nodes` ((label, props) pairs, scan_id already set) into an EXISTING partition, with no
+    clear -- the write half of `orion reanalyze`. Same chunked jobs and counter check as `persist`:
+    returns {"counts": {label: {expected, written}}, "mismatches": [...]}; strict raises."""
+    driver = GraphDatabase.driver(config.NEO4J_URI, auth=config.NEO4J_AUTH)
+    jobs = _keyed_node_jobs(_node_rows(nodes))
+    try:
+        counters = _run_jobs(driver, [(c, r) for _k, c, r in jobs], config.PERSIST_CONCURRENCY)
+    finally:
+        driver.close()
+    counts = {"nodes": _tally(jobs, counters, "nodes_created"), "edges": {}}
+    mismatches = _mismatches(counts)
+    if mismatches and (config.persist_strict() if strict is None else strict):
+        raise PersistMismatch("wrote a different number of nodes than given: " + "; ".join(mismatches))
+    return {"counts": counts["nodes"], "mismatches": mismatches}
+
+
 def persist(batch: Batch, *, strict: bool | None = None) -> dict:
     """Clear the scan partition and load the batch (nodes then edges) as CHUNKED, optionally PARALLEL
     writes: bounded per-transaction state + incremental commits (item 3), fanned across a session

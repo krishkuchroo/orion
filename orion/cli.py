@@ -19,6 +19,7 @@ at BUILD time so the graph carries the extra CandidateFlows (and gets its own sc
 needs, or the scan is refused with the command that rebuilds it.
 
     orion gc --keep 3 [--prefix P] [--dry-run] [--include-unrecorded]   # delete old scan partitions
+    orion reanalyze --scan-id <id> [--engine claude|lm]   # recompute CandidateFlows, no Joern
 
 graph_build / embed / discover / verify pull in the Neo4j driver, the local embedding model, and
 the `claude` CLI subprocess wrapper. Those are imported LAZILY inside `_run_scan`, not at module
@@ -321,6 +322,12 @@ def _build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--model", dest="lm_model", metavar="PATH",
                       help="path to the Orion-LM model (engine=lm)")
 
+    re_ = sub.add_parser("reanalyze",
+                         help="recompute a scan's CandidateFlows from the graph in Neo4j (no Joern)")
+    re_.add_argument("--scan-id", dest="scan_id", required=True)
+    re_.add_argument("--engine", choices=["claude", "lm"], default=None,
+                     help="must match the profile the scan was built with (default: the recorded one)")
+
     gc = sub.add_parser("gc", help="delete old scan partitions, keeping the N newest recorded scans")
     gc.add_argument("--keep", type=int, required=True, metavar="N",
                     help="recorded scans to keep (newest first); at least 1")
@@ -347,6 +354,22 @@ def main(argv: list[str] | None = None) -> int:
         return _run_index_exploits(args)
     if args.cmd == "gc":
         return _run_gc(args)
+    if args.cmd == "reanalyze":
+        return _run_reanalyze(args)
+    return 0
+
+
+def _run_reanalyze(args: argparse.Namespace) -> int:
+    """`orion reanalyze`: rebuild one scan's CandidateFlows from Neo4j (see graph/reanalyze.py)."""
+    from .graph import reanalyze
+    try:
+        out = reanalyze.reanalyze(args.scan_id, args.engine)
+    except reanalyze.ReanalyzeRefused as exc:
+        print(f"orion reanalyze: {exc}", file=sys.stderr)
+        return 2
+    pf = out["pathfind"]
+    print(f"reanalyzed {out['scan_id']} (profile {out['profile']}): {out['removed']} CandidateFlows removed, "
+          f"{out['written']} written ({pf['sources']} sources, {pf['sinks']} sink hits)")
     return 0
 
 
