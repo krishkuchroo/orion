@@ -653,3 +653,28 @@ FLOWS_TO / CandidateFlow / CpgParameter numbers; anything stopped on or not done
   `scans.mark_complete`, `scans.check_usable`, `persist.PersistMismatch`,
   `config.persist_strict()`, `graph_build._persist_warning`, `scan_id_for(repo, profile=None)`,
   `reanalyze.reanalyze(scan_id, engine=None)`, `tests/graph_snapshot.from_batch/from_neo4j/diff`.
+
+---
+
+## Outcome (measured 2026-10-18)
+
+- **Added during the build — change 1b** (`d74cdec`): after the hash-seed fix, ties still broke
+  by call uid, which hashes the scan_id in, so two scans of the same code ranked tied flows
+  differently (NodeGoat 84/116 ranks; PyGoat 94/98 ranks + 368 centrality values; PyGoat lm 44 of
+  300 kept flows). The old code had the same uid tie-break. Fixed with a location key
+  (file, line, column, code). Goldens regenerated: FLOWS_TO identical; NodeGoat default/lm and
+  PyGoat default keep the same flows (ranks moved); PyGoat lm swaps 48 of its 300 capped flows.
+- **Suites:** non-slow 369 passed / 2 skipped → **403 passed / 2 skipped**; `eval/tests` 190 → 190;
+  slow parity + new slow tests **49 passed, 1 skipped** (sharpemu not cloned).
+- **FLOWS_TO:** NodeGoat 217 → 217; PyGoat @ 19d17cc 1075 → 1075 (oracle, summaries, legacy, stream).
+- **CandidateFlows:** NodeGoat 116 (lm 201), PyGoat 98 (lm 300 = the cap), counts unchanged.
+- **D4:** CpgParameter NodeGoat 290 → 831, PyGoat 334 → 1523. Persisted node_count (graph + Chunks)
+  NodeGoat 3291 → 3832, discovery timeout 439s → 442s; PyGoat 11443 after (timeout 488s; before
+  would be 10254 / 481s, derived from the measured batch counts + its 34 deps and 451 chunks).
+- **Phase 3:** CLI build stage, NodeGoat and PyGoat, PYTHONHASHSEED 0 vs 3 into `test-<uuid>` scans:
+  identical row for row (FLOWS_TO, CandidateFlow, every call/method centrality, reachability and
+  hop value, per-label and per-type counts). `orion reanalyze` on the seed-0 scans: identical to
+  the build and to the goldens (0.50s / 0.61s); `--engine lm` on an express scan refused (rc 2).
+  `orion gc --keep 1 --prefix test-<uuid>` dry run then real: kept the newest, deleted 3 (all
+  labels); survivor cleared; 38 pre-existing scans intact. get_schema identical to the Phase 1
+  snapshot. 35 scans remain unrecorded (listed by a dry run only; not deleted).
