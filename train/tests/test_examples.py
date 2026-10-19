@@ -39,7 +39,7 @@ def test_cut_rejects_mismatched_results():
         examples.cut({"case": CASE, "actions": [{"action": "final", "leads": []}], "results": [{}], "meta": {}}, schema_text="S")
 
 
-def test_mix_shares_and_no_dev_in_train(tmp_path):
+def test_mix_draws_group_shares(tmp_path):
     out = examples.mix({"stage1": [{"g": 1}] * 90, "stage2": [{"g": 2}] * 100}, {"stage1": 0.9, "stage2": 0.1}, total=100, seed=0)
     assert sum(1 for e in out if e["g"] == 2) == 10 and len(out) == 100
 
@@ -90,3 +90,24 @@ def test_export_stage2_traces_cypher_rows_and_missing_split(tmp_path):
     _write(s2, [{**trace, "meta": {"pair_id": "b"}}])
     with pytest.raises(ValueError):
         examples.export(str(s1), str(s2), None, out_dir=str(tmp_path / "o2"), schema_text="S", shares={"stage1": 1}, seed=0)
+
+
+def test_export_rejects_pair_with_conflicting_splits(tmp_path):
+    s1 = tmp_path / "s1.jsonl"
+    _write(s1, [{"pair_id": "P", "label": "vulnerable", "tier": "single", "case": CASE, "lead": LEAD, "split": "train"}])
+    s2 = tmp_path / "s2.jsonl"
+    _write(s2, [{"case": CASE, "actions": [{"action": "final", "leads": []}], "results": [],
+                 "meta": {"pair_id": "P", "split": "dev"}}])
+    with pytest.raises(ValueError, match="P"):
+        examples.export(str(s1), str(s2), None, out_dir=str(tmp_path / "o"), schema_text="S",
+                        shares={"stage1": 0.5, "stage2": 0.5}, seed=0)
+    assert not (tmp_path / "o" / "train.jsonl").exists()
+
+
+def test_export_default_schema_is_runtime_pruned_schema(tmp_path):
+    from orion.lm import slice as lm_slice
+    s1 = tmp_path / "s1.jsonl"
+    _write(s1, [{"pair_id": "P", "label": "patched", "tier": "single", "case": CASE, "lead": None, "split": "train"}])
+    examples.export(str(s1), None, None, out_dir=str(tmp_path / "o"), shares={"stage1": 1.0}, seed=0)
+    row = json.loads((tmp_path / "o" / "train.jsonl").read_text().splitlines()[0])
+    assert row["messages"][0] == fmt.system_message(lm_slice.pruned_schema())

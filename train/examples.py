@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import random
 
 from orion.lm import format as fmt
+from orion.lm import slice as lm_slice
 
 log = logging.getLogger(__name__)
 
@@ -88,15 +90,23 @@ def _write(path: str, rows: list[dict]) -> None:
             f.write(json.dumps(r, sort_keys=True) + "\n")
 
 
-def export(stage1_jsonl, stage2_jsonl, cypher_rows, *, out_dir, schema_text, shares, seed) -> dict:
+def export(stage1_jsonl, stage2_jsonl, cypher_rows, *, out_dir, schema_text=None, shares, seed) -> dict:
     """Write `train.jsonl` (mixed by `shares`) and `dev.jsonl` (all dev rows, unmixed). `oldcve` is
-    never written; a dev pair never reaches train. Every row needs a split or export raises."""
-    import os
+    never written; a dev pair never reaches train. Every row needs a split, and every pair_id must have
+    ONE split across all inputs, or export raises. `schema_text` defaults to the runtime's
+    `slice.pruned_schema()`."""
+    if schema_text is None:
+        schema_text = lm_slice.pruned_schema()
+    pair_splits: dict[str, set[str]] = {}
     by_split: dict[str, dict[str, list[dict]]] = {"train": {}, "dev": {}}
     dropped = 0
 
     def put(group: str, split: str, rows: list[dict]) -> None:
         nonlocal dropped
+        for r in rows:
+            pid = (r.get("meta") or {}).get("pair_id")
+            if pid is not None:
+                pair_splits.setdefault(pid, set()).add(split)
         if split == "oldcve":
             dropped += len(rows)
         else:
@@ -115,6 +125,9 @@ def export(stage1_jsonl, stage2_jsonl, cypher_rows, *, out_dir, schema_text, sha
     for row in cypher_rows or []:
         put("cypher", _split_of((row.get("meta") or {}).get("split", row.get("split")), "cypher row"), [row])
 
+    for pid, sp in sorted(pair_splits.items()):
+        if len(sp) > 1:
+            raise ValueError(f"pair {pid!r} appears in more than one split: {sorted(sp)}")
     train = mix(by_split["train"], shares, total=None, seed=seed)
     rng = random.Random(seed)
     dev = [r for g in sorted(by_split["dev"]) for r in by_split["dev"][g]]
