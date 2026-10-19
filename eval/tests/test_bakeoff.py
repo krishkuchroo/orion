@@ -122,3 +122,18 @@ def test_run_all_empty_output_becomes_error_row():
 
 def test_run_all_non_json_last_line_becomes_error_row():
     _check_error_row(bakeoff.run_all(["a", "bad", "c"], "d.jsonl", run=_flaky("ok\nnot json")))
+
+
+def test_sample_dev_reads_stage2_traces_and_skips_train_traces():
+    """Final review I5: traces carry pair_id/split/label under `meta`; a train trace is never dev."""
+    import pytest
+
+    def trace(pid, label, split):
+        return {"case": CASE, "actions": [{"action": "final", "leads": [LEAD] if label == "vulnerable" else []}],
+                "results": [], "meta": {"pair_id": pid, "split": split, "label": label}}
+
+    rows = [trace("P", "vulnerable", "dev"), trace("P", "patched", "dev"), trace("T", "vulnerable", "train")]
+    out = bakeoff.sample_dev(rows, sample_n=10, seed=0)
+    assert [(r["meta"]["pair_id"], r["meta"]["label"]) for r in out] == [("P", "patched"), ("P", "vulnerable")]
+    with pytest.raises(ValueError, match="split"):
+        bakeoff.sample_dev([{"pair_id": "P", "label": "vulnerable", "case": CASE, "lead": LEAD}], sample_n=10, seed=0)

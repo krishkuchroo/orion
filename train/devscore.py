@@ -17,6 +17,30 @@ def _rate(num: int, den: int):
     return num / den if den else None
 
 
+def _field(row: dict, key: str):
+    val = row.get(key)
+    if val is None:
+        val = (row.get("meta") or {}).get(key)
+    if val is None:
+        raise ValueError(f"dev row has no {key!r} (top level or meta): {str(row)[:200]}")
+    return val
+
+
+def normalise_row(row: dict) -> dict:
+    """THE dev-row reader (this module and `eval.bakeoff`): `{case, pair_id, split, label, lead}` from a Stage
+    1/2 example row or a Stage 2 trace (`stage2.trace_for`: pair_id/split/label under `meta`). `lead` is the
+    row's lead, or for a trace the first lead of its last `final` action (None when it has none). A row
+    without a split raises ValueError: it is never treated as dev."""
+    if "actions" in row:
+        finals = [a for a in row.get("actions") or [] if isinstance(a, dict) and a.get("action") == "final"]
+        leads = (finals[-1].get("leads") or []) if finals else []
+        lead = leads[0] if leads else None
+    else:
+        lead = row.get("lead")
+    return {"case": _field(row, "case"), "pair_id": _field(row, "pair_id"), "split": _field(row, "split"),
+            "label": _field(row, "label"), "lead": lead}
+
+
 def _judge_one(generate, example: dict, schema_text: str, acc: dict) -> tuple[bool, bool, bool]:
     """-> (flagged, parse_failed, overflowed). Adds token and time counts into `acc`."""
     messages = [fmt.system_message(schema_text), fmt.task_message([example["case"]])]
@@ -45,11 +69,12 @@ def _judge_one(generate, example: dict, schema_text: str, acc: dict) -> tuple[bo
 
 
 def judge(generate, dev_examples, *, schema_text=None) -> dict:
-    """Score `generate(messages) -> GenResult` on the dev rows. A row with no `split` counts as dev; any
-    other split is skipped. `schema_text` defaults to the runtime `slice.pruned_schema()`."""
+    """Score `generate(messages) -> GenResult` on the dev rows (example rows or Stage 2 traces, read by
+    `normalise_row`). Only `split == "dev"` is scored; a row with no split raises ValueError. `schema_text`
+    defaults to the runtime `slice.pruned_schema()`."""
     if schema_text is None:
         schema_text = lm_slice.pruned_schema()
-    rows = [r for r in dev_examples if r.get("split", "dev") == "dev"]
+    rows = [r for r in map(normalise_row, dev_examples) if r["split"] == "dev"]
     acc = {"tokens": 0, "completion": 0, "seconds": 0.0}
     flagged_by: dict[str, dict[str, list[bool]]] = {}
     by_label: dict[str, list[bool]] = {"vulnerable": [], "patched": [], "negative": []}

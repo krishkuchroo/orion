@@ -12,9 +12,9 @@ LEAD = {"flow_id": "F0", "file": "a.py", "function": "f", "line": 1, "cwe": "CWE
 
 def test_judge_scores_pairs_and_forces_final():
     """Patched silent + vulnerable flagged = pair-correct; a non-final first action gets one forced final."""
-    exs = [{"pair_id": "P", "label": "vulnerable", "case": CASE, "lead": LEAD},
-           {"pair_id": "P", "label": "patched", "case": CASE, "lead": None},
-           {"pair_id": "Q", "label": "negative", "case": CASE, "lead": None}]
+    exs = [{"pair_id": "P", "label": "vulnerable", "case": CASE, "lead": LEAD, "split": "dev"},
+           {"pair_id": "P", "label": "patched", "case": CASE, "lead": None, "split": "dev"},
+           {"pair_id": "Q", "label": "negative", "case": CASE, "lead": None, "split": "dev"}]
     replies = iter([json.dumps({"action": "read_code", "file": "a.py", "start": 1, "end": 2}),
                     json.dumps({"action": "final", "leads": [LEAD]}),
                     json.dumps({"action": "final", "leads": []}), "garbage", json.dumps({"action": "final", "leads": []})])
@@ -53,7 +53,7 @@ def test_forced_final_appends_assistant_turn_and_default_schema():
         text = first if len(calls) == 1 else json.dumps({"action": "final", "leads": []})
         return GenResult(text=text, prompt_tokens=1, completion_tokens=1, cached_tokens=0)
 
-    devscore.judge(gen, [{"pair_id": "P", "label": "negative", "case": CASE, "lead": None}], schema_text=None)
+    devscore.judge(gen, [{"pair_id": "P", "label": "negative", "case": CASE, "lead": None, "split": "dev"}], schema_text=None)
     assert calls[0][0] == fmt.system_message(lm_slice.pruned_schema())
     assert calls[1] == calls[0] + [{"role": "assistant", "content": first}, fmt.forced_final_message()]
 
@@ -62,7 +62,7 @@ def test_unparseable_forced_final_is_no_lead_and_overflow_counted():
     def bad(messages):
         return GenResult(text="nope", prompt_tokens=1, completion_tokens=1, cached_tokens=0)
 
-    ex = [{"pair_id": "P", "label": "vulnerable", "case": CASE, "lead": LEAD}]
+    ex = [{"pair_id": "P", "label": "vulnerable", "case": CASE, "lead": LEAD, "split": "dev"}]
     out = devscore.judge(bad, ex, schema_text="S")
     assert out["vuln_recall"] == 0.0 and out["parse_fail_rate"] == 1.0
 
@@ -80,13 +80,52 @@ def test_pair_correct_aggregates_duplicate_rows_per_pair():
     replies = iter([quiet, flag, quiet,          # P: vuln flagged, vuln missed, patched silent -> wrong
                     flag, flag, quiet,           # R: two vuln flagged, patched silent -> correct
                     flag])                       # S: vulnerable only -> excluded
-    exs = [{"pair_id": "P", "label": "vulnerable", "case": CASE, "lead": LEAD},
-           {"pair_id": "P", "label": "vulnerable", "case": CASE, "lead": LEAD},
-           {"pair_id": "P", "label": "patched", "case": CASE, "lead": None},
-           {"pair_id": "R", "label": "vulnerable", "case": CASE, "lead": LEAD},
-           {"pair_id": "R", "label": "vulnerable", "case": CASE, "lead": LEAD},
-           {"pair_id": "R", "label": "patched", "case": CASE, "lead": None},
-           {"pair_id": "S", "label": "vulnerable", "case": CASE, "lead": LEAD}]
+    exs = [{"pair_id": "P", "label": "vulnerable", "case": CASE, "lead": LEAD, "split": "dev"},
+           {"pair_id": "P", "label": "vulnerable", "case": CASE, "lead": LEAD, "split": "dev"},
+           {"pair_id": "P", "label": "patched", "case": CASE, "lead": None, "split": "dev"},
+           {"pair_id": "R", "label": "vulnerable", "case": CASE, "lead": LEAD, "split": "dev"},
+           {"pair_id": "R", "label": "vulnerable", "case": CASE, "lead": LEAD, "split": "dev"},
+           {"pair_id": "R", "label": "patched", "case": CASE, "lead": None, "split": "dev"},
+           {"pair_id": "S", "label": "vulnerable", "case": CASE, "lead": LEAD, "split": "dev"}]
     out = devscore.judge(lambda m: GenResult(text=next(replies), prompt_tokens=1, completion_tokens=1, cached_tokens=0),
                          exs, schema_text="S")
     assert out["pair_correct"] == 0.5
+
+
+# --- final review I5: one row normaliser for Stage 1/2 example rows and Stage 2 traces ---
+import pytest
+
+
+def _trace(pid, label, split, leads):
+    return {"case": CASE, "actions": [{"action": "run_cypher", "query": "Q"}, {"action": "final", "leads": leads}],
+            "results": [{"rows": [], "row_count": 0}], "meta": {"pair_id": pid, "split": split, "label": label}}
+
+
+def test_normalise_row_reads_traces_from_meta_and_the_last_final_lead():
+    tr = _trace("P", "vulnerable", "dev", [LEAD])
+    assert devscore.normalise_row(tr) == {"case": CASE, "pair_id": "P", "split": "dev", "label": "vulnerable",
+                                          "lead": LEAD}
+    row = {"pair_id": "Q", "label": "patched", "case": CASE, "lead": None, "split": "dev"}
+    assert devscore.normalise_row(row) == {"case": CASE, "pair_id": "Q", "split": "dev", "label": "patched",
+                                           "lead": None}
+
+
+def test_judge_scores_stage2_trace_rows():
+    flag, quiet = json.dumps({"action": "final", "leads": [LEAD]}), json.dumps({"action": "final", "leads": []})
+    replies = iter([flag, quiet])
+    out = devscore.judge(lambda m: GenResult(text=next(replies), prompt_tokens=1, completion_tokens=1, cached_tokens=0),
+                         [_trace("P", "vulnerable", "dev", [LEAD]), _trace("P", "patched", "dev", [])], schema_text="S")
+    assert out["n"] == 2 and out["vuln_recall"] == 1.0 and out["pair_correct"] == 1.0
+
+
+def test_train_split_trace_is_never_scored_and_a_missing_split_raises():
+    def gen(messages):
+        raise AssertionError("a train-split row must never reach the model")
+
+    assert devscore.judge(gen, [_trace("T", "vulnerable", "train", [LEAD])], schema_text="S")["n"] == 0
+    no_split = _trace("T", "vulnerable", "train", [LEAD])
+    del no_split["meta"]["split"]
+    with pytest.raises(ValueError, match="split"):
+        devscore.judge(gen, [no_split], schema_text="S")
+    with pytest.raises(ValueError, match="split"):
+        devscore.judge(gen, [{"pair_id": "P", "label": "vulnerable", "case": CASE, "lead": LEAD}], schema_text="S")

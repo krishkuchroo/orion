@@ -23,17 +23,20 @@ COLUMNS = ["model", "n", "vuln_recall", "patched_silence", "negative_silence", "
 
 def sample_dev(dev_examples, *, sample_n: int, seed: int) -> list[dict]:
     """Seeded sample of whole pairs (so pair_correct stays defined), at most `sample_n` rows. The result
-    depends only on the dev rows, `sample_n` and `seed`, never on the candidate."""
-    groups: dict[str, list[dict]] = {}
+    depends only on the dev rows, `sample_n` and `seed`, never on the candidate. Rows (example rows or Stage 2
+    traces) are read by `devscore.normalise_row`: only `split == "dev"` is sampled and a missing split raises.
+    The original rows are returned."""
+    groups: dict[str, list[tuple[dict, dict]]] = {}
     for r in dev_examples:
-        if r.get("split", "dev") == "dev":
-            groups.setdefault(r["pair_id"], []).append(r)
+        n = devscore.normalise_row(r)
+        if n["split"] == "dev":
+            groups.setdefault(n["pair_id"], []).append((n, r))
     ids = sorted(groups)
     random.Random(seed).shuffle(ids)
     out: list[dict] = []
     for pid in ids:
         if len(out) + len(groups[pid]) <= sample_n:
-            out.extend(sorted(groups[pid], key=lambda r: r["label"]))
+            out.extend(r for _, r in sorted(groups[pid], key=lambda nr: nr[0]["label"]))
     return out
 
 
