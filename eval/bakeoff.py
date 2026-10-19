@@ -55,6 +55,14 @@ def _subprocess_run(cmd: list[str]) -> str:
     return subprocess.run(cmd, check=True, capture_output=True, text=True).stdout
 
 
+def _error_row(path, exc: Exception) -> dict:
+    reason = f"{type(exc).__name__}: {exc}"
+    stderr = getattr(exc, "stderr", None)
+    if stderr:
+        reason += " | stderr: " + str(stderr).strip()[:300]
+    return {**{c: None for c in COLUMNS}, "model": str(path), "error": reason[:500]}
+
+
 def run_all(candidates, dev_path, *, sample_n=300, seed=0, train_cutoffs=None, run=_subprocess_run) -> list[dict]:
     """One fresh child process per candidate (`python -m eval.bakeoff --one ...`); `run(cmd) -> stdout`
     is injectable. The row is the last JSON line the child prints."""
@@ -65,7 +73,13 @@ def run_all(candidates, dev_path, *, sample_n=300, seed=0, train_cutoffs=None, r
         cutoff = (train_cutoffs or {}).get(path)
         if cutoff is not None:
             cmd += ["--train-cutoff", cutoff]
-        rows.append(json.loads(run(cmd).strip().splitlines()[-1]))
+        try:
+            lines = run(cmd).strip().splitlines()
+            if not lines:
+                raise ValueError("child printed nothing")
+            rows.append(json.loads(lines[-1]))
+        except Exception as exc:  # one bad candidate must not drop the others' rows
+            rows.append(_error_row(path, exc))
     return rows
 
 

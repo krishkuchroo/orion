@@ -87,3 +87,38 @@ def test_run_all_spawns_one_child_per_candidate_and_parses_json():
     assert [r["model"] for r in rows] == ["a", "b"] and len(cmds) == 2
     assert "eval.bakeoff" in cmds[0] and "--sample-n" in cmds[0] and "7" in cmds[0]
     assert "--train-cutoff" in cmds[0] and "--train-cutoff" not in cmds[1]
+
+
+def _flaky(bad_output):
+    def runner(cmd):
+        m = cmd[cmd.index("--one") + 1]
+        if m == "bad":
+            if isinstance(bad_output, Exception):
+                raise bad_output
+            return bad_output
+        return json.dumps({"model": m, "n": 1, "peak_rss_mb": 1.0})
+    return runner
+
+
+def _check_error_row(rows):
+    assert [r["model"] for r in rows] == ["a", "bad", "c"]
+    assert rows[0]["n"] == 1 and rows[2]["n"] == 1
+    bad = rows[1]
+    assert bad["error"] and set(bakeoff.COLUMNS) - {"model"} <= set(bad)
+    assert all(bad[c] is None for c in bakeoff.COLUMNS if c != "model")
+
+
+def test_run_all_child_crash_becomes_error_row():
+    import subprocess
+    exc = subprocess.CalledProcessError(1, ["x"], output="", stderr="Traceback\nOOM killed")
+    _check_error_row(bakeoff.run_all(["a", "bad", "c"], "d.jsonl", run=_flaky(exc)))
+    rows = bakeoff.run_all(["a", "bad", "c"], "d.jsonl", run=_flaky(exc))
+    assert "OOM killed" in rows[1]["error"]
+
+
+def test_run_all_empty_output_becomes_error_row():
+    _check_error_row(bakeoff.run_all(["a", "bad", "c"], "d.jsonl", run=_flaky("  \n")))
+
+
+def test_run_all_non_json_last_line_becomes_error_row():
+    _check_error_row(bakeoff.run_all(["a", "bad", "c"], "d.jsonl", run=_flaky("ok\nnot json")))
