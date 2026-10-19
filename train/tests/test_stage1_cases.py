@@ -99,3 +99,101 @@ def test_unchanged_patched_function_gets_no_patched_example(tmp_path):
     pair = {**PAIR, "vuln_methods": [{"file": "app.py", "method": "third", "start_line": 11, "end_line": 15, "vulnerable_lines": [12]}]}
     ex, rec = stage1.cases_from(pair, HUNK, _idx(tmp_path), {"app.py": PATCHED}, budget=cases.CaseBudget(), n_negatives=0, seed=0)
     assert [e["label"] for e in ex] == ["vulnerable"] and "patched_unchanged" in rec["reason"]
+
+
+# --- fix round 1: reviewer probes ---
+import pytest
+from train import diffs
+from train.tests._git import GitRepo
+
+B = cases.CaseBudget()
+
+
+def _real(tmp_path, hermetic_git, old: dict, new: dict):
+    """Vulnerable index + real `git diff -U0` hunks + patched text for a two-commit repo."""
+    repo = GitRepo(tmp_path / "r")
+    a = repo.commit(old)
+    idx = ci.RepoIndex(repo.path)
+    b = repo.commit(new)
+    return idx, diffs.parse_u0(diffs.git_diff_u0(repo.path, a, b)), {k: v for k, v in new.items()}
+
+
+def test_negative_never_nested_in_or_around_a_target(tmp_path):
+    """I1 (P1, P1b)."""
+    src = "def outer():\n    a = 1\n    def inner():\n        log(a)\n        x = a\n        y = x\n        return y\n    return inner\n"
+    (tmp_path / "app.py").write_text(src)
+    idx = ci.RepoIndex(str(tmp_path))
+    h = [{"file": "app.py", "old_file": "app.py", "old_start": 2, "old_end": 2, "new_start": 2, "new_end": 2}]
+    ex, _ = stage1.cases_from(PAIR, h, idx, {"app.py": src.replace("a = 1", "a = 2")}, budget=B, n_negatives=5, seed=0)
+    assert [e["label"] for e in ex] == ["vulnerable", "patched"]
+    pair = {**PAIR, "vuln_methods": [{"file": "app.py", "method": "outer", "start_line": 1, "end_line": 8, "vulnerable_lines": [5]}]}
+    ex, _ = stage1.cases_from(pair, h, idx, {"app.py": src}, budget=B, n_negatives=5, seed=0)
+    assert "negative" not in [e["label"] for e in ex]
+
+
+def test_annotated_functions_past_the_cap_are_never_negatives(tmp_path):
+    """I2 (P2)."""
+    src = "".join(f"def f{i}(a):\n    log(a)\n    x = a\n    y = x\n    return y\n\n" for i in range(5))
+    (tmp_path / "app.py").write_text(src)
+    idx = ci.RepoIndex(str(tmp_path))
+    vm = [{"file": "app.py", "method": f"f{i}", "start_line": 6 * i + 1, "end_line": 6 * i + 5, "vulnerable_lines": [6 * i + 2]} for i in range(5)]
+    h = [{"file": "app.py", "old_file": "app.py", "old_start": 2, "old_end": 2, "new_start": 2, "new_end": 2}]
+    ex, rec = stage1.cases_from({**PAIR, "vuln_methods": vm}, h, idx, {"app.py": src.replace("log(a)", "log(b)", 1)},
+                                budget=B, n_negatives=5, seed=0)
+    assert rec["n_targets"] == 3 and "negative" not in [e["label"] for e in ex]
+
+
+PY_OLD = "def f(a):\n    log(a)\n    return a\n"
+
+
+@pytest.mark.parametrize("name,new", [
+    ("new function at EOF", PY_OLD + "\ndef g(b):\n    return b\n"),
+    ("new method appended after the last function", PY_OLD + "def g(b):\n    return b\n"),
+    ("insertion at top of file", "import os\n" + PY_OLD),
+])
+def test_untouched_neighbour_is_not_a_target(tmp_path, hermetic_git, name, new):
+    """I3: add-only hunks at line 0, after a function's last line, or holding a whole new function give no target."""
+    idx, hunks, patched = _real(tmp_path, hermetic_git, {"m.py": PY_OLD}, {"m.py": new})
+    ex, rec = stage1.cases_from(PAIR, hunks, idx, patched, budget=B, n_negatives=0, seed=0)
+    assert ex == [] and rec["reason"] == "no_target", name
+
+
+def test_insertion_strictly_inside_a_body_is_a_target(tmp_path, hermetic_git):
+    idx, hunks, patched = _real(tmp_path, hermetic_git, {"m.py": PY_OLD},
+                                {"m.py": PY_OLD.replace("    return a", "    check(a)\n    return a")})
+    t, _ = stage1.targets(PAIR, hunks, idx, patched)
+    assert [x["name"] for x in t] == ["f"]
+
+
+def test_new_function_inserted_between_functions_is_not_a_target(tmp_path, hermetic_git):
+    old = PY_OLD + "def h(c):\n    return c\n"
+    idx, hunks, patched = _real(tmp_path, hermetic_git, {"m.py": old},
+                                {"m.py": PY_OLD + "def g(b):\n    return b\n" + "def h(c):\n    return c\n"})
+    assert stage1.targets(PAIR, hunks, idx, patched) == ([], "no_target")
+
+
+def test_unchanged_long_function_does_not_get_both_labels(tmp_path):
+    """I4 (P4): whole-function comparison, not budget windows."""
+    big = "def big(a):\n" + "".join(f"    x{i} = a + {i}\n" for i in range(200)) + "    return a\n"
+    other = "\ndef small(b):\n    log(b)\n    return b\n"
+    (tmp_path / "app.py").write_text(big + other)
+    idx = ci.RepoIndex(str(tmp_path))
+    pair = {**PAIR, "vuln_methods": [{"file": "app.py", "method": "big", "start_line": 1, "end_line": 202, "vulnerable_lines": [150]}]}
+    h = [{"file": "app.py", "old_file": "app.py", "old_start": 205, "old_end": 205, "new_start": 205, "new_end": 205}]
+    ex, rec = stage1.cases_from(pair, h, idx, {"app.py": big + other.replace("log(b)", "log(c)")},
+                                budget=B, n_negatives=0, seed=0)
+    assert [e["label"] for e in ex] == ["vulnerable"] and "patched_unchanged" in rec["reason"]
+
+
+def test_overloads_each_get_their_own_patched_code(tmp_path, hermetic_git):
+    """I5 (probe4): the first overload grows by 4 lines; the second must still pair with its own fix."""
+    old = ("class P {\n  int parse(String a) {\n    return raw(a);\n  }\n\n"
+           "  int parse(String a, int b) {\n    return raw(a) + b;\n  }\n}\n")
+    new = ("class P {\n  int parse(String a) {\n    if (a == null) {\n      throw new E();\n    }\n"
+           "    check(a);\n    return raw(a);\n  }\n\n"
+           "  int parse(String a, int b) {\n    return safe(a) + b;\n  }\n}\n")
+    idx, hunks, patched = _real(tmp_path, hermetic_git, {"P.java": old}, {"P.java": new})
+    ex, rec = stage1.cases_from({**PAIR, "cwe": ["CWE-20"]}, hunks, idx, patched, budget=B, n_negatives=0, seed=0)
+    pat = [e["case"]["snippets"][0]["code"] for e in ex if e["label"] == "patched"]
+    assert len(pat) == 2 and any("check(a)" in c for c in pat) and any("safe(a) + b" in c for c in pat)
+    assert not any("check(a)" in c and "safe(" in c for c in pat)

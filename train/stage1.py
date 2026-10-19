@@ -28,6 +28,7 @@ from collections import Counter
 
 from orion.lm import cases as _cases
 from orion.lm.codeindex import MODULE, RepoIndex, Span, is_test_path, parse_text
+from train.fixmap import map_line
 from train.sources import DATAFLOW_CWES, cwe_class, norm_cwe
 
 MAX_MULTI = 3
@@ -129,23 +130,46 @@ def _changed_old_lines(h: dict) -> tuple[list[int], bool]:
     a, b = h["old_start"], h["old_end"]
     if b >= a:
         return list(range(a, b + 1)), False
-    return [max(a, 1)], True
+    return [a], True
 
 
-def _changed_functions(hunks: list[dict], idx: RepoIndex) -> dict[tuple, dict]:
+def _is_new_function_hunk(h: dict, patched_text: dict) -> bool:
+    """True when the hunk's new lines are entirely one function that exists only in the patched text."""
+    text = patched_text.get(h.get("file"))
+    if not text:
+        return False
+    try:
+        spans = parse_text(h["file"], text) or []
+    except Exception:
+        return False
+    lo, hi = h["new_start"], h["new_end"]
+    lines = text.split("\n")
+    for p in spans:
+        if lo <= p.start and p.end <= hi:
+            rest = [l for i, l in enumerate(lines[lo - 1:hi], lo) if not p.start <= i <= p.end]
+            if all(not l.strip() for l in rest):
+                return True
+    return False
+
+
+def _changed_functions(hunks: list[dict], idx: RepoIndex, patched_text: dict) -> dict[tuple, dict]:
     found: dict[tuple, dict] = {}
     for h in hunks:
         of = h.get("old_file")
         if not of or is_test_path(of) or of not in idx.files:
             continue
         lines, add_only = _changed_old_lines(h)
+        a_only_new_fn = None
         spans = idx.files[of]
         for ln in lines:
             if add_only:
-                # an insertion after line `ln`: the function must hold both neighbours, or (python) end exactly at `ln`
+                # insertion AFTER old line `ln` (0 = top of file): it belongs to a function only when that function
+                # holds both neighbours, i.e. the insertion is strictly inside the body (not at/after its last line)
+                if a_only_new_fn is None:
+                    a_only_new_fn = _is_new_function_hunk(h, patched_text)
+                if a_only_new_fn:
+                    continue
                 inner = [s for s in spans if s.start <= ln and ln + 1 <= s.end]
-                if not inner:
-                    inner = [s for s in spans if s.start <= ln == s.end and of.endswith(".py")]
             else:
                 inner = [s for s in spans if s.start <= ln <= s.end]
             if not inner:
@@ -176,7 +200,11 @@ def _patched_for(span: Span, hunks: list[dict], patched_text: dict) -> tuple[Spa
     same = [s for s in spans if s.name == span.name]
     if not same:
         return None, None, "patched_missing"
-    ps = min(same, key=lambda s: (abs(s.start - span.start), s.start))
+    # map the vulnerable span's ends through the hunks (D3's map_line), then take the same-named span holding
+    # a mapped line, else the nearest one
+    mapped = [ln for edge in (span.start, span.end) for ln in map_line(hunks, span.file, edge)[1]]
+    ps = min(same, key=lambda s: (not any(s.start <= m <= s.end for m in mapped),
+                                  min((abs(s.start - m) for m in mapped), default=0), s.start))
     anchor = next((h["new_start"] for h in touching if ps.start <= h["new_start"] <= ps.end), ps.start)
     return ps, anchor, None
 
@@ -189,9 +217,13 @@ def _anchor_old(span: Span, annotated_anchor: int | None, ent: dict | None) -> i
     return span.start
 
 
+def _src(idx: RepoIndex, span: Span) -> str:
+    return idx.source(span.file, span.start, span.end)
+
+
 def targets(pair: dict, hunks: list[dict], vuln_idx: RepoIndex,
             patched_text: dict[str, str | None]) -> tuple[list[dict], str | None]:
-    changed = _changed_functions(hunks, vuln_idx)
+    changed = _changed_functions(hunks, vuln_idx, patched_text)
     ann = _annotated(pair, vuln_idx)[:MAX_MULTI]
     if ann:
         picked = [(s, a, "annotated") for s, a in ann]
@@ -245,15 +277,16 @@ def _overlaps_hunk(span: Span, hunks: list[dict]) -> bool:
     return False
 
 
-def _negative_spans(vuln_idx: RepoIndex, hunks: list[dict], tgts: list[dict]) -> list[Span]:
-    taken = {(t["vuln_span"].file, t["vuln_span"].start, t["vuln_span"].end) for t in tgts}
+def _negative_spans(vuln_idx: RepoIndex, hunks: list[dict], tgts: list[dict], annotated: list[Span]) -> list[Span]:
+    taken = [t["vuln_span"] for t in tgts] + list(annotated)   # every target and every resolved annotation
     out = []
     for rel in sorted(vuln_idx.files):
         if is_test_path(rel):
             continue
         for s in vuln_idx.files[rel]:
             if (s.end - s.start + 1 >= MIN_NEG_LINES and s.calls and s.name != MODULE
-                    and (s.file, s.start, s.end) not in taken and not _overlaps_hunk(s, hunks)):
+                    and not any(t.file == s.file and t.start <= s.end and s.start <= t.end for t in taken)
+                    and not _overlaps_hunk(s, hunks)):
                 out.append(s)
     return out
 
@@ -295,7 +328,7 @@ def cases_from(pair: dict, hunks: list[dict], vuln_idx: RepoIndex, patched_text:
         pcase = _cases.case_from_function(patched_idx, ps.file, ps, anchor=t["anchor_new"] or ps.start, budget=budget)
         if not pcase["snippets"]:
             reasons.append("no_snippet")
-        elif pcase["snippets"][0]["code"] == vcase["snippets"][0]["code"]:
+        elif _src(vuln_idx, vs) == _src(patched_idx, ps):
             reasons.append("patched_unchanged")
         else:
             examples.append(ex("patched", t["tier"], pcase, None))
@@ -303,7 +336,7 @@ def cases_from(pair: dict, hunks: list[dict], vuln_idx: RepoIndex, patched_text:
         rec["reason"] = ",".join(dict.fromkeys(reasons)) or "no_target"
         return [], rec
 
-    pool = _negative_spans(vuln_idx, hunks, used)
+    pool = _negative_spans(vuln_idx, hunks, tgts, [a for a, _ in _annotated(pair, vuln_idx)])
     rng = random.Random(f"{seed}:{pair['id']}")
     n_neg = 0
     for s in rng.sample(pool, min(max(n_negatives, 0), len(pool))):
