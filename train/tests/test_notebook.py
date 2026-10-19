@@ -47,6 +47,7 @@ def _vendored(cell, name):
 @pytest.mark.parametrize("name,fn,src_comment", [
     ("merge_consecutive_roles", model.merge_consecutive_roles, "orion/lm/model.py"),
     ("_turn_end_id", model._turn_end_id, "orion/lm/model.py"),
+    ("encode_prompt", model.encode_prompt, "orion/lm/model.py"),
     ("resolve_turn_end", sft_encode.resolve_turn_end, "train/sft_encode.py"),
     ("encode_row", sft_encode.encode_row, "train/sft_encode.py"),
 ])
@@ -88,3 +89,13 @@ def test_cell_2_is_labelled_throughput_projection():
 
 def test_merges_and_saves():
     assert any("save_pretrained_merged" in s or "merge_and_unload" in s for s in _code())
+
+
+def test_max_seq_len_is_the_runtime_hard_cap():
+    """Final review M8: rows longer than the runtime's hard cap would raise ContextOverflow there, so they are
+    dropped here too (the printed DROPPED count is relative to the same cap)."""
+    holder = next(s for s in _code() if "\nLORA_R =" in "\n" + s)
+    line = next(ln for ln in holder.splitlines() if ln.startswith("MAX_SEQ_LEN ="))
+    cap = inspect.signature(model.MlxModel.__init__).parameters["context_cap"].default
+    assert int(line.split("=")[1].split("#")[0]) == cap == 8000
+    assert "context_cap" in line                          # says so next to it, like THINKING

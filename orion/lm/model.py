@@ -224,6 +224,14 @@ def _turn_end_id(render, encode, special_ids: set[int]) -> int | None:
     return ids[0] if ids and ids[0] in special_ids else None
 
 
+def encode_prompt(tok, text: str) -> list[int]:
+    """Token ids of a templated prompt as the runtime feeds it: the template usually writes the BOS itself, so
+    specials are added only when it did not (mlx_lm's own rule). Shared by `MlxModel` and SFT encoding."""
+    bos = tok.bos_token
+    add_special = bos is None or not text.startswith(bos)
+    return list(tok.encode(text, add_special_tokens=add_special))
+
+
 def _action_regex() -> str:
     from outlines_core.json_schema import build_regex_from_schema
     from orion.lm import format as fmt
@@ -310,10 +318,7 @@ class MlxModel:
                                        self._last_stop_text)
         if spliced is not None:
             return spliced, True
-        bos = self.tokenizer.bos_token
-        # The template already wrote the BOS; only add specials when it did not (mlx_lm's own rule).
-        add_special = bos is None or not text.startswith(bos)
-        return list(self.tokenizer.encode(text, add_special_tokens=add_special)), False
+        return encode_prompt(self.tokenizer, text), False
 
     # -- cache ---------------------------------------------------------------------------------
 
