@@ -96,6 +96,11 @@ def _index_and_edges(batch: schema.Batch):
             m, c = from_key.get("full_name"), to_key.get("uid")
             if m is not None and c is not None:
                 contains.setdefault(m, []).append(c)
+    # Sorted neighbours: the BFS parent of a node is its first-visited predecessor, so the path picked
+    # among equally short ones must not depend on the order FLOWS_TO edges were listed in (a build
+    # lists them in Joern order, `orion reanalyze` in Neo4j storage order).
+    for dsts in flows.values():
+        dsts.sort()
     return call_props, flows, self_loops, entry_methods, contains
 
 
@@ -127,7 +132,9 @@ def pathfind(batch: schema.Batch, profile) -> dict:
     origin: dict[str, str] = {}
     dist: dict[str, int] = {}
     queue: deque[str] = deque()
-    for s in sources:
+    # Sorted, not set order: when two sources reach a sink at the same depth, the one enqueued first
+    # wins, and str set order changes with PYTHONHASHSEED.
+    for s in sorted(sources):
         if s not in dist:
             dist[s], parent[s], origin[s] = 0, None, s
             queue.append(s)

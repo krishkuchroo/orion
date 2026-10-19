@@ -179,7 +179,10 @@ def tag_centrality(batch: schema.Batch) -> dict:
     adj, _sources = _adjacency_and_sources(batch)
 
     g = nx.DiGraph()
-    g.add_nodes_from(reachable)
+    # Sorted, not set order: networkx samples its k pivots from the graph's node order (seed only fixes
+    # the RNG), and even exact betweenness sums floats in node order. Set order changes with
+    # PYTHONHASHSEED, so an unsorted insert made centrality -- and pathfind's ranking -- vary per run.
+    g.add_nodes_from(sorted(reachable))
     for src, nbrs in adj.items():
         if src in reachable:
             for dst in nbrs:
