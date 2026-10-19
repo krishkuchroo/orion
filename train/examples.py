@@ -49,25 +49,32 @@ def cut(trace: dict, *, schema_text: str) -> list[dict]:
     return out
 
 
-def mix(groups: dict[str, list[dict]], shares: dict[str, float], *, total: int | None, seed: int) -> list[dict]:
-    """Draw each group in proportion to its share; a short group is used whole (shortfall logged).
+def _wants(groups: dict[str, list[dict]], shares: dict[str, float], total: int | None) -> dict[str, int]:
+    """round(share * total) per group with a positive share (shares renormalised over the groups present).
     `total=None` takes the largest total every group can fill."""
-    rng = random.Random(seed)
     active = {k: s for k, s in shares.items() if s > 0 and k in groups}
     if not active:
-        return []
+        return {}
     norm = sum(active.values())
     active = {k: s / norm for k, s in active.items()}
     if total is None:
         total = int(min(len(groups[k]) / s for k, s in active.items()))
+    return {k: round(active[k] * total) for k in sorted(active)}
+
+
+def mix(groups: dict[str, list[dict]], shares: dict[str, float], *, total: int | None, seed: int) -> list[dict]:
+    """Draw each group in proportion to its share; a short group is used whole (shortfall logged), and a group
+    drawn below what it has is logged too. `total=None` takes the largest total every group can fill."""
+    rng = random.Random(seed)
     out: list[dict] = []
-    for k in sorted(active):
-        want = round(active[k] * total)
+    for k, want in _wants(groups, shares, total).items():
         have = groups[k]
         if want > len(have):
             log.warning("mix: group %r shortfall: wanted %d, have %d (used whole)", k, want, len(have))
             out.extend(have)
         else:
+            if want < len(have):
+                log.warning("mix: group %r down-sampled: using %d of %d rows", k, want, len(have))
             out.extend(rng.sample(have, want))
     rng.shuffle(out)
     return out
@@ -90,11 +97,14 @@ def _write(path: str, rows: list[dict]) -> None:
             f.write(json.dumps(r, sort_keys=True) + "\n")
 
 
-def export(stage1_jsonl, stage2_jsonl, cypher_rows, *, out_dir, schema_text=None, shares, seed) -> dict:
+def export(stage1_jsonl, stage2_jsonl, cypher_rows, *, out_dir, schema_text=None, shares, seed,
+           total: int | None = None) -> dict:
     """Write `train.jsonl` (mixed by `shares`) and `dev.jsonl` (all dev rows, unmixed). `oldcve` is
     never written; a dev pair never reaches train. Every row needs a split, and every pair_id must have
     ONE split across all inputs, or export raises. `schema_text` defaults to the runtime's
-    `slice.pruned_schema()`."""
+    `slice.pruned_schema()`. `total` (train rows to mix) defaults to every available train row of the
+    groups with a positive share, so a small group is used whole (shortfall logged) instead of capping the
+    others; `used` in the returned counts is the rows each group contributed."""
     if schema_text is None:
         schema_text = lm_slice.pruned_schema()
     pair_splits: dict[str, set[str]] = {}
@@ -130,7 +140,11 @@ def export(stage1_jsonl, stage2_jsonl, cypher_rows, *, out_dir, schema_text=None
     for pid, sp in sorted(pair_splits.items()):
         if len(sp) > 1:
             raise ValueError(f"pair {pid!r} appears in more than one split: {sorted(sp)}")
-    train = mix(by_split["train"], shares, total=None, seed=seed)
+    groups = by_split["train"]
+    if total is None:
+        total = sum(len(groups[k]) for k in groups if shares.get(k, 0) > 0)
+    train = mix(groups, shares, total=total, seed=seed)
+    used = {k: min(want, len(groups[k])) for k, want in _wants(groups, shares, total).items()}
     rng = random.Random(seed)
     dev = [r for g in sorted(by_split["dev"]) for r in by_split["dev"][g]]
     rng.shuffle(dev)
@@ -138,4 +152,4 @@ def export(stage1_jsonl, stage2_jsonl, cypher_rows, *, out_dir, schema_text=None
     _write(os.path.join(out_dir, "train.jsonl"), train)
     _write(os.path.join(out_dir, "dev.jsonl"), dev)
     return {"train": len(train), "dev": len(dev), "oldcve_dropped": dropped,
-            "available": {s: {g: len(v) for g, v in gs.items()} for s, gs in by_split.items()}}
+            "available": {s: {g: len(v) for g, v in gs.items()} for s, gs in by_split.items()}, "used": used}

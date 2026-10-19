@@ -133,3 +133,21 @@ def test_export_requires_pair_id_on_stage_rows_but_not_cypher(tmp_path):
     c = examples.export(str(s1), None, cy, out_dir=str(tmp_path / "d"), schema_text="S",
                         shares={"stage1": 0.5, "cypher": 0.5}, seed=0)
     assert c["train"] == 2
+
+
+def test_export_total_defaults_to_all_train_rows_logs_and_reports_used(tmp_path, caplog):
+    """Final review I6: 1000 Stage 1 + 50 Stage 2 rows at 0.8/0.2. The default total is every train row, so
+    Stage 1 is no longer cut to 4x Stage 2; down-sampling and shortfalls are logged; `used` is returned."""
+    row = {"label": "patched", "tier": "single", "case": CASE, "lead": None, "split": "train"}
+    s1, s2 = tmp_path / "s1.jsonl", tmp_path / "s2.jsonl"
+    _write(s1, [{**row, "pair_id": f"a{i}"} for i in range(1000)])
+    _write(s2, [{**row, "pair_id": f"b{i}", "tier": "graph"} for i in range(50)])
+    shares = {"stage1": 0.8, "stage2": 0.2}
+    with caplog.at_level(logging.WARNING):
+        c = examples.export(str(s1), str(s2), None, out_dir=str(tmp_path / "o"), schema_text="S", shares=shares, seed=0)
+    assert c["used"] == {"stage1": 840, "stage2": 50} and c["train"] == 890      # total = 1050
+    assert c["available"]["train"] == {"stage1": 1000, "stage2": 50}
+    assert "'stage1' down-sampled" in caplog.text and "'stage2' shortfall" in caplog.text
+    c = examples.export(str(s1), str(s2), None, out_dir=str(tmp_path / "p"), schema_text="S", shares=shares, seed=0,
+                        total=250)
+    assert c["used"] == {"stage1": 200, "stage2": 50} and c["train"] == 250
