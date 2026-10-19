@@ -59,3 +59,14 @@ def test_member_calls_nested_functions_and_update(tmp_path):
     idx.update("n.js", "function only(){ z() }\n")
     assert [s.name for s in idx.files["n.js"]] == ["only"]
     assert idx.source("n.js", 1, 1) == "function only(){ z() }"
+
+
+def test_source_and_lines_split_on_newline_only(tmp_path):
+    """Form feed and U+2028 must not shift lines; source(span) returns exactly the span's lines."""
+    text = "x = 1\n\x0c\ndef f():\n    s = 'a b'\n    return g(s)\n\ndef g(v):\n    return v\n"
+    idx = _idx(tmp_path, {"p.py": text})
+    f = idx.enclosing("p.py", 5)
+    assert (f.name, f.start, f.end) == ("f", 3, 5)
+    assert idx.source("p.py", f.start, f.end) == "def f():\n    s = 'a b'\n    return g(s)"
+    assert idx.enclosing("p.py", 8).name == "g"
+    assert idx.enclosing("p.py", 1).name == "<module>"

@@ -9,7 +9,6 @@ import os
 import posixpath
 from dataclasses import dataclass
 
-from eval.dataset.enrich import _is_test
 
 LANG_BY_EXT = {".js": "javascript", ".mjs": "javascript", ".cjs": "javascript", ".jsx": "javascript",
                ".ts": "typescript", ".tsx": "tsx", ".py": "python", ".java": "java"}
@@ -17,6 +16,20 @@ MAX_FILE_BYTES = 1_000_000
 MODULE_WINDOW = 20
 SKIP_DIRS = ("node_modules", "vendor", "dist", "build", "target", ".git", "__pycache__", "venv", ".venv")
 MODULE = "<module>"
+_TEST_MARKERS = ("/test/", "/tests/", ".test.", "_test.", "spec.")
+
+
+def is_test_path(path: str) -> bool:
+    p = "/" + path
+    return any(m in p for m in _TEST_MARKERS)
+
+
+def _split_lines(text: str) -> list[str]:
+    """Lines as tree-sitter counts them: split on "\n" only (not \x0c, U+2028, ...)."""
+    lines = text.split("\n")
+    if lines[-1] == "":
+        lines.pop()
+    return lines
 
 _JS_FUNCS = {"function_declaration", "generator_function_declaration", "method_definition"}
 _JS_EXPRS = {"arrow_function", "function_expression", "function", "generator_function"}
@@ -183,7 +196,7 @@ class RepoIndex:
                 except OSError as e:
                     self.skipped[rel] = f"unreadable: {e}"
                     continue
-                if _is_test(rel):
+                if is_test_path(rel):
                     self.skipped[rel] = "test file"
                     continue
                 try:
@@ -204,7 +217,7 @@ class RepoIndex:
             self.skipped[rel] = "no parser"
             return
         self.files[rel] = spans
-        self._lines[rel] = len(text.splitlines())
+        self._lines[rel] = len(_split_lines(text))
         self._by_name = None
 
     def update(self, rel: str, text: str) -> None:
@@ -219,7 +232,7 @@ class RepoIndex:
         if text is None:
             with open(os.path.join(self.root, file), encoding="utf-8", errors="replace") as f:
                 text = f.read()
-        return "\n".join(text.splitlines()[max(start, 1) - 1:end])
+        return "\n".join(_split_lines(text)[max(start, 1) - 1:end])
 
     def enclosing(self, file: str, line: int) -> Span | None:
         spans = self.files.get(file)

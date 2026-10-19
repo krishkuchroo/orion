@@ -83,9 +83,8 @@ Rules for working on it:
 ## Orion-LM track (branch `eval/orion-lm`, started 2026-10-18)
 
 Design: `docs/superpowers/specs/2026-10-18-orion-lm-design.md` — **APPROVED 2026-10-18.** Plan:
-`docs/superpowers/plans/2026-10-18-orion-lm.md` (rev 2). **Build paused after Task E3** — A1–A6,
-B1–B6, C1, E1–E3 done and reviewed (eval 190 passed; orion 259 passed + 1 expected Neo4j fail);
-next E4. Status, rulings and Krish-check items: `docs/superpowers/plans/2026-10-18-orion-lm-progress.md`.
+`docs/superpowers/plans/2026-10-18-orion-lm.md` (rev 2). **Executing the hybrid plan** (D2/D3 done,
+H-tasks in progress); earlier A1–A6, B1–B6, C1, E1–E3 done and reviewed. Status, rulings and Krish-check items: `docs/superpowers/plans/2026-10-18-orion-lm-progress.md`.
 Goal: fine-tune an open-weight model (Unsloth, cloud GPU) that runs
 **in-process inside Orion** (MLX-LM, no Claude, no Ollama) via a **hand-written prompter** that
 writes Cypher over the Joern→Neo4j graph and judges code vulnerable/safe; then benchmark
