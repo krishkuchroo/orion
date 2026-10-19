@@ -234,3 +234,45 @@ def test_yield_all_writes_one_record_per_built_pair_and_resumes(tmp_path):
     assert [x["id"] for x in rows] == ["X", "Z"]
     assert rows[0]["n_hunks"] == 1 and rows[0]["gold_flow"]["uid"] == "F1"
     assert rows[1]["n_hunks"] == 2 and rows[1]["gold_flow"]["uid"] == "F1"   # stored hunks, no mirror needed
+
+
+# ───────────────────────────── patched_counterpart ─────────────────────────────
+
+def test_patched_counterpart_matches_by_file_mapped_line_and_call_name_not_uid():
+    """The patched flow has different uids (they hash the scan_id); it matches the vulnerable flow
+    through (file, diff-mapped line, call name). An insertion of 2 lines above shifts the sink 5 -> 7;
+    a same-line flow with a different sink call name must not match."""
+    h = {"file": "a.js", "old_file": "a.js", "old_start": 2, "old_end": 1, "new_start": 3, "new_end": 4}
+    db = StubDB({
+        "v": {"calls": [call("vs", "a.js", 1, "src"), call("vk", "a.js", 5, "exec")],
+              "methods": [meth("m", "a.js", 1)],
+              "flows": [flow("vf", ["vs", "vk"], 0)]},
+        "p": {"calls": [call("ps", "a.js", 1, "src"), call("pk", "a.js", 7, "exec"), call("pz", "a.js", 7, "other")],
+              "methods": [meth("m", "a.js", 1)],
+              "flows": [flow("pf_other", ["ps", "pz"], 0), flow("pf", ["ps", "pk"], 3)]}})
+    gold = {"uid": "vf", "source_uid": "vs", "sink_uid": "vk"}
+    got = fixmap.patched_counterpart(db, gold, [h], vulnerable_scan_id="v", patched_scan_id="p")
+    assert got["uid"] == "pf" and got["path_uids"] == ["ps", "pk"]
+
+
+def test_patched_counterpart_none_when_gone_or_unresolved():
+    db = StubDB({
+        "v": {"calls": [call("vs", "a.js", 1, "src"), call("vk", "a.js", 5, "exec")], "methods": []},
+        "p": {"calls": [call("ps", "a.js", 1, "src"), call("pk", "a.js", 5, "exec")], "methods": [],
+              "flows": []}})
+    kw = dict(vulnerable_scan_id="v", patched_scan_id="p")
+    assert fixmap.patched_counterpart(db, {"source_uid": "vs", "sink_uid": "vk"}, [], **kw) is None
+    assert fixmap.patched_counterpart(db, {"source_uid": "nope", "sink_uid": "vk"}, [], **kw) is None
+
+
+def test_pair_yield_reports_the_same_gone_and_unresolved_split_as_the_matcher():
+    db = StubDB({
+        "v": {"calls": [call("vs", "a.js", 1, "src"), call("vk", "a.js", 5, "exec"), call("vk2", "a.js", 6, "eval")],
+              "methods": [meth("m", "a.js", 1)],
+              "flows": [flow("f1", ["vs", "vk"], 0), flow("f2", ["vs", "vk2"], 1), flow("f3", ["param", "vk"], 2)]},
+        "p": {"calls": [call("ps", "a.js", 1, "src"), call("pk", "a.js", 5, "exec")], "methods": [],
+              "flows": [flow("pf", ["ps", "pk"], 0)]}})
+    h = {"file": "a.js", "old_file": "a.js", "old_start": 4, "old_end": 6, "new_start": 4, "new_end": 6}
+    rec = fixmap.pair_yield(db, "P", [h], vulnerable_scan_id="v", patched_scan_id="p")
+    assert [f["uid"] for f in rec["flows_gone_on_patched"]] == ["f2"]
+    assert [f["uid"] for f in rec["flows_unresolved"]] == ["f3"]

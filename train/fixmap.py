@@ -12,6 +12,8 @@
   (rank 0 = best) whose parsed ``path_uids`` contains a fix-site call uid, else None with reason
   ``no_site_nodes`` | ``no_flow_through_site`` (or ``query_error: ...``). Never raises.
 * ``pair_yield``: the per-pair yield record, including ``flows_gone_on_patched``.
+* ``patched_counterpart``: a vulnerable flow's matching flow on the patched scan (the same matcher
+  ``pair_yield`` uses for flows_gone_on_patched / flows_unresolved).
 
 Uids are treated as opaque strings (no format parsing: CpgParameter uids are changing upstream). They
 also hash the scan_id, so a vulnerable-scan uid NEVER equals a patched-scan uid. "Same source->sink on
@@ -179,11 +181,14 @@ def _flows(db, scan_id: str) -> list[dict]:
     return out
 
 
+def _rank_key(f: dict) -> tuple:
+    return (f["rank"] is None, f["rank"] if isinstance(f["rank"], (int, float)) else 0, str(f["uid"]))
+
+
 def _through(flows: list[dict], uids: set[str]) -> list[dict]:
     hits = [{**f, "site_uids": sorted(uids.intersection(f["path_uids"]))} for f in flows
             if uids.intersection(f["path_uids"])]
-    hits.sort(key=lambda f: (f["rank"] is None, f["rank"] if isinstance(f["rank"], (int, float)) else 0,
-                             str(f["uid"])))
+    hits.sort(key=_rank_key)
     return hits
 
 
@@ -229,6 +234,44 @@ def map_line(hunks: list[dict], file: str, line: int, *, root: str | None = None
     return new, [line + delta]
 
 
+class _PatchedMatcher:
+    """The ONE implementation of cross-scan flow matching (used by `pair_yield` and `patched_counterpart`).
+    A vulnerable flow matches a patched flow when its source and sink nodes match by (file, diff-mapped
+    line, call name); uids cannot be compared because they hash the scan_id."""
+
+    def __init__(self, db, vulnerable_scan_id: str, patched_scan_id: str, hunks: list[dict],
+                 root: str | None = None, *, vidx: "_ScanIndex | None" = None) -> None:
+        self.vidx = vidx if vidx is not None else _ScanIndex(db, vulnerable_scan_id, root)
+        self.pidx = _ScanIndex(db, patched_scan_id, root)
+        self.hunks, self.root = hunks, root
+        self.on_patched: dict[tuple, list[dict]] = {}
+        for pf in _flows(db, patched_scan_id):
+            s, k = self.pidx.by_uid.get(pf["source_uid"]), self.pidx.by_uid.get(pf["sink_uid"])
+            if s and k:
+                self.on_patched.setdefault((s, k), []).append(pf)
+
+    def match(self, v: dict) -> tuple[dict | None, str | None]:
+        """(best-ranked matching patched flow, None) | (None, 'gone') | (None, 'unresolved'); 'unresolved'
+        = the source or sink is not a CpgCall of the vulnerable scan, so it cannot be matched."""
+        s, k = self.vidx.by_uid.get(v["source_uid"]), self.vidx.by_uid.get(v["sink_uid"])
+        if s is None or k is None:
+            return None, "unresolved"
+        (sf, sl), (kf, kl) = (map_line(self.hunks, s[0], s[1], root=self.root),
+                              map_line(self.hunks, k[0], k[1], root=self.root))
+        found = [pf for a in sl for b in kl for pf in self.on_patched.get(((sf, a, s[2]), (kf, b, k[2])), ())]
+        if not found:
+            return None, "gone"
+        return min(found, key=_rank_key), None
+
+
+def patched_counterpart(db, gold: dict, hunks: list[dict], *, vulnerable_scan_id: str,
+                        patched_scan_id: str, root: str | None = None) -> dict | None:
+    """The patched-scan CandidateFlow (with `path_uids`; best-ranked if several) whose source and sink
+    match those of the vulnerable flow `gold` ({source_uid, sink_uid, ...}) under the fix diff, or None
+    when the flow is gone or cannot be matched. Raises GraphReadError if a graph cannot be read."""
+    return _PatchedMatcher(db, vulnerable_scan_id, patched_scan_id, hunks, root).match(gold)[0]
+
+
 def _compact(f: dict) -> dict:
     return {k: f.get(k) for k in ("uid", "source_uid", "sink_uid", "sink_category", "rank")}
 
@@ -262,20 +305,13 @@ def pair_yield(db, pair_id: str, hunks: list[dict], *, vulnerable_scan_id: str,
         rec["gold_flow"] = hits[0]
         if patched_scan_id is None:
             return rec
-        pidx = _ScanIndex(db, patched_scan_id, root)
-        on_patched = set()
-        for pf in _flows(db, patched_scan_id):
-            s, k = pidx.by_uid.get(pf["source_uid"]), pidx.by_uid.get(pf["sink_uid"])
-            if s and k:
-                on_patched.add((s, k))
+        matcher = _PatchedMatcher(db, vulnerable_scan_id, patched_scan_id, hunks, root, vidx=vidx)
         gone, unresolved = [], []
         for v in hits:
-            s, k = vidx.by_uid.get(v["source_uid"]), vidx.by_uid.get(v["sink_uid"])
-            if s is None or k is None:
+            _, why = matcher.match(v)
+            if why == "unresolved":
                 unresolved.append(_compact(v))
-                continue
-            (sf, sl), (kf, kl) = map_line(hunks, s[0], s[1], root=root), map_line(hunks, k[0], k[1], root=root)
-            if not any(((sf, a, s[2]), (kf, b, k[2])) in on_patched for a in sl for b in kl):
+            elif why == "gone":
                 gone.append(_compact(v))
         rec.update(flows_gone_on_patched=gone, flows_unresolved=unresolved)
     except Exception as e:  # noqa: BLE001 -- recorded, never fatal
