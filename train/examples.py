@@ -105,7 +105,9 @@ def export(stage1_jsonl, stage2_jsonl, cypher_rows, *, out_dir, schema_text=None
         nonlocal dropped
         for r in rows:
             pid = (r.get("meta") or {}).get("pair_id")
-            if pid is not None:
+            if group != "cypher" and not pid:
+                raise ValueError(f"{group} row has no pair_id (split {split!r}): cannot check it for leakage")
+            if pid:
                 pair_splits.setdefault(pid, set()).add(split)
         if split == "oldcve":
             dropped += len(rows)

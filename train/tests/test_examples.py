@@ -111,3 +111,25 @@ def test_export_default_schema_is_runtime_pruned_schema(tmp_path):
     examples.export(str(s1), None, None, out_dir=str(tmp_path / "o"), shares={"stage1": 1.0}, seed=0)
     row = json.loads((tmp_path / "o" / "train.jsonl").read_text().splitlines()[0])
     assert row["messages"][0] == fmt.system_message(lm_slice.pruned_schema())
+
+
+def test_export_requires_pair_id_on_stage_rows_but_not_cypher(tmp_path):
+    good = {"pair_id": "P", "label": "patched", "tier": "single", "case": CASE, "lead": None, "split": "train"}
+    s1 = tmp_path / "s1.jsonl"
+    _write(s1, [{**good, "pair_id": ""}])
+    with pytest.raises(ValueError, match="pair_id"):
+        examples.export(str(s1), None, None, out_dir=str(tmp_path / "a"), schema_text="S", shares={"stage1": 1.0}, seed=0)
+    _write(s1, [{k: v for k, v in good.items() if k != "pair_id"}])
+    with pytest.raises(ValueError, match="pair_id"):
+        examples.export(str(s1), None, None, out_dir=str(tmp_path / "b"), schema_text="S", shares={"stage1": 1.0}, seed=0)
+    _write(s1, [good])
+    s2 = tmp_path / "s2.jsonl"
+    _write(s2, [{"case": CASE, "actions": [{"action": "final", "leads": []}], "results": [], "meta": {"split": "train"}}])
+    with pytest.raises(ValueError, match="pair_id"):
+        examples.export(str(s1), str(s2), None, out_dir=str(tmp_path / "c"), schema_text="S",
+                        shares={"stage1": 0.5, "stage2": 0.5}, seed=0)
+    assert not (tmp_path / "c" / "train.jsonl").exists()
+    cy = [{"messages": [], "target": "{}", "meta": {"split": "train"}}]
+    c = examples.export(str(s1), None, cy, out_dir=str(tmp_path / "d"), schema_text="S",
+                        shares={"stage1": 0.5, "cypher": 0.5}, seed=0)
+    assert c["train"] == 2
