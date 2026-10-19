@@ -164,6 +164,33 @@ def test_negative_sampling_is_deterministic_per_seed(trees):
     assert any(pick(s) != pick(0) for s in range(1, 8))
 
 
+def _many_flows(db, ranks):
+    for k in ranks:
+        db.scans["P:vulnerable"]["flows"].append(_flow(f"fx{k}", [f"s{k}", f"k{k}"], k))
+        db.scans["P:vulnerable"]["calls"] += [_call(f"s{k}", "b.js", 1, "src", "other"),
+                                              _call(f"k{k}", "b.js", 2, "eval", "other")]
+
+
+def test_negatives_come_only_from_the_flows_the_runtime_judges(trees):
+    """Final review M7: the runtime judges the top engine.DEFAULT_MAX_FLOWS flows, so negatives come from that
+    rank range, never from the long tail of the wide read."""
+    from orion.lm import engine
+    db = graph()
+    _many_flows(db, range(2, 120))
+    neg = [e["case"]["rank"] for e in run_cases(db, trees, n_negatives=500) if e["label"] == "negative"]
+    assert max(neg) < engine.DEFAULT_MAX_FLOWS and len(neg) == engine.DEFAULT_MAX_FLOWS - 1    # all but gold
+
+
+def test_gold_flow_ranked_past_the_runtime_cap_is_still_found(trees):
+    """The wide read (MAX_FLOWS) is kept for finding the gold flow."""
+    db = graph()
+    db.scans["P:vulnerable"]["flows"] = [f for f in db.scans["P:vulnerable"]["flows"] if f["uid"] != "fl0"]
+    _many_flows(db, range(2, 80))
+    db.scans["P:vulnerable"]["flows"].append(_flow("fl0", ["vs0", "vk0"], 99))
+    ex = run_cases(db, trees, yrec(gold_flow={**GOLD, "rank": 99}), n_negatives=0)
+    assert [e["label"] for e in ex][:1] == ["vulnerable"] and ex[0]["case"]["rank"] == 99
+
+
 def test_no_gold_flow_gives_no_examples(trees):
     assert run_cases(graph(), trees, yrec(gold_flow=None)) == []
 

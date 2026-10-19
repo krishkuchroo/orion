@@ -20,7 +20,8 @@ split}` plus `stage: 2`:
     patched     the gold flow's counterpart on the PATCHED scan (`fixmap.patched_counterpart`), no lead.
                 Omitted when the flow is gone (`flow_gone`), cannot be matched (`flow_unresolved`), has no
                 counterpart, or there is no patched scan
-    negative    seeded vulnerable-scan flows whose path touches no fix-site call, no lead
+    negative    seeded vulnerable-scan flows whose path touches no fix-site call, no lead; drawn only from the
+                top `engine.DEFAULT_MAX_FLOWS` flows by rank (the ones the runtime judges)
 
 Traces (`trace_for`) are `{case, actions: [*run_cypher, final], results, meta}`; `meta` carries `pair_id`
 and `split` (train/examples.py `export` needs them), plus `fix_site` on the vulnerable trace (train/rounds.py).
@@ -51,6 +52,7 @@ if __package__ in (None, ""):
 
 from eval import repo as erepo  # noqa: E402
 from orion.lm import cases as _cases  # noqa: E402
+from orion.lm import engine as lm_engine  # noqa: E402
 from orion.lm import slice as lm_slice  # noqa: E402
 from orion.lm import tools  # noqa: E402
 from orion.lm.codeindex import RepoIndex  # noqa: E402
@@ -60,7 +62,7 @@ from train.sources import cwe_class  # noqa: E402
 from train.stage1 import _append, _done_ids, primary_cwe  # noqa: E402
 
 SPLITS = ("train", "dev")
-MAX_FLOWS = 5000                  # candidate flows read per scan (the gold flow can rank low)
+MAX_FLOWS = 5000                  # candidate flows read per scan to find the gold flow (it can rank low)
 PLACEHOLDERS = ("source_uid", "sink_uid")
 _PH = re.compile(r"<<(\w+)>>")
 
@@ -176,7 +178,7 @@ def _graph_cases(db, yield_rec: dict, pair: dict, vuln_tree: str, patched_tree: 
                 why.append("patched_no_snippet")
 
     site_uids = {u for s in sites for u in s["call_uids"]}
-    pool = [f for f in flows if not site_uids.intersection(f["path_uids"])
+    pool = [f for f in flows[:lm_engine.DEFAULT_MAX_FLOWS] if not site_uids.intersection(f["path_uids"])
             and (f["source_uid"], f["sink_uid"]) != (vflow["source_uid"], vflow["sink_uid"])]
     random.Random(f"{seed}:{pair['id']}").shuffle(pool)
     got = 0
