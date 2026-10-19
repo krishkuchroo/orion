@@ -158,6 +158,15 @@ def _kind_index(batch: schema.Batch) -> dict[tuple[str, str], list[dict]]:
     return index
 
 
+def _order_key(ident: tuple[str, str], index: dict[tuple[str, str], list[dict]]) -> tuple:
+    """A scan_id-free sort key for a traversal identity (see tag_centrality)."""
+    kind, key = ident
+    if kind == _METHOD:
+        return (kind, key)
+    from .pathfind import location_key
+    return (kind, *location_key({key: index[ident][0]} if ident in index else {}, key))
+
+
 def tag_centrality(batch: schema.Batch) -> dict:
     """Stamp betweenness `centrality` (0-1) onto every CpgMethod/CpgCall, over the ATTACKER-REACHABLE
     call graph. Must run AFTER `tag_reachability` (it reads `reachable_from_entry`).
@@ -182,7 +191,9 @@ def tag_centrality(batch: schema.Batch) -> dict:
     # Sorted, not set order: networkx samples its k pivots from the graph's node order (seed only fixes
     # the RNG), and even exact betweenness sums floats in node order. Set order changes with
     # PYTHONHASHSEED, so an unsorted insert made centrality -- and pathfind's ranking -- vary per run.
-    g.add_nodes_from(sorted(reachable))
+    # Sorted by location, not by call uid (which hashes the scan_id in), so every scan_id of the same
+    # code gets the same order: methods by full_name, calls by (file, line, column, code).
+    g.add_nodes_from(sorted(reachable, key=lambda ident: _order_key(ident, index)))
     for src, nbrs in adj.items():
         if src in reachable:
             for dst in nbrs:

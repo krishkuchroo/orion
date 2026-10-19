@@ -100,8 +100,18 @@ def _index_and_edges(batch: schema.Batch):
     # among equally short ones must not depend on the order FLOWS_TO edges were listed in (a build
     # lists them in Joern order, `orion reanalyze` in Neo4j storage order).
     for dsts in flows.values():
-        dsts.sort()
+        dsts.sort(key=lambda uid: location_key(call_props, uid))
     return call_props, flows, self_loops, entry_methods, contains
+
+
+def location_key(call_props: dict[str, dict], uid: str) -> tuple:
+    """Order calls by where they are in the source, not by uid: a uid hashes the scan_id in, so
+    sorting by it would break ties differently in every scan of the same code. (file, line, column,
+    code) is what the uid is made of minus the scan_id; the uid itself only settles an exact tie."""
+    p = call_props.get(uid, {})
+    line, col = p.get("line"), p.get("column")
+    return (str(p.get("file_path") or ""), line if isinstance(line, int) else -1,
+            col if isinstance(col, int) else -1, str(p.get("code") or ""), uid)
 
 
 def _sources(self_loops: set[str], entry_methods: set[str], contains: dict[str, list[str]]) -> set[str]:
@@ -133,8 +143,9 @@ def pathfind(batch: schema.Batch, profile) -> dict:
     dist: dict[str, int] = {}
     queue: deque[str] = deque()
     # Sorted, not set order: when two sources reach a sink at the same depth, the one enqueued first
-    # wins, and str set order changes with PYTHONHASHSEED.
-    for s in sorted(sources):
+    # wins, and str set order changes with PYTHONHASHSEED. Sorted by location, so the winner is the
+    # same in every scan_id (see location_key).
+    for s in sorted(sources, key=lambda uid: location_key(call_props, uid)):
         if s not in dist:
             dist[s], parent[s], origin[s] = 0, None, s
             queue.append(s)
@@ -166,8 +177,9 @@ def pathfind(batch: schema.Batch, profile) -> dict:
         path = _path(uid)
         raw.append((_severity(category), centrality, len(path), category, origin[uid], uid, path))
 
-    # Rank: severity desc, centrality desc, shorter path first, then uid for a stable tie-break.
-    raw.sort(key=lambda r: (-r[0], -r[1], r[2], r[5]))
+    # Rank: severity desc, centrality desc, shorter path first, then the sink's location (not its uid,
+    # which differs per scan_id) for a stable tie-break.
+    raw.sort(key=lambda r: (-r[0], -r[1], r[2], location_key(call_props, r[5])))
 
     n_sinks = len(raw)
     for rank, (_sev, _cent, _plen, category, source_uid, sink_uid, path) in enumerate(raw[:_MAX_FLOWS]):

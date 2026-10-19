@@ -3,13 +3,17 @@
 A guard, not a bug test: a change that moves any taint edge or candidate flow on NodeGoat or PyGoat
 fails here with the rows it added and the rows it lost.
 
-Where the goldens come from:
-  - nodegoat_*.json: the pre-hardening code (eval/orion-lm @ d20173a). It gave the same rows under
-    PYTHONHASHSEED 0/3/7, so they are the code's real output.
-  - pygoat_*.json: written AFTER the change-1 determinism fix. Before it, PyGoat's 4080-node
-    reachable graph took the sampled-centrality path and CandidateFlow output changed with the hash
-    seed (default: same 98 flows, ranks moved; lm: 135-171 of the 300 kept flows changed), so the
-    old code had no single output to freeze. FLOWS_TO (1075) was seed-independent before and after.
+Where the goldens come from: all four are written by the code after the determinism fixes
+(hash-seed-free, then scan_id-free tie-breaks), because the old code had no single output to freeze:
+  - its CandidateFlow ranks broke ties by call uid, which hashes the scan_id in, so every scan_id
+    of the same code ranked tied flows differently (NodeGoat: 84 of 116 ranks moved between two
+    scan_ids);
+  - on PyGoat (4080 reachable nodes, sampled centrality) the output also changed with
+    PYTHONHASHSEED (lm: 135-171 of the 300 kept flows changed between seeds).
+Against the old goldens (NodeGoat from eval/orion-lm @ d20173a, PyGoat from the first fix):
+FLOWS_TO identical (217, 1075); NodeGoat default/lm and PyGoat default keep exactly the same flows
+(sink, category, path) with only ranks moved; PyGoat lm swaps 48 of its 300 capped flows, since
+which flows fit under pathfind's 300 cap follows the ranking.
 """
 from __future__ import annotations
 

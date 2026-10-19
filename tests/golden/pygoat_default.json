@@ -9696,7 +9696,7 @@
 [
 "challenge/views.py:70",
 "redirect",
-36,
+43,
 [
 "challenge/views.py:70:redirect('login')"
 ]
@@ -9704,7 +9704,7 @@
 [
 "dockerized_labs/sensitive_data_exposure/dataexposure/views.py:138",
 "redirect",
-53,
+46,
 [
 "dockerized_labs/sensitive_data_exposure/dataexposure/views.py:138:redirect('index')"
 ]
@@ -9712,7 +9712,7 @@
 [
 "dockerized_labs/sensitive_data_exposure/dataexposure/views.py:30",
 "redirect",
-56,
+44,
 [
 "dockerized_labs/sensitive_data_exposure/dataexposure/views.py:30:redirect('profile')"
 ]
@@ -9720,7 +9720,7 @@
 [
 "dockerized_labs/sensitive_data_exposure/dataexposure/views.py:62",
 "redirect",
-80,
+45,
 [
 "dockerized_labs/sensitive_data_exposure/dataexposure/views.py:62:redirect('login')"
 ]
@@ -9728,23 +9728,23 @@
 [
 "introduction/mitre.py:170",
 "redirect",
-71,
-[
-"introduction/mitre.py:170:redirect(\"/mitre/9/lab/transaction\")"
-]
-],
-[
-"introduction/mitre.py:170",
-"redirect",
-94,
+47,
 [
 "introduction/mitre.py:170:response = redirect(\"/mitre/9/lab/transaction\")"
 ]
 ],
 [
+"introduction/mitre.py:170",
+"redirect",
+48,
+[
+"introduction/mitre.py:170:redirect(\"/mitre/9/lab/transaction\")"
+]
+],
+[
 "introduction/mitre.py:174",
 "redirect",
-76,
+49,
 [
 "introduction/mitre.py:174:redirect('/mitre/9/lab/login')"
 ]
@@ -9752,7 +9752,7 @@
 [
 "introduction/mitre.py:186",
 "redirect",
-57,
+50,
 [
 "introduction/mitre.py:186:redirect('/mitre/9/lab/login')"
 ]
@@ -9760,7 +9760,7 @@
 [
 "introduction/mitre.py:189",
 "redirect",
-49,
+51,
 [
 "introduction/mitre.py:189:redirect('/mitre/9/lab/login')"
 ]
@@ -9768,7 +9768,7 @@
 [
 "introduction/mitre.py:198",
 "redirect",
-69,
+52,
 [
 "introduction/mitre.py:198:redirect('/mitre/9/lab/login')"
 ]
@@ -9776,7 +9776,7 @@
 [
 "introduction/mitre.py:208",
 "redirect",
-67,
+53,
 [
 "introduction/mitre.py:208:redirect('/mitre/9/lab/transaction')"
 ]
@@ -9784,7 +9784,7 @@
 [
 "introduction/mitre.py:210",
 "redirect",
-62,
+54,
 [
 "introduction/mitre.py:210:redirect('/mitre/9/lab/transaction')"
 ]
@@ -9792,7 +9792,7 @@
 [
 "introduction/mitre.py:218",
 "code_exec",
-1,
+0,
 [
 "introduction/mitre.py:218:eval(expression)"
 ]
@@ -9800,7 +9800,7 @@
 [
 "introduction/mitre.py:218",
 "code_exec",
-2,
+1,
 [
 "introduction/mitre.py:218:result = eval(expression)"
 ]
@@ -9808,7 +9808,7 @@
 [
 "introduction/mitre.py:221",
 "redirect",
-39,
+37,
 [
 "introduction/mitre.py:221:redirect('/mitre/25/lab/')"
 ]
@@ -9834,7 +9834,7 @@
 "sql",
 12,
 [
-"introduction/mitre.py:247:tmp17['raw_res'] = str(res)"
+"introduction/mitre.py:247:tmp17['raw_err'] = str(err)"
 ]
 ],
 [
@@ -9842,7 +9842,7 @@
 "sql",
 13,
 [
-"introduction/mitre.py:247:tmp17['raw_err'] = str(err)"
+"introduction/mitre.py:247:tmp17['raw_res'] = str(res)"
 ]
 ],
 [
@@ -9856,7 +9856,7 @@
 [
 "introduction/views.py:1000",
 "redirect",
-47,
+94,
 [
 "introduction/views.py:1000:redirect('login')"
 ]
@@ -9864,15 +9864,7 @@
 [
 "introduction/views.py:101",
 "sql",
-20,
-[
-"introduction/views.py:101:tmp6['query']"
-]
-],
-[
-"introduction/views.py:101",
-"sql",
-30,
+14,
 [
 "introduction/views.py:101:render(request, 'Lab/XSS/xss_lab.html', {'query':q})"
 ]
@@ -9880,7 +9872,15 @@
 [
 "introduction/views.py:101",
 "sql",
-32,
+15,
+[
+"introduction/views.py:101:tmp6['query']"
+]
+],
+[
+"introduction/views.py:101",
+"sql",
+16,
 [
 "introduction/views.py:101:tmp6['query'] = q"
 ]
@@ -9888,7 +9888,7 @@
 [
 "introduction/views.py:1016",
 "redirect",
-89,
+95,
 [
 "introduction/views.py:1016:redirect('login')"
 ]
@@ -9896,7 +9896,7 @@
 [
 "introduction/views.py:103",
 "redirect",
-66,
+57,
 [
 "introduction/views.py:103:redirect('login')"
 ]
@@ -9904,7 +9904,7 @@
 [
 "introduction/views.py:1032",
 "redirect",
-95,
+96,
 [
 "introduction/views.py:1032:redirect('login')"
 ]
@@ -9912,7 +9912,7 @@
 [
 "introduction/views.py:1092",
 "redirect",
-75,
+97,
 [
 "introduction/views.py:1092:redirect('login')"
 ]
@@ -9920,7 +9920,7 @@
 [
 "introduction/views.py:120",
 "redirect",
-59,
+58,
 [
 "introduction/views.py:120:redirect('login')"
 ]
@@ -9928,7 +9928,7 @@
 [
 "introduction/views.py:136",
 "redirect",
-55,
+59,
 [
 "introduction/views.py:136:redirect('login')"
 ]
@@ -9936,7 +9936,7 @@
 [
 "introduction/views.py:145",
 "redirect",
-96,
+60,
 [
 "introduction/views.py:145:redirect('login')"
 ]
@@ -9944,7 +9944,7 @@
 [
 "introduction/views.py:158",
 "sql",
-21,
+17,
 [
 "introduction/views.py:158:sql_query = \"SELECT * FROM introduction_login WHERE user='\" + name + \"' AND password='\" + password + \"'\""
 ]
@@ -9952,7 +9952,7 @@
 [
 "introduction/views.py:159",
 "sql",
-16,
+18,
 [
 "introduction/views.py:159:print(sql_query)"
 ]
@@ -9960,7 +9960,15 @@
 [
 "introduction/views.py:162",
 "sql",
-18,
+19,
+[
+"introduction/views.py:162:val = tmp15 = login.objects\nlogin.objects.raw(sql_query)"
+]
+],
+[
+"introduction/views.py:162",
+"sql",
+20,
 [
 "introduction/views.py:162:login.objects.raw(sql_query)"
 ]
@@ -9968,23 +9976,15 @@
 [
 "introduction/views.py:162",
 "sql",
-23,
+21,
 [
 "introduction/views.py:162:tmp15.raw"
 ]
 ],
 [
-"introduction/views.py:162",
-"sql",
-25,
-[
-"introduction/views.py:162:val = tmp15 = login.objects\nlogin.objects.raw(sql_query)"
-]
-],
-[
 "introduction/views.py:165",
 "sql",
-31,
+22,
 [
 "introduction/views.py:165:render(request, 'Lab/SQL/sql_lab.html', {\"wrongpass\":password, \"sql_error\":sql_query})"
 ]
@@ -9992,7 +9992,7 @@
 [
 "introduction/views.py:168",
 "sql",
-15,
+23,
 [
 "introduction/views.py:168:tmp16[\"sql_error\"] = sql_query"
 ]
@@ -10000,7 +10000,7 @@
 [
 "introduction/views.py:177",
 "sql",
-29,
+24,
 [
 "introduction/views.py:177:render(request, 'Lab/SQL/sql_lab.html', {\"wrongpass\":password, \"sql_error\":sql_query})"
 ]
@@ -10008,7 +10008,7 @@
 [
 "introduction/views.py:180",
 "sql",
-22,
+25,
 [
 "introduction/views.py:180:tmp18[\"sql_error\"] = sql_query"
 ]
@@ -10016,7 +10016,7 @@
 [
 "introduction/views.py:189",
 "redirect",
-74,
+61,
 [
 "introduction/views.py:189:redirect('login')"
 ]
@@ -10024,7 +10024,7 @@
 [
 "introduction/views.py:197",
 "redirect",
-97,
+62,
 [
 "introduction/views.py:197:redirect('login')"
 ]
@@ -10032,7 +10032,7 @@
 [
 "introduction/views.py:221",
 "redirect",
-79,
+63,
 [
 "introduction/views.py:221:redirect('login')"
 ]
@@ -10040,7 +10040,7 @@
 [
 "introduction/views.py:231",
 "redirect",
-60,
+64,
 [
 "introduction/views.py:231:redirect('login')"
 ]
@@ -10048,7 +10048,7 @@
 [
 "introduction/views.py:237",
 "redirect",
-70,
+65,
 [
 "introduction/views.py:237:redirect('login')"
 ]
@@ -10056,7 +10056,7 @@
 [
 "introduction/views.py:245",
 "code_exec",
-4,
+2,
 [
 "introduction/views.py:245:comment_obj = tmp24 = comments.objects\ncomments.objects.create(name = 'System', comment = 'Default comment for XXE lab')"
 ]
@@ -10064,7 +10064,7 @@
 [
 "introduction/views.py:245",
 "code_exec",
-8,
+3,
 [
 "introduction/views.py:245:comments.objects.create(name = 'System', comment = 'Default comment for XXE lab')"
 ]
@@ -10072,7 +10072,7 @@
 [
 "introduction/views.py:252",
 "redirect",
-77,
+66,
 [
 "introduction/views.py:252:redirect('login')"
 ]
@@ -10080,7 +10080,7 @@
 [
 "introduction/views.py:340",
 "redirect",
-92,
+67,
 [
 "introduction/views.py:340:redirect('login')"
 ]
@@ -10088,7 +10088,7 @@
 [
 "introduction/views.py:381",
 "redirect",
-88,
+68,
 [
 "introduction/views.py:381:redirect('login')"
 ]
@@ -10096,7 +10096,7 @@
 [
 "introduction/views.py:390",
 "redirect",
-84,
+69,
 [
 "introduction/views.py:390:redirect('login')"
 ]
@@ -10104,7 +10104,7 @@
 [
 "introduction/views.py:396",
 "redirect",
-68,
+70,
 [
 "introduction/views.py:396:redirect('login')"
 ]
@@ -10112,7 +10112,7 @@
 [
 "introduction/views.py:413",
 "redirect",
-93,
+71,
 [
 "introduction/views.py:413:redirect('login')"
 ]
@@ -10120,7 +10120,7 @@
 [
 "introduction/views.py:450",
 "redirect",
-37,
+36,
 [
 "introduction/views.py:450:redirect('login')"
 ]
@@ -10128,7 +10128,7 @@
 [
 "introduction/views.py:460",
 "code_exec",
-3,
+4,
 [
 "introduction/views.py:460:output = eval(val)"
 ]
@@ -10136,7 +10136,7 @@
 [
 "introduction/views.py:460",
 "code_exec",
-7,
+5,
 [
 "introduction/views.py:460:eval(val)"
 ]
@@ -10144,7 +10144,7 @@
 [
 "introduction/views.py:469",
 "redirect",
-87,
+72,
 [
 "introduction/views.py:469:redirect('login')"
 ]
@@ -10152,7 +10152,7 @@
 [
 "introduction/views.py:478",
 "redirect",
-41,
+40,
 [
 "introduction/views.py:478:redirect('login')"
 ]
@@ -10160,7 +10160,7 @@
 [
 "introduction/views.py:486",
 "redirect",
-90,
+73,
 [
 "introduction/views.py:486:redirect('login')"
 ]
@@ -10168,7 +10168,7 @@
 [
 "introduction/views.py:527",
 "redirect",
-63,
+74,
 [
 "introduction/views.py:527:redirect('login')"
 ]
@@ -10176,7 +10176,7 @@
 [
 "introduction/views.py:53",
 "redirect",
-54,
+55,
 [
 "introduction/views.py:53:redirect('/')"
 ]
@@ -10184,7 +10184,7 @@
 [
 "introduction/views.py:533",
 "redirect",
-52,
+75,
 [
 "introduction/views.py:533:redirect('login')"
 ]
@@ -10192,7 +10192,7 @@
 [
 "introduction/views.py:549",
 "redirect",
-73,
+76,
 [
 "introduction/views.py:549:redirect('login')"
 ]
@@ -10200,7 +10200,7 @@
 [
 "introduction/views.py:569",
 "redirect",
-45,
+77,
 [
 "introduction/views.py:569:redirect('login')"
 ]
@@ -10208,7 +10208,7 @@
 [
 "introduction/views.py:576",
 "redirect",
-58,
+78,
 [
 "introduction/views.py:576:redirect('login')"
 ]
@@ -10216,15 +10216,7 @@
 [
 "introduction/views.py:588",
 "code_exec",
-0,
-[
-"introduction/views.py:588:ImageMath.eval(function_str, img = img, b = b, r = r, g = g)"
-]
-],
-[
-"introduction/views.py:588",
-"code_exec",
-5,
+6,
 [
 "introduction/views.py:588:output = ImageMath.eval(function_str, img = img, b = b, r = r, g = g)"
 ]
@@ -10232,15 +10224,23 @@
 [
 "introduction/views.py:588",
 "code_exec",
-6,
+7,
 [
 "introduction/views.py:588:ImageMath.eval"
 ]
 ],
 [
+"introduction/views.py:588",
+"code_exec",
+8,
+[
+"introduction/views.py:588:ImageMath.eval(function_str, img = img, b = b, r = r, g = g)"
+]
+],
+[
 "introduction/views.py:618",
 "redirect",
-81,
+79,
 [
 "introduction/views.py:618:redirect('login')"
 ]
@@ -10248,7 +10248,7 @@
 [
 "introduction/views.py:634",
 "redirect",
-51,
+80,
 [
 "introduction/views.py:634:redirect('login')"
 ]
@@ -10256,7 +10256,7 @@
 [
 "introduction/views.py:686",
 "redirect",
-43,
+41,
 [
 "introduction/views.py:686:redirect('login')"
 ]
@@ -10264,7 +10264,7 @@
 [
 "introduction/views.py:73",
 "redirect",
-85,
+56,
 [
 "introduction/views.py:73:redirect('login')"
 ]
@@ -10272,7 +10272,7 @@
 [
 "introduction/views.py:730",
 "redirect",
-78,
+81,
 [
 "introduction/views.py:730:redirect('login')"
 ]
@@ -10280,7 +10280,7 @@
 [
 "introduction/views.py:741",
 "redirect",
-64,
+82,
 [
 "introduction/views.py:741:redirect('login')"
 ]
@@ -10288,7 +10288,7 @@
 [
 "introduction/views.py:751",
 "redirect",
-61,
+83,
 [
 "introduction/views.py:751:redirect('login')"
 ]
@@ -10296,7 +10296,7 @@
 [
 "introduction/views.py:787",
 "redirect",
-65,
+84,
 [
 "introduction/views.py:787:redirect('login')"
 ]
@@ -10304,7 +10304,7 @@
 [
 "introduction/views.py:81",
 "redirect",
-40,
+38,
 [
 "introduction/views.py:81:redirect('login')"
 ]
@@ -10312,7 +10312,7 @@
 [
 "introduction/views.py:824",
 "redirect",
-91,
+85,
 [
 "introduction/views.py:824:redirect('login')"
 ]
@@ -10320,7 +10320,7 @@
 [
 "introduction/views.py:839",
 "redirect",
-48,
+86,
 [
 "introduction/views.py:839:redirect('login')"
 ]
@@ -10328,7 +10328,7 @@
 [
 "introduction/views.py:849",
 "redirect",
-86,
+87,
 [
 "introduction/views.py:849:redirect('login')"
 ]
@@ -10336,7 +10336,7 @@
 [
 "introduction/views.py:864",
 "sql",
-24,
+26,
 [
 "introduction/views.py:864:sql_query = \"SELECT * FROM introduction_sql_lab_table WHERE id='\" + name + \"'AND password='\" + password + \"'\""
 ]
@@ -10344,17 +10344,9 @@
 [
 "introduction/views.py:875",
 "sql",
-33,
+27,
 [
 "introduction/views.py:875:print(sql_query)"
-]
-],
-[
-"introduction/views.py:878",
-"sql",
-14,
-[
-"introduction/views.py:878:sql_lab_table.objects.raw(sql_query)"
 ]
 ],
 [
@@ -10368,7 +10360,15 @@
 [
 "introduction/views.py:878",
 "sql",
-34,
+29,
+[
+"introduction/views.py:878:sql_lab_table.objects.raw(sql_query)"
+]
+],
+[
+"introduction/views.py:878",
+"sql",
+30,
 [
 "introduction/views.py:878:tmp141.raw"
 ]
@@ -10376,7 +10376,7 @@
 [
 "introduction/views.py:883",
 "sql",
-17,
+31,
 [
 "introduction/views.py:883:render(request, 'Lab_2021/A3_Injection/sql_lab.html', {\"wrongpass\":password, \"sql_error\":sql_query})"
 ]
@@ -10384,7 +10384,7 @@
 [
 "introduction/views.py:886",
 "sql",
-19,
+32,
 [
 "introduction/views.py:886:tmp142[\"sql_error\"] = sql_query"
 ]
@@ -10392,7 +10392,7 @@
 [
 "introduction/views.py:894",
 "sql",
-27,
+33,
 [
 "introduction/views.py:894:render(request, 'Lab_2021/A3_Injection/sql_lab.html', {\"wrongpass\":password, \"sql_error\":sql_query})"
 ]
@@ -10400,7 +10400,7 @@
 [
 "introduction/views.py:897",
 "sql",
-26,
+34,
 [
 "introduction/views.py:897:tmp144[\"sql_error\"] = sql_query"
 ]
@@ -10408,7 +10408,7 @@
 [
 "introduction/views.py:904",
 "redirect",
-72,
+88,
 [
 "introduction/views.py:904:redirect('login')"
 ]
@@ -10416,7 +10416,7 @@
 [
 "introduction/views.py:91",
 "redirect",
-38,
+39,
 [
 "introduction/views.py:91:redirect('login')"
 ]
@@ -10424,7 +10424,7 @@
 [
 "introduction/views.py:916",
 "redirect",
-44,
+89,
 [
 "introduction/views.py:916:redirect('login')"
 ]
@@ -10432,7 +10432,7 @@
 [
 "introduction/views.py:933",
 "redirect",
-46,
+90,
 [
 "introduction/views.py:933:redirect('login')"
 ]
@@ -10440,7 +10440,7 @@
 [
 "introduction/views.py:939",
 "redirect",
-82,
+91,
 [
 "introduction/views.py:939:redirect('login')"
 ]
@@ -10448,7 +10448,7 @@
 [
 "introduction/views.py:973",
 "redirect",
-50,
+92,
 [
 "introduction/views.py:973:redirect('login')"
 ]
@@ -10456,7 +10456,7 @@
 [
 "introduction/views.py:998",
 "redirect",
-83,
+93,
 [
 "introduction/views.py:998:redirect(f'blog/{id}')"
 ]

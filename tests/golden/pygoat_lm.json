@@ -9678,9 +9678,353 @@
 ],
 "candidate_flows": [
 [
+"challenge/management/commands/populate_challenge.py:11",
+"prototype_pollution",
+251,
+[
+"challenge/management/commands/populate_challenge.py:11:filename = \"challenge/challenge.json\""
+]
+],
+[
+"challenge/management/commands/populate_challenge.py:12",
+"prototype_pollution",
+252,
+[
+"challenge/management/commands/populate_challenge.py:12:enter_tmp1 = manager_tmp0.__enter__"
+]
+],
+[
+"challenge/management/commands/populate_challenge.py:12",
+"prototype_pollution",
+253,
+[
+"challenge/management/commands/populate_challenge.py:12:exit_tmp2 = manager_tmp0.__exit__"
+]
+],
+[
+"challenge/management/commands/populate_challenge.py:12",
+"prototype_pollution",
+254,
+[
+"challenge/management/commands/populate_challenge.py:12:f = value_tmp3"
+]
+],
+[
+"challenge/management/commands/populate_challenge.py:12",
+"prototype_pollution",
+255,
+[
+"challenge/management/commands/populate_challenge.py:12:manager_tmp0 = open(filename, \"r\")"
+]
+],
+[
+"challenge/management/commands/populate_challenge.py:12",
+"prototype_pollution",
+256,
+[
+"challenge/management/commands/populate_challenge.py:12:value_tmp3 = enter_tmp1()"
+]
+],
+[
+"challenge/management/commands/populate_challenge.py:13",
+"prototype_pollution",
+257,
+[
+"challenge/management/commands/populate_challenge.py:13:data = json.load(f)"
+]
+],
+[
+"challenge/management/commands/populate_challenge.py:14",
+"prototype_pollution",
+258,
+[
+"challenge/management/commands/populate_challenge.py:14:challenge = tmp6.__next__()"
+]
+],
+[
+"challenge/management/commands/populate_challenge.py:14",
+"prototype_pollution",
+259,
+[
+"challenge/management/commands/populate_challenge.py:14:tmp6 = data.__iter__()"
+]
+],
+[
+"challenge/management/commands/populate_challenge.py:16",
+"prototype_pollution",
+260,
+[
+"challenge/management/commands/populate_challenge.py:16:tmp4 = tmp5 = Challenge.objects\nChallenge.objects.create(**challenge)"
+]
+],
+[
+"challenge/management/commands/populate_challenge.py:16",
+"prototype_pollution",
+261,
+[
+"challenge/management/commands/populate_challenge.py:16:tmp5 = Challenge.objects"
+]
+],
+[
+"challenge/management/commands/populate_challenge.py:20",
+"prototype_pollution",
+262,
+[
+"challenge/management/commands/populate_challenge.py:20:tmp7 = \"File not found: {}\""
+]
+],
+[
+"challenge/management/commands/populate_challenges.py:14",
+"prototype_pollution",
+263,
+[
+"challenge/management/commands/populate_challenges.py:14:file_path = tmp0 = os.path\nos.path.join('challenge', 'challenge.json')"
+]
+],
+[
+"challenge/management/commands/populate_challenges.py:14",
+"prototype_pollution",
+264,
+[
+"challenge/management/commands/populate_challenges.py:14:tmp0 = os.path"
+]
+],
+[
+"challenge/management/commands/populate_challenges.py:17",
+"prototype_pollution",
+265,
+[
+"challenge/management/commands/populate_challenges.py:17:enter_tmp2 = manager_tmp1.__enter__"
+]
+],
+[
+"challenge/management/commands/populate_challenges.py:17",
+"prototype_pollution",
+266,
+[
+"challenge/management/commands/populate_challenges.py:17:exit_tmp3 = manager_tmp1.__exit__"
+]
+],
+[
+"challenge/management/commands/populate_challenges.py:17",
+"prototype_pollution",
+267,
+[
+"challenge/management/commands/populate_challenges.py:17:json_file = value_tmp4"
+]
+],
+[
+"challenge/management/commands/populate_challenges.py:17",
+"prototype_pollution",
+268,
+[
+"challenge/management/commands/populate_challenges.py:17:manager_tmp1 = open(file_path, 'r')"
+]
+],
+[
+"challenge/management/commands/populate_challenges.py:17",
+"prototype_pollution",
+269,
+[
+"challenge/management/commands/populate_challenges.py:17:value_tmp4 = enter_tmp2()"
+]
+],
+[
+"challenge/management/commands/populate_challenges.py:18",
+"prototype_pollution",
+270,
+[
+"challenge/management/commands/populate_challenges.py:18:challenges_data = json.load(json_file)"
+]
+],
+[
+"challenge/management/commands/populate_challenges.py:20",
+"prototype_pollution",
+271,
+[
+"challenge/management/commands/populate_challenges.py:20:tmp6 = self.stderr"
+]
+],
+[
+"challenge/management/commands/populate_challenges.py:20",
+"prototype_pollution",
+272,
+[
+"challenge/management/commands/populate_challenges.py:20:tmp5 = self.style"
+]
+],
+[
+"challenge/management/commands/populate_challenges.py:23",
+"prototype_pollution",
+273,
+[
+"challenge/management/commands/populate_challenges.py:23:tmp8 = self.stderr"
+]
+],
+[
+"challenge/management/commands/populate_challenges.py:23",
+"prototype_pollution",
+274,
+[
+"challenge/management/commands/populate_challenges.py:23:tmp7 = self.style"
+]
+],
+[
+"challenge/management/commands/populate_challenges.py:26",
+"prototype_pollution",
+275,
+[
+"challenge/management/commands/populate_challenges.py:26:item = tmp15.__next__()"
+]
+],
+[
+"challenge/management/commands/populate_challenges.py:26",
+"prototype_pollution",
+276,
+[
+"challenge/management/commands/populate_challenges.py:26:tmp15 = challenges_data.__iter__()"
+]
+],
+[
+"challenge/management/commands/populate_challenges.py:27",
+"prototype_pollution",
+277,
+[
+"challenge/management/commands/populate_challenges.py:27:challenge = tmp11[0]"
+]
+],
+[
+"challenge/management/commands/populate_challenges.py:27",
+"prototype_pollution",
+278,
+[
+"challenge/management/commands/populate_challenges.py:27:created = tmp11[1]"
+]
+],
+[
+"challenge/management/commands/populate_challenges.py:27",
+"prototype_pollution",
+279,
+[
+"challenge/management/commands/populate_challenges.py:27:tmp11 = tmp10 = Challenge.objects\nChallenge.objects.get_or_create(name = item.get(\"name\"), defaults = {\"description\":item.get(\"description\", \"\"), \"docker_image\":item.get(\"docker_image\", \"\"), \"docker_port\":item.get(\"docker_port\", 0), \"start_port\":item.get(\"start_port\", 0), \"end_port\":item.get(\"end_port\", 0), \"flag\":item.get(\"flag\", \"\"), \"point\":item.get(\"point\", 0)})"
+]
+],
+[
+"challenge/management/commands/populate_challenges.py:27",
+"prototype_pollution",
+280,
+[
+"challenge/management/commands/populate_challenges.py:27:tmp10 = Challenge.objects"
+]
+],
+[
+"challenge/management/commands/populate_challenges.py:29",
+"prototype_pollution",
+281,
+[
+"challenge/management/commands/populate_challenges.py:29:tmp9 = {}"
+]
+],
+[
+"challenge/management/commands/populate_challenges.py:29",
+"prototype_pollution",
+282,
+[
+"challenge/management/commands/populate_challenges.py:29:tmp9[\"description\"] = item.get(\"description\", \"\")"
+]
+],
+[
+"challenge/management/commands/populate_challenges.py:29",
+"prototype_pollution",
+283,
+[
+"challenge/management/commands/populate_challenges.py:29:tmp9[\"docker_image\"] = item.get(\"docker_image\", \"\")"
+]
+],
+[
+"challenge/management/commands/populate_challenges.py:29",
+"prototype_pollution",
+284,
+[
+"challenge/management/commands/populate_challenges.py:29:tmp9[\"docker_port\"] = item.get(\"docker_port\", 0)"
+]
+],
+[
+"challenge/management/commands/populate_challenges.py:29",
+"prototype_pollution",
+285,
+[
+"challenge/management/commands/populate_challenges.py:29:tmp9[\"end_port\"] = item.get(\"end_port\", 0)"
+]
+],
+[
+"challenge/management/commands/populate_challenges.py:29",
+"prototype_pollution",
+286,
+[
+"challenge/management/commands/populate_challenges.py:29:tmp9[\"flag\"] = item.get(\"flag\", \"\")"
+]
+],
+[
+"challenge/management/commands/populate_challenges.py:29",
+"prototype_pollution",
+287,
+[
+"challenge/management/commands/populate_challenges.py:29:tmp9[\"point\"] = item.get(\"point\", 0)"
+]
+],
+[
+"challenge/management/commands/populate_challenges.py:29",
+"prototype_pollution",
+288,
+[
+"challenge/management/commands/populate_challenges.py:29:tmp9[\"start_port\"] = item.get(\"start_port\", 0)"
+]
+],
+[
+"challenge/management/commands/populate_challenges.py:40",
+"prototype_pollution",
+289,
+[
+"challenge/management/commands/populate_challenges.py:40:tmp13 = self.stdout"
+]
+],
+[
+"challenge/management/commands/populate_challenges.py:40",
+"prototype_pollution",
+290,
+[
+"challenge/management/commands/populate_challenges.py:40:tmp12 = self.style"
+]
+],
+[
+"challenge/management/commands/populate_challenges.py:42",
+"prototype_pollution",
+291,
+[
+"challenge/management/commands/populate_challenges.py:42:tmp14 = self.stdout"
+]
+],
+[
+"challenge/management/commands/populate_challenges.py:44",
+"prototype_pollution",
+292,
+[
+"challenge/management/commands/populate_challenges.py:44:tmp17 = self.stdout"
+]
+],
+[
+"challenge/management/commands/populate_challenges.py:44",
+"prototype_pollution",
+293,
+[
+"challenge/management/commands/populate_challenges.py:44:tmp16 = self.style"
+]
+],
+[
 "challenge/models.py:27",
 "prototype_pollution",
-24,
+294,
 [
 "challenge/models.py:27:tmp0 = self.flag"
 ]
@@ -9688,7 +10032,15 @@
 [
 "challenge/models.py:28",
 "prototype_pollution",
-22,
+295,
+[
+"challenge/models.py:28:self.flag = \"hashed_\" + tmp1 = hashlib.sha256(self.flag.encode('utf-8'))\nhashlib.sha256(self.flag.encode('utf-8')).hexdigest()"
+]
+],
+[
+"challenge/models.py:28",
+"prototype_pollution",
+296,
 [
 "challenge/models.py:28:tmp1 = hashlib.sha256(self.flag.encode('utf-8'))"
 ]
@@ -9696,71 +10048,71 @@
 [
 "challenge/models.py:28",
 "prototype_pollution",
-23,
+297,
 [
 "challenge/models.py:28:tmp2 = self.flag"
 ]
 ],
 [
-"challenge/models.py:28",
-"prototype_pollution",
-25,
-[
-"challenge/models.py:28:self.flag = \"hashed_\" + tmp1 = hashlib.sha256(self.flag.encode('utf-8'))\nhashlib.sha256(self.flag.encode('utf-8')).hexdigest()"
-]
-],
-[
 "challenge/models.py:29",
 "prototype_pollution",
-26,
+298,
 [
 "challenge/models.py:29:tmp3 = super(Challenge, self)"
 ]
 ],
 [
-"challenge/views.py:17",
+"challenge/utility.py:4",
 "prototype_pollution",
-36,
+299,
 [
-"challenge/views.py:17:tmp0 = Challenge.objects"
+"challenge/utility.py:4:port = tmp4.__next__()"
 ]
 ],
 [
 "challenge/views.py:17",
 "prototype_pollution",
-45,
+20,
 [
 "challenge/views.py:17:chal = tmp0 = Challenge.objects\nChallenge.objects.get(name = challenge)"
 ]
 ],
 [
-"challenge/views.py:22",
+"challenge/views.py:17",
 "prototype_pollution",
-33,
+21,
 [
-"challenge/views.py:22:tmp1 = UserChallenge.objects"
+"challenge/views.py:17:tmp0 = Challenge.objects"
 ]
 ],
 [
 "challenge/views.py:22",
 "prototype_pollution",
-46,
+22,
 [
 "challenge/views.py:22:user_chal = tmp1 = UserChallenge.objects\nUserChallenge.objects.get(user = request.user, challenge = chal)"
 ]
 ],
 [
-"challenge/views.py:23",
+"challenge/views.py:22",
 "prototype_pollution",
-34,
+23,
 [
-"challenge/views.py:23:tmp2['user_chal'] = user_chal"
+"challenge/views.py:22:tmp1 = UserChallenge.objects"
 ]
 ],
 [
 "challenge/views.py:23",
 "prototype_pollution",
-40,
+24,
+[
+"challenge/views.py:23:tmp2 = {}"
+]
+],
+[
+"challenge/views.py:23",
+"prototype_pollution",
+25,
 [
 "challenge/views.py:23:tmp2['chal'] = chal"
 ]
@@ -9768,23 +10120,23 @@
 [
 "challenge/views.py:23",
 "prototype_pollution",
-42,
+26,
 [
-"challenge/views.py:23:tmp2 = {}"
+"challenge/views.py:23:tmp2['user_chal'] = user_chal"
 ]
 ],
 [
 "challenge/views.py:25",
 "prototype_pollution",
-41,
+27,
 [
-"challenge/views.py:25:tmp3['user_chal'] = None"
+"challenge/views.py:25:tmp3 = {}"
 ]
 ],
 [
 "challenge/views.py:25",
 "prototype_pollution",
-43,
+28,
 [
 "challenge/views.py:25:tmp3['chal'] = chal"
 ]
@@ -9792,399 +10144,23 @@
 [
 "challenge/views.py:25",
 "prototype_pollution",
-44,
+29,
 [
-"challenge/views.py:25:tmp3 = {}"
-]
-],
-[
-"challenge/views.py:28",
-"prototype_pollution",
-214,
-[
-"challenge/views.py:28:user_chall_exists = False"
-]
-],
-[
-"challenge/views.py:33",
-"prototype_pollution",
-223,
-[
-"challenge/views.py:33:chal = tmp4 = Challenge.objects\nChallenge.objects.get(name = challenge)"
-]
-],
-[
-"challenge/views.py:33",
-"prototype_pollution",
-228,
-[
-"challenge/views.py:33:tmp4 = Challenge.objects"
-]
-],
-[
-"challenge/views.py:38",
-"prototype_pollution",
-218,
-[
-"challenge/views.py:38:user_chal = tmp5 = UserChallenge.objects\nUserChallenge.objects.get(user = request.user, challenge = chal)"
-]
-],
-[
-"challenge/views.py:38",
-"prototype_pollution",
-219,
-[
-"challenge/views.py:38:tmp5 = UserChallenge.objects"
-]
-],
-[
-"challenge/views.py:40",
-"prototype_pollution",
-208,
-[
-"challenge/views.py:40:tmp6 = {}"
-]
-],
-[
-"challenge/views.py:40",
-"prototype_pollution",
-209,
-[
-"challenge/views.py:40:tmp6['message'] = 'already running'"
-]
-],
-[
-"challenge/views.py:40",
-"prototype_pollution",
-225,
-[
-"challenge/views.py:40:tmp6['status'] = '200'"
-]
-],
-[
-"challenge/views.py:40",
-"prototype_pollution",
-232,
-[
-"challenge/views.py:40:tmp6['endpoint'] = f'http://localhost:{user_chal.port}'"
-]
-],
-[
-"challenge/views.py:41",
-"prototype_pollution",
-215,
-[
-"challenge/views.py:41:user_chall_exists = True"
-]
-],
-[
-"challenge/views.py:45",
-"prototype_pollution",
-233,
-[
-"challenge/views.py:45:port = get_free_port(8000, 8100)"
-]
-],
-[
-"challenge/views.py:47",
-"prototype_pollution",
-205,
-[
-"challenge/views.py:47:tmp7['message'] = 'failed'"
-]
-],
-[
-"challenge/views.py:47",
-"prototype_pollution",
-212,
-[
-"challenge/views.py:47:tmp7['endpoint'] = 'None'"
-]
-],
-[
-"challenge/views.py:47",
-"prototype_pollution",
-222,
-[
-"challenge/views.py:47:tmp7['status'] = '500'"
-]
-],
-[
-"challenge/views.py:47",
-"prototype_pollution",
-224,
-[
-"challenge/views.py:47:tmp7 = {}"
-]
-],
-[
-"challenge/views.py:49",
-"prototype_pollution",
-227,
-[
-"challenge/views.py:49:command = f\"docker run -d -p {port}:{chal.docker_port} {chal.docker_image}\""
-]
-],
-[
-"challenge/views.py:50",
-"prototype_pollution",
-230,
-[
-"challenge/views.py:50:process = subprocess.Popen(command.split(\" \"), stdout = subprocess.PIPE)"
-]
-],
-[
-"challenge/views.py:51",
-"prototype_pollution",
-211,
-[
-"challenge/views.py:51:error = tmp8[1]"
-]
-],
-[
-"challenge/views.py:51",
-"prototype_pollution",
-216,
-[
-"challenge/views.py:51:tmp8 = process.communicate()"
-]
-],
-[
-"challenge/views.py:51",
-"prototype_pollution",
-231,
-[
-"challenge/views.py:51:output = tmp8[0]"
-]
-],
-[
-"challenge/views.py:52",
-"prototype_pollution",
-213,
-[
-"challenge/views.py:52:container_id = tmp9 = output.decode('utf-8')\noutput.decode('utf-8').strip()"
-]
-],
-[
-"challenge/views.py:52",
-"prototype_pollution",
-221,
-[
-"challenge/views.py:52:tmp9 = output.decode('utf-8')"
-]
-],
-[
-"challenge/views.py:56",
-"prototype_pollution",
-210,
-[
-"challenge/views.py:56:user_chal.container_id = container_id"
-]
-],
-[
-"challenge/views.py:57",
-"prototype_pollution",
-217,
-[
-"challenge/views.py:57:user_chal.port = port"
-]
-],
-[
-"challenge/views.py:58",
-"prototype_pollution",
-207,
-[
-"challenge/views.py:58:user_chal.is_live = True"
-]
-],
-[
-"challenge/views.py:61",
-"prototype_pollution",
-229,
-[
-"challenge/views.py:61:user_chal = UserChallenge(user = request.user, challenge = chal, container_id = container_id, port = port)"
-]
-],
-[
-"challenge/views.py:64",
-"prototype_pollution",
-204,
-[
-"challenge/views.py:64:tmp10['message'] = 'success'"
-]
-],
-[
-"challenge/views.py:64",
-"prototype_pollution",
-206,
-[
-"challenge/views.py:64:tmp10['endpoint'] = f'http://localhost:{port}'"
-]
-],
-[
-"challenge/views.py:64",
-"prototype_pollution",
-220,
-[
-"challenge/views.py:64:tmp10['status'] = '200'"
-]
-],
-[
-"challenge/views.py:64",
-"prototype_pollution",
-226,
-[
-"challenge/views.py:64:tmp10 = {}"
-]
-],
-[
-"challenge/views.py:73",
-"prototype_pollution",
-104,
-[
-"challenge/views.py:73:chal = tmp11 = Challenge.objects\nChallenge.objects.get(name = challenge)"
-]
-],
-[
-"challenge/views.py:73",
-"prototype_pollution",
-124,
-[
-"challenge/views.py:73:tmp11 = Challenge.objects"
-]
-],
-[
-"challenge/views.py:74",
-"prototype_pollution",
-119,
-[
-"challenge/views.py:74:user_chal = tmp12 = UserChallenge.objects\nUserChallenge.objects.get(user = request.user, challenge = chal)"
-]
-],
-[
-"challenge/views.py:74",
-"prototype_pollution",
-97,
-[
-"challenge/views.py:74:tmp12 = UserChallenge.objects"
-]
-],
-[
-"challenge/views.py:76",
-"prototype_pollution",
-112,
-[
-"challenge/views.py:76:tmp13 = {}"
-]
-],
-[
-"challenge/views.py:76",
-"prototype_pollution",
-118,
-[
-"challenge/views.py:76:tmp13['message'] = 'failed'"
-]
-],
-[
-"challenge/views.py:76",
-"prototype_pollution",
-98,
-[
-"challenge/views.py:76:tmp13['status'] = '500'"
-]
-],
-[
-"challenge/views.py:78",
-"prototype_pollution",
-116,
-[
-"challenge/views.py:78:user_chal.is_live = False"
-]
-],
-[
-"challenge/views.py:80",
-"prototype_pollution",
-102,
-[
-"challenge/views.py:80:command = f\"docker stop {user_chal.container_id}\""
-]
-],
-[
-"challenge/views.py:81",
-"prototype_pollution",
-113,
-[
-"challenge/views.py:81:process = subprocess.Popen(command.split(\" \"), stdout = subprocess.PIPE)"
-]
-],
-[
-"challenge/views.py:82",
-"prototype_pollution",
-101,
-[
-"challenge/views.py:82:tmp14 = process.communicate()"
-]
-],
-[
-"challenge/views.py:82",
-"prototype_pollution",
-105,
-[
-"challenge/views.py:82:error = tmp14[1]"
-]
-],
-[
-"challenge/views.py:82",
-"prototype_pollution",
-121,
-[
-"challenge/views.py:82:output = tmp14[0]"
-]
-],
-[
-"challenge/views.py:83",
-"prototype_pollution",
-115,
-[
-"challenge/views.py:83:tmp15 = {}"
-]
-],
-[
-"challenge/views.py:83",
-"prototype_pollution",
-125,
-[
-"challenge/views.py:83:tmp15['status'] = '200'"
-]
-],
-[
-"challenge/views.py:83",
-"prototype_pollution",
-96,
-[
-"challenge/views.py:83:tmp15['message'] = 'success'"
+"challenge/views.py:25:tmp3['user_chal'] = None"
 ]
 ],
 [
 "dockerized_labs/sensitive_data_exposure/dataexposure/views.py:101",
 "prototype_pollution",
-58,
+51,
 [
-"dockerized_labs/sensitive_data_exposure/dataexposure/views.py:101:tmp14['api_key'] = user_data.api_key"
+"dockerized_labs/sensitive_data_exposure/dataexposure/views.py:101:tmp14 = {}"
 ]
 ],
 [
 "dockerized_labs/sensitive_data_exposure/dataexposure/views.py:101",
 "prototype_pollution",
-60,
-[
-"dockerized_labs/sensitive_data_exposure/dataexposure/views.py:101:tmp14['credit_card'] = user_data.credit_card"
-]
-],
-[
-"dockerized_labs/sensitive_data_exposure/dataexposure/views.py:101",
-"prototype_pollution",
-61,
+56,
 [
 "dockerized_labs/sensitive_data_exposure/dataexposure/views.py:101:data = tmp14 = {}\ntmp14['username'] = request.user.username\ntmp14['credit_card'] = user_data.credit_card\ntmp14['ssn'] = user_data.ssn\ntmp14['api_key'] = user_data.api_key\ntmp14"
 ]
@@ -10192,15 +10168,23 @@
 [
 "dockerized_labs/sensitive_data_exposure/dataexposure/views.py:101",
 "prototype_pollution",
-62,
+57,
 [
-"dockerized_labs/sensitive_data_exposure/dataexposure/views.py:101:tmp14['username'] = request.user.username"
+"dockerized_labs/sensitive_data_exposure/dataexposure/views.py:101:tmp14['api_key'] = user_data.api_key"
 ]
 ],
 [
 "dockerized_labs/sensitive_data_exposure/dataexposure/views.py:101",
 "prototype_pollution",
-63,
+58,
+[
+"dockerized_labs/sensitive_data_exposure/dataexposure/views.py:101:tmp14['credit_card'] = user_data.credit_card"
+]
+],
+[
+"dockerized_labs/sensitive_data_exposure/dataexposure/views.py:101",
+"prototype_pollution",
+59,
 [
 "dockerized_labs/sensitive_data_exposure/dataexposure/views.py:101:tmp14['ssn'] = user_data.ssn"
 ]
@@ -10208,47 +10192,47 @@
 [
 "dockerized_labs/sensitive_data_exposure/dataexposure/views.py:101",
 "prototype_pollution",
-64,
+60,
 [
-"dockerized_labs/sensitive_data_exposure/dataexposure/views.py:101:tmp14 = {}"
+"dockerized_labs/sensitive_data_exposure/dataexposure/views.py:101:tmp14['username'] = request.user.username"
 ]
 ],
 [
 "dockerized_labs/sensitive_data_exposure/dataexposure/views.py:91",
 "prototype_pollution",
-65,
-[
-"dockerized_labs/sensitive_data_exposure/dataexposure/views.py:91:tmp12 = UserData.objects"
-]
-],
-[
-"dockerized_labs/sensitive_data_exposure/dataexposure/views.py:91",
-"prototype_pollution",
-66,
+52,
 [
 "dockerized_labs/sensitive_data_exposure/dataexposure/views.py:91:user_data = tmp12 = UserData.objects\nUserData.objects.get(user = request.user)"
 ]
 ],
 [
-"dockerized_labs/sensitive_data_exposure/dataexposure/views.py:94",
+"dockerized_labs/sensitive_data_exposure/dataexposure/views.py:91",
 "prototype_pollution",
-59,
+53,
 [
-"dockerized_labs/sensitive_data_exposure/dataexposure/views.py:94:tmp13 = UserData.objects"
+"dockerized_labs/sensitive_data_exposure/dataexposure/views.py:91:tmp12 = UserData.objects"
 ]
 ],
 [
 "dockerized_labs/sensitive_data_exposure/dataexposure/views.py:94",
 "prototype_pollution",
-67,
+54,
 [
 "dockerized_labs/sensitive_data_exposure/dataexposure/views.py:94:user_data = tmp13 = UserData.objects\nUserData.objects.create(user = request.user, credit_card = '4111111111111111', ssn = '123456789', api_key = generate_api_key())"
 ]
 ],
 [
+"dockerized_labs/sensitive_data_exposure/dataexposure/views.py:94",
+"prototype_pollution",
+55,
+[
+"dockerized_labs/sensitive_data_exposure/dataexposure/views.py:94:tmp13 = UserData.objects"
+]
+],
+[
 "introduction/apis.py:128",
 "prototype_pollution",
-73,
+63,
 [
 "introduction/apis.py:128:tmp31 = {}"
 ]
@@ -10256,7 +10240,7 @@
 [
 "introduction/apis.py:128",
 "prototype_pollution",
-79,
+64,
 [
 "introduction/apis.py:128:tmp31[\"message\"] = \"method not allowed\""
 ]
@@ -10264,7 +10248,7 @@
 [
 "introduction/apis.py:130",
 "prototype_pollution",
-71,
+65,
 [
 "introduction/apis.py:130:code = tmp32 = request.POST\nrequest.POST.get('code')"
 ]
@@ -10272,7 +10256,7 @@
 [
 "introduction/apis.py:130",
 "prototype_pollution",
-77,
+66,
 [
 "introduction/apis.py:130:tmp32 = request.POST"
 ]
@@ -10280,39 +10264,39 @@
 [
 "introduction/apis.py:131",
 "prototype_pollution",
-74,
-[
-"introduction/apis.py:131:tmp33 = os.path"
-]
-],
-[
-"introduction/apis.py:131",
-"prototype_pollution",
-78,
+61,
 [
 "introduction/apis.py:131:dirname = tmp33 = os.path\nos.path.dirname(__file__)"
 ]
 ],
 [
-"introduction/apis.py:132",
+"introduction/apis.py:131",
 "prototype_pollution",
-70,
+67,
 [
-"introduction/apis.py:132:tmp34 = os.path"
+"introduction/apis.py:131:tmp33 = os.path"
 ]
 ],
 [
 "introduction/apis.py:132",
 "prototype_pollution",
-76,
+68,
 [
 "introduction/apis.py:132:filename = tmp34 = os.path\nos.path.join(dirname, \"playground/A6/utility.py\")"
 ]
 ],
 [
+"introduction/apis.py:132",
+"prototype_pollution",
+69,
+[
+"introduction/apis.py:132:tmp34 = os.path"
+]
+],
+[
 "introduction/apis.py:133",
 "prototype_pollution",
-72,
+70,
 [
 "introduction/apis.py:133:f = open(filename, \"w\")"
 ]
@@ -10320,55 +10304,55 @@
 [
 "introduction/apis.py:137",
 "prototype_pollution",
-68,
-[
-"introduction/apis.py:137:tmp35[\"message\"] = \"missing code\""
-]
-],
-[
-"introduction/apis.py:137",
-"prototype_pollution",
-69,
+62,
 [
 "introduction/apis.py:137:tmp35 = {}"
 ]
 ],
 [
-"introduction/apis.py:138",
+"introduction/apis.py:137",
 "prototype_pollution",
-75,
+71,
 [
-"introduction/apis.py:138:tmp36[\"message\"] = \"success\""
+"introduction/apis.py:137:tmp35[\"message\"] = \"missing code\""
 ]
 ],
 [
 "introduction/apis.py:138",
 "prototype_pollution",
-80,
+72,
 [
 "introduction/apis.py:138:tmp36 = {}"
 ]
 ],
 [
-"introduction/apis.py:63",
+"introduction/apis.py:138",
 "prototype_pollution",
-165,
+73,
 [
-"introduction/apis.py:63:csrf_token = tmp14 = request.POST\nrequest.POST.get(\"csrfmiddlewaretoken\")"
+"introduction/apis.py:138:tmp36[\"message\"] = \"success\""
 ]
 ],
 [
 "introduction/apis.py:63",
 "prototype_pollution",
-170,
+126,
 [
 "introduction/apis.py:63:tmp14 = request.POST"
 ]
 ],
 [
+"introduction/apis.py:63",
+"prototype_pollution",
+129,
+[
+"introduction/apis.py:63:csrf_token = tmp14 = request.POST\nrequest.POST.get(\"csrfmiddlewaretoken\")"
+]
+],
+[
 "introduction/apis.py:64",
 "prototype_pollution",
-155,
+127,
 [
 "introduction/apis.py:64:tmp15 = request.POST"
 ]
@@ -10376,7 +10360,7 @@
 [
 "introduction/apis.py:64",
 "prototype_pollution",
-161,
+130,
 [
 "introduction/apis.py:64:log_code = tmp15 = request.POST\nrequest.POST.get('log_code')"
 ]
@@ -10384,7 +10368,7 @@
 [
 "introduction/apis.py:65",
 "prototype_pollution",
-157,
+131,
 [
 "introduction/apis.py:65:api_code = tmp16 = request.POST\nrequest.POST.get('api_code')"
 ]
@@ -10392,7 +10376,7 @@
 [
 "introduction/apis.py:65",
 "prototype_pollution",
-167,
+132,
 [
 "introduction/apis.py:65:tmp16 = request.POST"
 ]
@@ -10400,7 +10384,7 @@
 [
 "introduction/apis.py:66",
 "prototype_pollution",
-151,
+133,
 [
 "introduction/apis.py:66:dirname = tmp17 = os.path\nos.path.dirname(__file__)"
 ]
@@ -10408,7 +10392,7 @@
 [
 "introduction/apis.py:66",
 "prototype_pollution",
-166,
+134,
 [
 "introduction/apis.py:66:tmp17 = os.path"
 ]
@@ -10416,23 +10400,23 @@
 [
 "introduction/apis.py:67",
 "prototype_pollution",
-150,
-[
-"introduction/apis.py:67:tmp18 = os.path"
-]
-],
-[
-"introduction/apis.py:67",
-"prototype_pollution",
-174,
+135,
 [
 "introduction/apis.py:67:log_filename = tmp18 = os.path\nos.path.join(dirname, \"playground/A9/main.py\")"
 ]
 ],
 [
+"introduction/apis.py:67",
+"prototype_pollution",
+136,
+[
+"introduction/apis.py:67:tmp18 = os.path"
+]
+],
+[
 "introduction/apis.py:68",
 "prototype_pollution",
-149,
+137,
 [
 "introduction/apis.py:68:api_filename = tmp19 = os.path\nos.path.join(dirname, \"playground/A9/api.py\")"
 ]
@@ -10440,7 +10424,7 @@
 [
 "introduction/apis.py:68",
 "prototype_pollution",
-158,
+138,
 [
 "introduction/apis.py:68:tmp19 = os.path"
 ]
@@ -10448,7 +10432,7 @@
 [
 "introduction/apis.py:69",
 "prototype_pollution",
-159,
+139,
 [
 "introduction/apis.py:69:f = open(log_filename, \"w\")"
 ]
@@ -10456,7 +10440,7 @@
 [
 "introduction/apis.py:72",
 "prototype_pollution",
-168,
+140,
 [
 "introduction/apis.py:72:f = open(api_filename, \"w\")"
 ]
@@ -10464,7 +10448,7 @@
 [
 "introduction/apis.py:76",
 "prototype_pollution",
-152,
+141,
 [
 "introduction/apis.py:76:f = open('test.log', 'w')"
 ]
@@ -10472,7 +10456,7 @@
 [
 "introduction/apis.py:79",
 "prototype_pollution",
-162,
+142,
 [
 "introduction/apis.py:79:url = \"http://127.0.0.1:8000/2021/discussion/A9/target\""
 ]
@@ -10480,7 +10464,15 @@
 [
 "introduction/apis.py:80",
 "prototype_pollution",
-164,
+143,
+[
+"introduction/apis.py:80:payload = tmp20 = {}\ntmp20['csrfmiddlewaretoken'] = csrf_token\ntmp20"
+]
+],
+[
+"introduction/apis.py:80",
+"prototype_pollution",
+144,
 [
 "introduction/apis.py:80:tmp20 = {}"
 ]
@@ -10488,23 +10480,15 @@
 [
 "introduction/apis.py:80",
 "prototype_pollution",
-171,
+145,
 [
 "introduction/apis.py:80:tmp20['csrfmiddlewaretoken'] = csrf_token"
 ]
 ],
 [
-"introduction/apis.py:80",
-"prototype_pollution",
-173,
-[
-"introduction/apis.py:80:payload = tmp20 = {}\ntmp20['csrfmiddlewaretoken'] = csrf_token\ntmp20"
-]
-],
-[
 "introduction/apis.py:85",
 "prototype_pollution",
-156,
+128,
 [
 "introduction/apis.py:85:f = open('test.log', 'r')"
 ]
@@ -10512,7 +10496,7 @@
 [
 "introduction/apis.py:86",
 "prototype_pollution",
-172,
+146,
 [
 "introduction/apis.py:86:lines = f.readlines()"
 ]
@@ -10520,7 +10504,7 @@
 [
 "introduction/apis.py:88",
 "prototype_pollution",
-153,
+147,
 [
 "introduction/apis.py:88:tmp21 = {}"
 ]
@@ -10528,7 +10512,7 @@
 [
 "introduction/apis.py:88",
 "prototype_pollution",
-154,
+148,
 [
 "introduction/apis.py:88:tmp21[\"logs\"] = lines"
 ]
@@ -10536,7 +10520,7 @@
 [
 "introduction/apis.py:88",
 "prototype_pollution",
-163,
+149,
 [
 "introduction/apis.py:88:tmp21[\"message\"] = \"success\""
 ]
@@ -10544,7 +10528,7 @@
 [
 "introduction/apis.py:90",
 "prototype_pollution",
-160,
+150,
 [
 "introduction/apis.py:90:tmp22 = {}"
 ]
@@ -10552,7 +10536,7 @@
 [
 "introduction/apis.py:90",
 "prototype_pollution",
-169,
+151,
 [
 "introduction/apis.py:90:tmp22[\"message\"] = \"method not allowed\""
 ]
@@ -10560,7 +10544,7 @@
 [
 "introduction/forms.py:15",
 "prototype_pollution",
-27,
+30,
 [
 "introduction/forms.py:15:tmp0 = super(NewUserForm, self)"
 ]
@@ -10584,7 +10568,7 @@
 [
 "introduction/mitre.py:217",
 "prototype_pollution",
-38,
+36,
 [
 "introduction/mitre.py:217:tmp12 = request.POST"
 ]
@@ -10592,7 +10576,7 @@
 [
 "introduction/mitre.py:217",
 "prototype_pollution",
-39,
+38,
 [
 "introduction/mitre.py:217:expression = tmp12 = request.POST\nrequest.POST.get('expression')"
 ]
@@ -10600,7 +10584,7 @@
 [
 "introduction/mitre.py:218",
 "code_exec",
-1,
+0,
 [
 "introduction/mitre.py:218:eval(expression)"
 ]
@@ -10616,7 +10600,7 @@
 [
 "introduction/mitre.py:219",
 "prototype_pollution",
-35,
+37,
 [
 "introduction/mitre.py:219:tmp13 = {}"
 ]
@@ -10624,7 +10608,7 @@
 [
 "introduction/mitre.py:219",
 "prototype_pollution",
-37,
+39,
 [
 "introduction/mitre.py:219:tmp13['result'] = result"
 ]
@@ -10632,7 +10616,7 @@
 [
 "introduction/mitre.py:240",
 "prototype_pollution",
-82,
+74,
 [
 "introduction/mitre.py:240:ip = tmp14 = request.POST\nrequest.POST.get('ip')"
 ]
@@ -10640,7 +10624,7 @@
 [
 "introduction/mitre.py:240",
 "prototype_pollution",
-94,
+75,
 [
 "introduction/mitre.py:240:tmp14 = request.POST"
 ]
@@ -10648,7 +10632,7 @@
 [
 "introduction/mitre.py:241",
 "prototype_pollution",
-85,
+76,
 [
 "introduction/mitre.py:241:command = \"nmap \" + ip"
 ]
@@ -10656,7 +10640,7 @@
 [
 "introduction/mitre.py:242",
 "prototype_pollution",
-81,
+77,
 [
 "introduction/mitre.py:242:err = tmp15[1]"
 ]
@@ -10664,7 +10648,7 @@
 [
 "introduction/mitre.py:242",
 "prototype_pollution",
-88,
+78,
 [
 "introduction/mitre.py:242:res = tmp15[0]"
 ]
@@ -10672,7 +10656,7 @@
 [
 "introduction/mitre.py:242",
 "prototype_pollution",
-95,
+79,
 [
 "introduction/mitre.py:242:tmp15 = command_out(command)"
 ]
@@ -10680,7 +10664,7 @@
 [
 "introduction/mitre.py:243",
 "prototype_pollution",
-86,
+80,
 [
 "introduction/mitre.py:243:res = res.decode()"
 ]
@@ -10688,7 +10672,7 @@
 [
 "introduction/mitre.py:244",
 "prototype_pollution",
-90,
+81,
 [
 "introduction/mitre.py:244:err = err.decode()"
 ]
@@ -10696,7 +10680,7 @@
 [
 "introduction/mitre.py:245",
 "prototype_pollution",
-93,
+82,
 [
 "introduction/mitre.py:245:pattern = \"STATE SERVICE.*\\\\n\\\\n\""
 ]
@@ -10704,7 +10688,7 @@
 [
 "introduction/mitre.py:246",
 "prototype_pollution",
-87,
+83,
 [
 "introduction/mitre.py:246:ports = tmp16 = re.findall(pattern, res,re.DOTALL)[0][14:-2]\nre.findall(pattern, res, re.DOTALL)[0][14:-2].split('\\n')"
 ]
@@ -10712,7 +10696,7 @@
 [
 "introduction/mitre.py:246",
 "prototype_pollution",
-91,
+84,
 [
 "introduction/mitre.py:246:tmp16 = re.findall(pattern, res,re.DOTALL)[0][14:-2]"
 ]
@@ -10720,23 +10704,7 @@
 [
 "introduction/mitre.py:247",
 "prototype_pollution",
-83,
-[
-"introduction/mitre.py:247:tmp17['ports'] = ports"
-]
-],
-[
-"introduction/mitre.py:247",
-"prototype_pollution",
-84,
-[
-"introduction/mitre.py:247:tmp17['raw_res'] = str(res)"
-]
-],
-[
-"introduction/mitre.py:247",
-"prototype_pollution",
-89,
+85,
 [
 "introduction/mitre.py:247:tmp17 = {}"
 ]
@@ -10744,9 +10712,25 @@
 [
 "introduction/mitre.py:247",
 "prototype_pollution",
-92,
+86,
+[
+"introduction/mitre.py:247:tmp17['ports'] = ports"
+]
+],
+[
+"introduction/mitre.py:247",
+"prototype_pollution",
+87,
 [
 "introduction/mitre.py:247:tmp17['raw_err'] = str(err)"
+]
+],
+[
+"introduction/mitre.py:247",
+"prototype_pollution",
+88,
+[
+"introduction/mitre.py:247:tmp17['raw_res'] = str(res)"
 ]
 ],
 [
@@ -10760,7 +10744,7 @@
 [
 "introduction/mitre.py:247",
 "sql",
-47,
+40,
 [
 "introduction/mitre.py:247:tmp17['raw_err']"
 ]
@@ -10768,7 +10752,7 @@
 [
 "introduction/mitre.py:247",
 "sql",
-48,
+41,
 [
 "introduction/mitre.py:247:tmp17['raw_res']"
 ]
@@ -10776,7 +10760,7 @@
 [
 "introduction/playground/A6/utility.py:11",
 "prototype_pollution",
-55,
+49,
 [
 "introduction/playground/A6/utility.py:11:info = response.json()"
 ]
@@ -10784,7 +10768,7 @@
 [
 "introduction/playground/A6/utility.py:12",
 "prototype_pollution",
-51,
+50,
 [
 "introduction/playground/A6/utility.py:12:existing_vuln = info['vulnerabilities']"
 ]
@@ -10792,7 +10776,7 @@
 [
 "introduction/playground/A6/utility.py:5",
 "prototype_pollution",
-52,
+46,
 [
 "introduction/playground/A6/utility.py:5:vulns = []"
 ]
@@ -10800,7 +10784,7 @@
 [
 "introduction/playground/A6/utility.py:6",
 "prototype_pollution",
-56,
+47,
 [
 "introduction/playground/A6/utility.py:6:i = tmp0.__next__()"
 ]
@@ -10808,7 +10792,7 @@
 [
 "introduction/playground/A6/utility.py:6",
 "prototype_pollution",
-57,
+48,
 [
 "introduction/playground/A6/utility.py:6:tmp0 = list_of_modules.__iter__()"
 ]
@@ -10816,7 +10800,7 @@
 [
 "introduction/playground/A6/utility.py:7",
 "prototype_pollution",
-50,
+43,
 [
 "introduction/playground/A6/utility.py:7:k = i.split(\"==\")"
 ]
@@ -10824,7 +10808,7 @@
 [
 "introduction/playground/A6/utility.py:8",
 "prototype_pollution",
-54,
+44,
 [
 "introduction/playground/A6/utility.py:8:url = f\"https://pypi.org/pypi/{k[0]}/{k[1]}/json\""
 ]
@@ -10832,7 +10816,7 @@
 [
 "introduction/playground/A6/utility.py:9",
 "ssrf",
-19,
+16,
 [
 "introduction/playground/A6/utility.py:9:requests.get(url)"
 ]
@@ -10840,7 +10824,7 @@
 [
 "introduction/playground/A6/utility.py:9",
 "ssrf",
-49,
+42,
 [
 "introduction/playground/A6/utility.py:9:requests.get"
 ]
@@ -10848,7 +10832,7 @@
 [
 "introduction/playground/A6/utility.py:9",
 "ssrf",
-53,
+45,
 [
 "introduction/playground/A6/utility.py:9:response = requests.get(url)"
 ]
@@ -10856,15 +10840,7 @@
 [
 "introduction/playground/A9/archive.py:12",
 "prototype_pollution",
-178,
-[
-"introduction/playground/A9/archive.py:12:tmp0 = {}"
-]
-],
-[
-"introduction/playground/A9/archive.py:12",
-"prototype_pollution",
-183,
+152,
 [
 "introduction/playground/A9/archive.py:12:tmp0[\"message\"] = \"normal get request\""
 ]
@@ -10872,7 +10848,15 @@
 [
 "introduction/playground/A9/archive.py:12",
 "prototype_pollution",
-200,
+156,
+[
+"introduction/playground/A9/archive.py:12:tmp0 = {}"
+]
+],
+[
+"introduction/playground/A9/archive.py:12",
+"prototype_pollution",
+157,
 [
 "introduction/playground/A9/archive.py:12:tmp0[\"method\"] = \"get\""
 ]
@@ -10880,7 +10864,7 @@
 [
 "introduction/playground/A9/archive.py:14",
 "prototype_pollution",
-190,
+158,
 [
 "introduction/playground/A9/archive.py:14:username = request.POST['username']"
 ]
@@ -10888,7 +10872,7 @@
 [
 "introduction/playground/A9/archive.py:15",
 "prototype_pollution",
-192,
+159,
 [
 "introduction/playground/A9/archive.py:15:password = request.POST['password']"
 ]
@@ -10896,7 +10880,7 @@
 [
 "introduction/playground/A9/archive.py:18",
 "prototype_pollution",
-179,
+160,
 [
 "introduction/playground/A9/archive.py:18:tmp1 = {}"
 ]
@@ -10904,7 +10888,7 @@
 [
 "introduction/playground/A9/archive.py:18",
 "prototype_pollution",
-201,
+161,
 [
 "introduction/playground/A9/archive.py:18:tmp1[\"message\"] = \"Loged in successfully\""
 ]
@@ -10912,7 +10896,7 @@
 [
 "introduction/playground/A9/archive.py:18",
 "prototype_pollution",
-203,
+162,
 [
 "introduction/playground/A9/archive.py:18:tmp1[\"method\"] = \"post\""
 ]
@@ -10920,7 +10904,7 @@
 [
 "introduction/playground/A9/archive.py:19",
 "prototype_pollution",
-184,
+163,
 [
 "introduction/playground/A9/archive.py:19:tmp2 = {}"
 ]
@@ -10928,31 +10912,23 @@
 [
 "introduction/playground/A9/archive.py:19",
 "prototype_pollution",
-195,
-[
-"introduction/playground/A9/archive.py:19:tmp2[\"method\"] = \"post\""
-]
-],
-[
-"introduction/playground/A9/archive.py:19",
-"prototype_pollution",
-198,
+164,
 [
 "introduction/playground/A9/archive.py:19:tmp2[\"message\"] = \"Invalid credentials\""
 ]
 ],
 [
-"introduction/playground/A9/archive.py:22",
+"introduction/playground/A9/archive.py:19",
 "prototype_pollution",
-188,
+165,
 [
-"introduction/playground/A9/archive.py:22:tmp3[\"method\"] = \"put\""
+"introduction/playground/A9/archive.py:19:tmp2[\"method\"] = \"post\""
 ]
 ],
 [
 "introduction/playground/A9/archive.py:22",
 "prototype_pollution",
-194,
+166,
 [
 "introduction/playground/A9/archive.py:22:tmp3 = {}"
 ]
@@ -10960,15 +10936,23 @@
 [
 "introduction/playground/A9/archive.py:22",
 "prototype_pollution",
-202,
+167,
 [
 "introduction/playground/A9/archive.py:22:tmp3[\"message\"] = \"success\""
 ]
 ],
 [
+"introduction/playground/A9/archive.py:22",
+"prototype_pollution",
+168,
+[
+"introduction/playground/A9/archive.py:22:tmp3[\"method\"] = \"put\""
+]
+],
+[
 "introduction/playground/A9/archive.py:25",
 "prototype_pollution",
-177,
+153,
 [
 "introduction/playground/A9/archive.py:25:tmp4[\"method\"] = \"delete\""
 ]
@@ -10976,31 +10960,31 @@
 [
 "introduction/playground/A9/archive.py:25",
 "prototype_pollution",
-185,
-[
-"introduction/playground/A9/archive.py:25:tmp4[\"message\"] = \"User is authenticated\""
-]
-],
-[
-"introduction/playground/A9/archive.py:25",
-"prototype_pollution",
-191,
+169,
 [
 "introduction/playground/A9/archive.py:25:tmp4 = {}"
 ]
 ],
 [
-"introduction/playground/A9/archive.py:27",
+"introduction/playground/A9/archive.py:25",
 "prototype_pollution",
-176,
+170,
 [
-"introduction/playground/A9/archive.py:27:tmp5[\"method\"] = \"delete\""
+"introduction/playground/A9/archive.py:25:tmp4[\"message\"] = \"User is authenticated\""
 ]
 ],
 [
 "introduction/playground/A9/archive.py:27",
 "prototype_pollution",
-181,
+171,
+[
+"introduction/playground/A9/archive.py:27:tmp5 = {}"
+]
+],
+[
+"introduction/playground/A9/archive.py:27",
+"prototype_pollution",
+172,
 [
 "introduction/playground/A9/archive.py:27:tmp5[\"message\"] = \"permission denied\""
 ]
@@ -11008,23 +10992,23 @@
 [
 "introduction/playground/A9/archive.py:27",
 "prototype_pollution",
-187,
+173,
 [
-"introduction/playground/A9/archive.py:27:tmp5 = {}"
+"introduction/playground/A9/archive.py:27:tmp5[\"method\"] = \"delete\""
 ]
 ],
 [
 "introduction/playground/A9/archive.py:30",
 "prototype_pollution",
-182,
+174,
 [
-"introduction/playground/A9/archive.py:30:tmp6[\"method\"] = \"patch\""
+"introduction/playground/A9/archive.py:30:tmp6 = {}"
 ]
 ],
 [
 "introduction/playground/A9/archive.py:30",
 "prototype_pollution",
-193,
+175,
 [
 "introduction/playground/A9/archive.py:30:tmp6[\"message\"] = \"success\""
 ]
@@ -11032,23 +11016,23 @@
 [
 "introduction/playground/A9/archive.py:30",
 "prototype_pollution",
-197,
+176,
 [
-"introduction/playground/A9/archive.py:30:tmp6 = {}"
+"introduction/playground/A9/archive.py:30:tmp6[\"method\"] = \"patch\""
 ]
 ],
 [
 "introduction/playground/A9/archive.py:32",
 "prototype_pollution",
-175,
+154,
 [
-"introduction/playground/A9/archive.py:32:tmp7[\"method\"] = \"update\""
+"introduction/playground/A9/archive.py:32:tmp7 = {}"
 ]
 ],
 [
 "introduction/playground/A9/archive.py:32",
 "prototype_pollution",
-189,
+177,
 [
 "introduction/playground/A9/archive.py:32:tmp7[\"message\"] = \"success\""
 ]
@@ -11056,9 +11040,17 @@
 [
 "introduction/playground/A9/archive.py:32",
 "prototype_pollution",
-199,
+178,
 [
-"introduction/playground/A9/archive.py:32:tmp7 = {}"
+"introduction/playground/A9/archive.py:32:tmp7[\"method\"] = \"update\""
+]
+],
+[
+"introduction/playground/A9/archive.py:33",
+"prototype_pollution",
+179,
+[
+"introduction/playground/A9/archive.py:33:tmp8 = {}"
 ]
 ],
 [
@@ -11070,33 +11062,25 @@
 ]
 ],
 [
-"introduction/playground/A9/archive.py:33",
-"prototype_pollution",
-196,
-[
-"introduction/playground/A9/archive.py:33:tmp8 = {}"
-]
-],
-[
 "introduction/playground/A9/archive.py:47",
 "prototype_pollution",
-29,
-[
-"introduction/playground/A9/archive.py:47:tmp9 = datetime.datetime"
-]
-],
-[
-"introduction/playground/A9/archive.py:47",
-"prototype_pollution",
-30,
+33,
 [
 "introduction/playground/A9/archive.py:47:now = tmp9 = datetime.datetime\ndatetime.datetime.now()"
 ]
 ],
 [
+"introduction/playground/A9/archive.py:47",
+"prototype_pollution",
+34,
+[
+"introduction/playground/A9/archive.py:47:tmp9 = datetime.datetime"
+]
+],
+[
 "introduction/playground/A9/archive.py:48",
 "prototype_pollution",
-28,
+35,
 [
 "introduction/playground/A9/archive.py:48:f = open('test.log', 'a')"
 ]
@@ -11104,31 +11088,15 @@
 [
 "introduction/playground/A9/archive.py:9",
 "prototype_pollution",
-186,
+155,
 [
 "introduction/playground/A9/archive.py:9:L = Log(request)"
 ]
 ],
 [
-"introduction/playground/A9/main.py:7",
-"prototype_pollution",
-18,
-[
-"introduction/playground/A9/main.py:7:self.request = request"
-]
-],
-[
-"introduction/utility.py:59",
-"prototype_pollution",
-16,
-[
-"introduction/utility.py:59:tmp19 = hashlib.sha256(password.encode())"
-]
-],
-[
 "introduction/views.py:1053",
 "prototype_pollution",
-262,
+192,
 [
 "introduction/views.py:1053:cookie = request.COOKIES[\"cookie\"]"
 ]
@@ -11136,7 +11104,7 @@
 [
 "introduction/views.py:1055",
 "prototype_pollution",
-293,
+193,
 [
 "introduction/views.py:1055:expire = cookie.split('|')[1]"
 ]
@@ -11144,7 +11112,7 @@
 [
 "introduction/views.py:1056",
 "prototype_pollution",
-244,
+194,
 [
 "introduction/views.py:1056:expire = tmp172 = datetime.datetime\ndatetime.datetime.fromisoformat(expire)"
 ]
@@ -11152,7 +11120,7 @@
 [
 "introduction/views.py:1056",
 "prototype_pollution",
-256,
+195,
 [
 "introduction/views.py:1056:tmp172 = datetime.datetime"
 ]
@@ -11160,7 +11128,7 @@
 [
 "introduction/views.py:1057",
 "prototype_pollution",
-251,
+181,
 [
 "introduction/views.py:1057:tmp173 = datetime.datetime"
 ]
@@ -11168,7 +11136,7 @@
 [
 "introduction/views.py:1057",
 "prototype_pollution",
-273,
+196,
 [
 "introduction/views.py:1057:now = tmp173 = datetime.datetime\ndatetime.datetime.now()"
 ]
@@ -11176,7 +11144,7 @@
 [
 "introduction/views.py:1059",
 "prototype_pollution",
-285,
+197,
 [
 "introduction/views.py:1059:tmp174 = {}"
 ]
@@ -11184,39 +11152,31 @@
 [
 "introduction/views.py:1059",
 "prototype_pollution",
-286,
-[
-"introduction/views.py:1059:tmp174[\"success\"] = False"
-]
-],
-[
-"introduction/views.py:1059",
-"prototype_pollution",
-296,
+198,
 [
 "introduction/views.py:1059:tmp174[\"failure\"] = False"
 ]
 ],
 [
-"introduction/views.py:1061",
+"introduction/views.py:1059",
 "prototype_pollution",
-246,
+199,
 [
-"introduction/views.py:1061:tmp175[\"success\"] = True"
+"introduction/views.py:1059:tmp174[\"success\"] = False"
 ]
 ],
 [
 "introduction/views.py:1061",
 "prototype_pollution",
-276,
+200,
 [
-"introduction/views.py:1061:tmp175[\"failure\"] = False"
+"introduction/views.py:1061:tmp175 = {}"
 ]
 ],
 [
 "introduction/views.py:1061",
 "prototype_pollution",
-287,
+201,
 [
 "introduction/views.py:1061:tmp175[\"admin\"] = True"
 ]
@@ -11224,31 +11184,31 @@
 [
 "introduction/views.py:1061",
 "prototype_pollution",
-289,
+202,
 [
-"introduction/views.py:1061:tmp175 = {}"
+"introduction/views.py:1061:tmp175[\"failure\"] = False"
+]
+],
+[
+"introduction/views.py:1061",
+"prototype_pollution",
+203,
+[
+"introduction/views.py:1061:tmp175[\"success\"] = True"
 ]
 ],
 [
 "introduction/views.py:1063",
 "prototype_pollution",
-258,
+182,
 [
-"introduction/views.py:1063:tmp176[\"success\"] = True"
+"introduction/views.py:1063:tmp176 = {}"
 ]
 ],
 [
 "introduction/views.py:1063",
 "prototype_pollution",
-260,
-[
-"introduction/views.py:1063:tmp176[\"failure\"] = False"
-]
-],
-[
-"introduction/views.py:1063",
-"prototype_pollution",
-295,
+204,
 [
 "introduction/views.py:1063:tmp176[\"admin\"] = False"
 ]
@@ -11256,15 +11216,23 @@
 [
 "introduction/views.py:1063",
 "prototype_pollution",
-297,
+205,
 [
-"introduction/views.py:1063:tmp176 = {}"
+"introduction/views.py:1063:tmp176[\"failure\"] = False"
+]
+],
+[
+"introduction/views.py:1063",
+"prototype_pollution",
+206,
+[
+"introduction/views.py:1063:tmp176[\"success\"] = True"
 ]
 ],
 [
 "introduction/views.py:1069",
 "prototype_pollution",
-247,
+207,
 [
 "introduction/views.py:1069:username = request.POST[\"username\"]"
 ]
@@ -11272,7 +11240,7 @@
 [
 "introduction/views.py:1070",
 "prototype_pollution",
-298,
+208,
 [
 "introduction/views.py:1070:password = request.POST[\"password\"]"
 ]
@@ -11280,23 +11248,23 @@
 [
 "introduction/views.py:1073",
 "prototype_pollution",
-236,
-[
-"introduction/views.py:1073:tmp177 = datetime.datetime"
-]
-],
-[
-"introduction/views.py:1073",
-"prototype_pollution",
-242,
+209,
 [
 "introduction/views.py:1073:expire = tmp177 = datetime.datetime\ndatetime.datetime.now() + datetime.timedelta(minutes = 60)"
 ]
 ],
 [
+"introduction/views.py:1073",
+"prototype_pollution",
+210,
+[
+"introduction/views.py:1073:tmp177 = datetime.datetime"
+]
+],
+[
 "introduction/views.py:1074",
 "prototype_pollution",
-254,
+183,
 [
 "introduction/views.py:1074:cookie = f\"{username}|{expire}\""
 ]
@@ -11304,15 +11272,15 @@
 [
 "introduction/views.py:1075",
 "prototype_pollution",
-239,
+184,
 [
-"introduction/views.py:1075:tmp178[\"admin\"] = False"
+"introduction/views.py:1075:tmp178[\"success\"] = True"
 ]
 ],
 [
 "introduction/views.py:1075",
 "prototype_pollution",
-259,
+211,
 [
 "introduction/views.py:1075:response = render(request, \"Lab_2021/A2_Crypto_failur/crypto_failure_lab3.html\", {\"success\":True, \"failure\":False, \"admin\":False})"
 ]
@@ -11320,15 +11288,7 @@
 [
 "introduction/views.py:1075",
 "prototype_pollution",
-272,
-[
-"introduction/views.py:1075:tmp178[\"failure\"] = False"
-]
-],
-[
-"introduction/views.py:1075",
-"prototype_pollution",
-291,
+212,
 [
 "introduction/views.py:1075:tmp178 = {}"
 ]
@@ -11336,15 +11296,23 @@
 [
 "introduction/views.py:1075",
 "prototype_pollution",
-294,
+213,
 [
-"introduction/views.py:1075:tmp178[\"success\"] = True"
+"introduction/views.py:1075:tmp178[\"admin\"] = False"
+]
+],
+[
+"introduction/views.py:1075",
+"prototype_pollution",
+214,
+[
+"introduction/views.py:1075:tmp178[\"failure\"] = False"
 ]
 ],
 [
 "introduction/views.py:1077",
 "prototype_pollution",
-234,
+215,
 [
 "introduction/views.py:1077:response.status_code = 200"
 ]
@@ -11352,23 +11320,7 @@
 [
 "introduction/views.py:1080",
 "prototype_pollution",
-264,
-[
-"introduction/views.py:1080:tmp179[\"success\"] = False"
-]
-],
-[
-"introduction/views.py:1080",
-"prototype_pollution",
-269,
-[
-"introduction/views.py:1080:tmp179 = {}"
-]
-],
-[
-"introduction/views.py:1080",
-"prototype_pollution",
-271,
+216,
 [
 "introduction/views.py:1080:response = render(request, \"Lab_2021/A2_Crypto_failur/crypto_failure_lab3.html\", {\"success\":False, \"failure\":True})"
 ]
@@ -11376,23 +11328,31 @@
 [
 "introduction/views.py:1080",
 "prototype_pollution",
-274,
+217,
+[
+"introduction/views.py:1080:tmp179 = {}"
+]
+],
+[
+"introduction/views.py:1080",
+"prototype_pollution",
+218,
 [
 "introduction/views.py:1080:tmp179[\"failure\"] = True"
 ]
 ],
 [
-"introduction/views.py:1084",
+"introduction/views.py:1080",
 "prototype_pollution",
-252,
+219,
 [
-"introduction/views.py:1084:tmp180[\"failure\"] = True"
+"introduction/views.py:1080:tmp179[\"success\"] = False"
 ]
 ],
 [
 "introduction/views.py:1084",
 "prototype_pollution",
-279,
+220,
 [
 "introduction/views.py:1084:tmp180 = {}"
 ]
@@ -11400,15 +11360,31 @@
 [
 "introduction/views.py:1084",
 "prototype_pollution",
-299,
+221,
+[
+"introduction/views.py:1084:tmp180[\"failure\"] = True"
+]
+],
+[
+"introduction/views.py:1084",
+"prototype_pollution",
+222,
 [
 "introduction/views.py:1084:tmp180[\"success\"] = False"
 ]
 ],
 [
+"introduction/views.py:1127",
+"prototype_pollution",
+223,
+[
+"introduction/views.py:1127:username = request.POST[\"username\"]"
+]
+],
+[
 "introduction/views.py:1128",
 "prototype_pollution",
-250,
+224,
 [
 "introduction/views.py:1128:password = request.POST[\"password\"]"
 ]
@@ -11416,7 +11392,7 @@
 [
 "introduction/views.py:1130",
 "prototype_pollution",
-237,
+185,
 [
 "introduction/views.py:1130:user = tmp187 = AF_admin.objects\nAF_admin.objects.get(username = username)"
 ]
@@ -11424,7 +11400,7 @@
 [
 "introduction/views.py:1130",
 "prototype_pollution",
-263,
+225,
 [
 "introduction/views.py:1130:tmp187 = AF_admin.objects"
 ]
@@ -11432,7 +11408,7 @@
 [
 "introduction/views.py:1132",
 "prototype_pollution",
-261,
+226,
 [
 "introduction/views.py:1132:tmp188 = datetime.datetime"
 ]
@@ -11440,7 +11416,7 @@
 [
 "introduction/views.py:1133",
 "prototype_pollution",
-278,
+227,
 [
 "introduction/views.py:1133:tmp189 = {}"
 ]
@@ -11448,7 +11424,7 @@
 [
 "introduction/views.py:1133",
 "prototype_pollution",
-292,
+228,
 [
 "introduction/views.py:1133:tmp189[\"is_locked\"] = True"
 ]
@@ -11456,7 +11432,7 @@
 [
 "introduction/views.py:1136",
 "prototype_pollution",
-249,
+229,
 [
 "introduction/views.py:1136:ph = PasswordHasher()"
 ]
@@ -11464,7 +11440,7 @@
 [
 "introduction/views.py:1138",
 "prototype_pollution",
-282,
+230,
 [
 "introduction/views.py:1138:tmp190 = datetime.datetime"
 ]
@@ -11472,7 +11448,7 @@
 [
 "introduction/views.py:1139",
 "prototype_pollution",
-248,
+231,
 [
 "introduction/views.py:1139:user.is_locked = False"
 ]
@@ -11480,23 +11456,23 @@
 [
 "introduction/views.py:1140",
 "prototype_pollution",
-243,
-[
-"introduction/views.py:1140:tmp191 = datetime.datetime"
-]
-],
-[
-"introduction/views.py:1140",
-"prototype_pollution",
-290,
+186,
 [
 "introduction/views.py:1140:user.last_login = tmp191 = datetime.datetime\ndatetime.datetime.now()"
 ]
 ],
 [
+"introduction/views.py:1140",
+"prototype_pollution",
+232,
+[
+"introduction/views.py:1140:tmp191 = datetime.datetime"
+]
+],
+[
 "introduction/views.py:1141",
 "prototype_pollution",
-281,
+233,
 [
 "introduction/views.py:1141:user.failattempt = 0"
 ]
@@ -11504,7 +11480,7 @@
 [
 "introduction/views.py:1143",
 "prototype_pollution",
-235,
+234,
 [
 "introduction/views.py:1143:tmp192 = {}"
 ]
@@ -11512,7 +11488,7 @@
 [
 "introduction/views.py:1143",
 "prototype_pollution",
-238,
+235,
 [
 "introduction/views.py:1143:tmp192[\"failure\"] = False"
 ]
@@ -11520,23 +11496,23 @@
 [
 "introduction/views.py:1143",
 "prototype_pollution",
-241,
-[
-"introduction/views.py:1143:tmp192[\"user\"] = user"
-]
-],
-[
-"introduction/views.py:1143",
-"prototype_pollution",
-267,
+236,
 [
 "introduction/views.py:1143:tmp192[\"success\"] = True"
 ]
 ],
 [
+"introduction/views.py:1143",
+"prototype_pollution",
+237,
+[
+"introduction/views.py:1143:tmp192[\"user\"] = user"
+]
+],
+[
 "introduction/views.py:1147",
 "prototype_pollution",
-284,
+238,
 [
 "introduction/views.py:1147:fail_attempt = user.failattempt + 1"
 ]
@@ -11544,7 +11520,7 @@
 [
 "introduction/views.py:1149",
 "prototype_pollution",
-257,
+187,
 [
 "introduction/views.py:1149:user.is_active = False"
 ]
@@ -11552,9 +11528,25 @@
 [
 "introduction/views.py:1150",
 "prototype_pollution",
-280,
+188,
 [
 "introduction/views.py:1150:user.failattempt = 0"
+]
+],
+[
+"introduction/views.py:1151",
+"prototype_pollution",
+239,
+[
+"introduction/views.py:1151:user.is_locked = True"
+]
+],
+[
+"introduction/views.py:1152",
+"prototype_pollution",
+189,
+[
+"introduction/views.py:1152:user.lockout_cooldown = tmp193 = datetime.datetime\ndatetime.datetime.now() + datetime.timedelta(minutes = 1440)"
 ]
 ],
 [
@@ -11566,25 +11558,9 @@
 ]
 ],
 [
-"introduction/views.py:1152",
-"prototype_pollution",
-266,
-[
-"introduction/views.py:1152:user.lockout_cooldown = tmp193 = datetime.datetime\ndatetime.datetime.now() + datetime.timedelta(minutes = 1440)"
-]
-],
-[
 "introduction/views.py:1154",
 "prototype_pollution",
-265,
-[
-"introduction/views.py:1154:tmp194[\"success\"] = False"
-]
-],
-[
-"introduction/views.py:1154",
-"prototype_pollution",
-270,
+241,
 [
 "introduction/views.py:1154:tmp194 = {}"
 ]
@@ -11592,23 +11568,39 @@
 [
 "introduction/views.py:1154",
 "prototype_pollution",
-275,
-[
-"introduction/views.py:1154:tmp194[\"user\"] = user"
-]
-],
-[
-"introduction/views.py:1154",
-"prototype_pollution",
-277,
+242,
 [
 "introduction/views.py:1154:tmp194[\"failure\"] = True"
 ]
 ],
 [
+"introduction/views.py:1154",
+"prototype_pollution",
+243,
+[
+"introduction/views.py:1154:tmp194[\"is_locked\"] = True"
+]
+],
+[
+"introduction/views.py:1154",
+"prototype_pollution",
+244,
+[
+"introduction/views.py:1154:tmp194[\"success\"] = False"
+]
+],
+[
+"introduction/views.py:1154",
+"prototype_pollution",
+245,
+[
+"introduction/views.py:1154:tmp194[\"user\"] = user"
+]
+],
+[
 "introduction/views.py:1155",
 "prototype_pollution",
-255,
+246,
 [
 "introduction/views.py:1155:user.failattempt = fail_attempt"
 ]
@@ -11616,7 +11608,7 @@
 [
 "introduction/views.py:1157",
 "prototype_pollution",
-245,
+247,
 [
 "introduction/views.py:1157:tmp195 = {}"
 ]
@@ -11624,7 +11616,15 @@
 [
 "introduction/views.py:1157",
 "prototype_pollution",
-288,
+248,
+[
+"introduction/views.py:1157:tmp195[\"failure\"] = True"
+]
+],
+[
+"introduction/views.py:1157",
+"prototype_pollution",
+249,
 [
 "introduction/views.py:1157:tmp195[\"success\"] = False"
 ]
@@ -11632,15 +11632,15 @@
 [
 "introduction/views.py:1160",
 "prototype_pollution",
-253,
+190,
 [
-"introduction/views.py:1160:tmp196 = {}"
+"introduction/views.py:1160:tmp196[\"failure\"] = True"
 ]
 ],
 [
 "introduction/views.py:1160",
 "prototype_pollution",
-268,
+191,
 [
 "introduction/views.py:1160:tmp196[\"success\"] = False"
 ]
@@ -11648,23 +11648,15 @@
 [
 "introduction/views.py:1160",
 "prototype_pollution",
-283,
+250,
 [
-"introduction/views.py:1160:tmp196[\"failure\"] = True"
+"introduction/views.py:1160:tmp196 = {}"
 ]
 ],
 [
 "introduction/views.py:214",
 "deserialize",
-4,
-[
-"introduction/views.py:214:admin = pickle.loads(token)"
-]
-],
-[
-"introduction/views.py:214",
-"deserialize",
-6,
+1,
 [
 "introduction/views.py:214:pickle.loads(token)"
 ]
@@ -11672,17 +11664,17 @@
 [
 "introduction/views.py:214",
 "deserialize",
-8,
+3,
 [
-"introduction/views.py:214:pickle.loads"
+"introduction/views.py:214:admin = pickle.loads(token)"
 ]
 ],
 [
-"introduction/views.py:245",
-"code_exec",
-15,
+"introduction/views.py:214",
+"deserialize",
+4,
 [
-"introduction/views.py:245:comments.objects.create(name = 'System', comment = 'Default comment for XXE lab')"
+"introduction/views.py:214:pickle.loads"
 ]
 ],
 [
@@ -11694,9 +11686,17 @@
 ]
 ],
 [
+"introduction/views.py:245",
+"code_exec",
+6,
+[
+"introduction/views.py:245:comments.objects.create(name = 'System', comment = 'Default comment for XXE lab')"
+]
+],
+[
 "introduction/views.py:284",
 "prototype_pollution",
-114,
+91,
 [
 "introduction/views.py:284:name = request.POST['name']"
 ]
@@ -11704,7 +11704,7 @@
 [
 "introduction/views.py:285",
 "prototype_pollution",
-107,
+92,
 [
 "introduction/views.py:285:user_name = request.POST['username']"
 ]
@@ -11712,7 +11712,7 @@
 [
 "introduction/views.py:286",
 "prototype_pollution",
-109,
+93,
 [
 "introduction/views.py:286:passwd = request.POST['pass']"
 ]
@@ -11720,23 +11720,31 @@
 [
 "introduction/views.py:287",
 "prototype_pollution",
-100,
-[
-"introduction/views.py:287:obj = tmp31 = authLogin.objects\nauthLogin.objects.create(name = name, username = user_name, password = passwd)"
-]
-],
-[
-"introduction/views.py:287",
-"prototype_pollution",
-103,
+89,
 [
 "introduction/views.py:287:tmp31 = authLogin.objects"
 ]
 ],
 [
+"introduction/views.py:287",
+"prototype_pollution",
+94,
+[
+"introduction/views.py:287:obj = tmp31 = authLogin.objects\nauthLogin.objects.create(name = name, username = user_name, password = passwd)"
+]
+],
+[
 "introduction/views.py:289",
 "prototype_pollution",
-110,
+90,
+[
+"introduction/views.py:289:rendered = render_to_string('Lab/AUTH/auth_success.html', {'username':obj.username, 'userid':obj.userid, 'name':obj.name, 'err_msg':'Cookie Set'})"
+]
+],
+[
+"introduction/views.py:289",
+"prototype_pollution",
+95,
 [
 "introduction/views.py:289:tmp32 = {}"
 ]
@@ -11744,31 +11752,7 @@
 [
 "introduction/views.py:289",
 "prototype_pollution",
-111,
-[
-"introduction/views.py:289:tmp32['name'] = obj.name"
-]
-],
-[
-"introduction/views.py:289",
-"prototype_pollution",
-117,
-[
-"introduction/views.py:289:tmp32['userid'] = obj.userid"
-]
-],
-[
-"introduction/views.py:289",
-"prototype_pollution",
-120,
-[
-"introduction/views.py:289:tmp32['username'] = obj.username"
-]
-],
-[
-"introduction/views.py:289",
-"prototype_pollution",
-123,
+96,
 [
 "introduction/views.py:289:tmp32['err_msg'] = 'Cookie Set'"
 ]
@@ -11776,15 +11760,31 @@
 [
 "introduction/views.py:289",
 "prototype_pollution",
-126,
+97,
 [
-"introduction/views.py:289:rendered = render_to_string('Lab/AUTH/auth_success.html', {'username':obj.username, 'userid':obj.userid, 'name':obj.name, 'err_msg':'Cookie Set'})"
+"introduction/views.py:289:tmp32['name'] = obj.name"
+]
+],
+[
+"introduction/views.py:289",
+"prototype_pollution",
+98,
+[
+"introduction/views.py:289:tmp32['userid'] = obj.userid"
+]
+],
+[
+"introduction/views.py:289",
+"prototype_pollution",
+99,
+[
+"introduction/views.py:289:tmp32['username'] = obj.username"
 ]
 ],
 [
 "introduction/views.py:290",
 "prototype_pollution",
-122,
+100,
 [
 "introduction/views.py:290:response = HttpResponse(rendered)"
 ]
@@ -11792,7 +11792,7 @@
 [
 "introduction/views.py:295",
 "prototype_pollution",
-106,
+101,
 [
 "introduction/views.py:295:tmp33 = {}"
 ]
@@ -11800,7 +11800,7 @@
 [
 "introduction/views.py:295",
 "prototype_pollution",
-99,
+102,
 [
 "introduction/views.py:295:tmp33['err_msg'] = 'Cookie cannot be set'"
 ]
@@ -11808,7 +11808,7 @@
 [
 "introduction/views.py:297",
 "prototype_pollution",
-108,
+103,
 [
 "introduction/views.py:297:tmp34 = {}"
 ]
@@ -11816,7 +11816,7 @@
 [
 "introduction/views.py:297",
 "prototype_pollution",
-127,
+104,
 [
 "introduction/views.py:297:tmp34['err_msg'] = 'Username already exists'"
 ]
@@ -11824,23 +11824,23 @@
 [
 "introduction/views.py:418",
 "prototype_pollution",
-135,
-[
-"introduction/views.py:418:tmp52 = request.POST"
-]
-],
-[
-"introduction/views.py:418",
-"prototype_pollution",
-136,
+108,
 [
 "introduction/views.py:418:domain = tmp52 = request.POST\nrequest.POST.get('domain')"
 ]
 ],
 [
+"introduction/views.py:418",
+"prototype_pollution",
+109,
+[
+"introduction/views.py:418:tmp52 = request.POST"
+]
+],
+[
 "introduction/views.py:420",
 "prototype_pollution",
-139,
+110,
 [
 "introduction/views.py:420:domain = re.sub(r'^(?:(https?|ftp)://)?(?:www\\.)?', '', domain, flags = re.IGNORECASE)"
 ]
@@ -11848,7 +11848,7 @@
 [
 "introduction/views.py:421",
 "prototype_pollution",
-132,
+111,
 [
 "introduction/views.py:421:os = tmp53 = request.POST\nrequest.POST.get('os')"
 ]
@@ -11856,7 +11856,7 @@
 [
 "introduction/views.py:421",
 "prototype_pollution",
-134,
+112,
 [
 "introduction/views.py:421:tmp53 = request.POST"
 ]
@@ -11864,23 +11864,23 @@
 [
 "introduction/views.py:424",
 "prototype_pollution",
-138,
-[
-"introduction/views.py:424:tmp54 = \"nslookup {}\""
-]
-],
-[
-"introduction/views.py:424",
-"prototype_pollution",
-144,
+105,
 [
 "introduction/views.py:424:command = tmp54 = \"nslookup {}\"\n\"nslookup {}\".format(domain)"
 ]
 ],
 [
+"introduction/views.py:424",
+"prototype_pollution",
+106,
+[
+"introduction/views.py:424:tmp54 = \"nslookup {}\""
+]
+],
+[
 "introduction/views.py:426",
 "prototype_pollution",
-131,
+113,
 [
 "introduction/views.py:426:command = tmp55 = \"dig {}\"\n\"dig {}\".format(domain)"
 ]
@@ -11888,7 +11888,7 @@
 [
 "introduction/views.py:426",
 "prototype_pollution",
-142,
+114,
 [
 "introduction/views.py:426:tmp55 = \"dig {}\""
 ]
@@ -11896,7 +11896,7 @@
 [
 "introduction/views.py:430",
 "prototype_pollution",
-141,
+115,
 [
 "introduction/views.py:430:process = subprocess.Popen(command, shell = True, stdout = subprocess.PIPE, stderr = subprocess.PIPE)"
 ]
@@ -11904,15 +11904,15 @@
 [
 "introduction/views.py:435",
 "prototype_pollution",
-128,
+116,
 [
-"introduction/views.py:435:tmp56 = process.communicate()"
+"introduction/views.py:435:stderr = tmp56[1]"
 ]
 ],
 [
 "introduction/views.py:435",
 "prototype_pollution",
-130,
+117,
 [
 "introduction/views.py:435:stdout = tmp56[0]"
 ]
@@ -11920,15 +11920,15 @@
 [
 "introduction/views.py:435",
 "prototype_pollution",
-133,
+118,
 [
-"introduction/views.py:435:stderr = tmp56[1]"
+"introduction/views.py:435:tmp56 = process.communicate()"
 ]
 ],
 [
 "introduction/views.py:436",
 "prototype_pollution",
-143,
+119,
 [
 "introduction/views.py:436:data = stdout.decode('utf-8')"
 ]
@@ -11936,7 +11936,7 @@
 [
 "introduction/views.py:437",
 "prototype_pollution",
-146,
+120,
 [
 "introduction/views.py:437:stderr = stderr.decode('utf-8')"
 ]
@@ -11944,7 +11944,7 @@
 [
 "introduction/views.py:440",
 "prototype_pollution",
-129,
+121,
 [
 "introduction/views.py:440:output = data + stderr"
 ]
@@ -11952,7 +11952,7 @@
 [
 "introduction/views.py:443",
 "prototype_pollution",
-137,
+122,
 [
 "introduction/views.py:443:output = \"Something went wrong\""
 ]
@@ -11960,23 +11960,23 @@
 [
 "introduction/views.py:444",
 "prototype_pollution",
-147,
-[
-"introduction/views.py:444:tmp57 = {}"
-]
-],
-[
-"introduction/views.py:444",
-"prototype_pollution",
-148,
+107,
 [
 "introduction/views.py:444:tmp57[\"output\"] = output"
 ]
 ],
 [
+"introduction/views.py:444",
+"prototype_pollution",
+123,
+[
+"introduction/views.py:444:tmp57 = {}"
+]
+],
+[
 "introduction/views.py:446",
 "prototype_pollution",
-140,
+124,
 [
 "introduction/views.py:446:tmp58 = {}"
 ]
@@ -11984,7 +11984,7 @@
 [
 "introduction/views.py:446",
 "prototype_pollution",
-145,
+125,
 [
 "introduction/views.py:446:tmp58[\"output\"] = output"
 ]
@@ -11992,17 +11992,17 @@
 [
 "introduction/views.py:460",
 "code_exec",
-13,
+7,
 [
-"introduction/views.py:460:eval(val)"
+"introduction/views.py:460:output = eval(val)"
 ]
 ],
 [
 "introduction/views.py:460",
 "code_exec",
-3,
+8,
 [
-"introduction/views.py:460:output = eval(val)"
+"introduction/views.py:460:eval(val)"
 ]
 ],
 [
@@ -12018,7 +12018,7 @@
 "deserialize",
 11,
 [
-"introduction/views.py:560:data = yaml.load(file, yaml.Loader)"
+"introduction/views.py:560:yaml.load(file, yaml.Loader)"
 ]
 ],
 [
@@ -12026,29 +12026,21 @@
 "deserialize",
 12,
 [
-"introduction/views.py:560:yaml.load(file, yaml.Loader)"
+"introduction/views.py:560:yaml.Loader"
 ]
 ],
 [
 "introduction/views.py:560",
 "deserialize",
-14,
+9,
 [
-"introduction/views.py:560:yaml.Loader"
+"introduction/views.py:560:data = yaml.load(file, yaml.Loader)"
 ]
 ],
 [
 "introduction/views.py:588",
 "code_exec",
-0,
-[
-"introduction/views.py:588:ImageMath.eval(function_str, img = img, b = b, r = r, g = g)"
-]
-],
-[
-"introduction/views.py:588",
-"code_exec",
-7,
+13,
 [
 "introduction/views.py:588:output = ImageMath.eval(function_str, img = img, b = b, r = r, g = g)"
 ]
@@ -12056,15 +12048,23 @@
 [
 "introduction/views.py:588",
 "code_exec",
-9,
+14,
 [
 "introduction/views.py:588:ImageMath.eval"
 ]
 ],
 [
+"introduction/views.py:588",
+"code_exec",
+15,
+[
+"introduction/views.py:588:ImageMath.eval(function_str, img = img, b = b, r = r, g = g)"
+]
+],
+[
 "introduction/views.py:637",
 "prototype_pollution",
-21,
+19,
 [
 "introduction/views.py:637:response = render(request, 'Lab/A10/debug.log')"
 ]
@@ -12072,7 +12072,7 @@
 [
 "introduction/views.py:638",
 "prototype_pollution",
-20,
+18,
 [
 "introduction/views.py:638:response['Content-Type'] = 'text/plain'"
 ]
