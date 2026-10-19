@@ -1,3 +1,5 @@
+import subprocess
+
 import pytest
 
 from train import snapshot
@@ -38,7 +40,7 @@ def test_missing_sha_or_repo_is_reported_not_raised(tmp_path, repo):
 def test_fetch_runs_the_three_git_steps_in_order(tmp_path):
     calls = []
     snapshot.fetch("file:///x", "abc", str(tmp_path / "d"), globs=["*.py", "*.js"],
-                   run=lambda cmd: calls.append(cmd) or "")
+                   run=lambda cmd, timeout=None: calls.append(cmd) or "")
     d = str(tmp_path / "d")
     assert calls == [
         ["git", "clone", "--filter=blob:none", "--no-checkout", "--quiet", "file:///x", d],
@@ -50,3 +52,37 @@ def test_fetch_runs_the_three_git_steps_in_order(tmp_path):
 def test_lang_globs():
     assert snapshot.LANG_GLOBS["py"] == ["*.py"] and snapshot.LANG_GLOBS["java"] == ["*.java"]
     assert "*.tsx" in snapshot.LANG_GLOBS["js"]
+
+
+def test_show_bad_sha_or_dest_raises_not_none(tmp_path, repo):
+    src, c1, _ = repo
+    snap = tmp_path / "snap"
+    assert snapshot.fetch(f"file://{src.path}", c1, str(snap), globs=["*.py"])["ok"]
+    with pytest.raises(snapshot.SnapshotError):
+        snapshot.show(str(snap), "0" * 40, "a.py")
+    with pytest.raises(snapshot.SnapshotError):
+        snapshot.show(str(tmp_path / "removed"), c1, "a.py")
+
+
+def test_fetch_timeout_is_reported_and_cleans_up(tmp_path):
+    dest = tmp_path / "d"
+
+    def run(cmd, timeout=None):
+        dest.mkdir()
+        raise subprocess.TimeoutExpired(cmd, timeout)
+
+    out = snapshot.fetch("file:///x", "abc", str(dest), globs=["*.py"], run=run, timeout=7)
+    assert out["ok"] is False and out["error"] == "timeout after 7 s" and out["bytes"] is None
+    assert not dest.exists()
+
+
+def test_show_timeout_raises(tmp_path):
+    def run(cmd, timeout=None):
+        raise subprocess.TimeoutExpired(cmd, timeout)
+
+    with pytest.raises(snapshot.SnapshotError, match="timeout after 5 s"):
+        snapshot.show(str(tmp_path), "abc", "a.py", run=run, timeout=5)
+
+
+def test_default_timeouts():
+    assert snapshot.CLONE_TIMEOUT_S == 900 and snapshot.SHOW_TIMEOUT_S == 120
