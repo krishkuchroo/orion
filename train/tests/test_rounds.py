@@ -113,7 +113,7 @@ def test_rollout_round_skips_non_train_seeds_and_drops_failures():
              _trace("N1", "vulnerable")]            # no patched side: dropped
     out = rounds.rollout_round(cases, FakeDB(), load, "base", samples=2, seed=10, repo_for=lambda pid, side: "/r")
     assert seeds == [("base", 10), ("base", 11)]
-    assert [r["meta"]["pair_id"] for r in out] == ["P1"]
+    assert [(r["meta"]["pair_id"], r["meta"]["label"]) for r in out] == [("P1", "vulnerable"), ("P1", "patched")]
     assert out[0]["meta"]["rollout_seed"] == 11 and out[0]["meta"]["tier"] == "rollout"
     assert [a["action"] for a in out[0]["actions"]] == ["run_cypher", "final"] and len(out[0]["results"]) == 1
 
@@ -159,7 +159,7 @@ def test_unclean_sessions_never_pass():
     read = fmt.dumps_action({"action": "read_code", "file": "a.js", "start": 1, "end": 2})
     for bad in ([read, FINAL_HIT], ["not json", RUN, FINAL_HIT]):      # read_code step; malformed reply
         assert _rr(PAIR, model=ScriptModel([bad, [FINAL_NONE]])) == []
-    assert len(_rr(PAIR, model=ScriptModel([[RUN, FINAL_HIT], [FINAL_NONE]]))) == 1     # control: clean passes
+    assert len(_rr(PAIR, model=ScriptModel([[RUN, FINAL_HIT], [FINAL_NONE]]))) == 2     # control: clean passes
 
 
 def test_scan_missing_skips_pair_and_reports():
@@ -195,3 +195,32 @@ def test_repo_for_called_with_pair_and_side():
     calls = []
     _rr(PAIR, repo_for=lambda pid, side: calls.append((pid, side)) or "/r")
     assert calls == [("P1", "vulnerable"), ("P1", "patched")]
+
+
+def test_passing_pair_keeps_its_patched_trace_too():
+    """Final review M5: the patched session of a passing sample is a clean silent trace ("judge unknown code"),
+    kept with meta label `patched`, so rounds do not drift the class balance toward flagging."""
+    out = _rr(PAIR, model=ScriptModel([[RUN, FINAL_HIT], [RUN, FINAL_NONE]]))
+    assert [r["meta"]["label"] for r in out] == ["vulnerable", "patched"]
+    v, p = out
+    assert p["meta"]["pair_id"] == "P1" and p["meta"]["tier"] == "rollout"
+    assert p["meta"]["rollout_seed"] == v["meta"]["rollout_seed"] and "fix_site" not in p["meta"]
+    assert [a["action"] for a in p["actions"]] == ["run_cypher", "final"] and p["actions"][-1]["leads"] == []
+    assert len(p["results"]) == len(p["actions"]) - 1 and p["case"] == PAIR[1]["case"]
+    from train import examples
+    assert len(examples.cut(p, schema_text="S")) == 2            # ready for examples.cut, like the vulnerable row
+
+
+def test_sessions_use_the_engine_budget_below_the_model_cap(monkeypatch):
+    """Final review M4: the same budget as the runtime (engine.prompter_cap: CONTEXT_MARGIN below the model's
+    hard cap, 8000 when it has none), so a session the runtime forces to a final is not lost to ContextOverflow."""
+    from orion.lm import engine, prompter
+    seen, real = [], prompter.run_session
+    monkeypatch.setattr(prompter, "run_session", lambda *a, **kw: seen.append(kw.get("context_cap")) or real(*a, **kw))
+    m = FakeModel([[LEAD], []])
+    m.context_cap = 3000
+    _rr(PAIR, model=m)
+    assert seen == [engine.prompter_cap(m)] * 2 == [3000 - prompter.CONTEXT_MARGIN] * 2
+    seen.clear()
+    _rr(PAIR, model=FakeModel([[LEAD], []]))                      # no context_cap: the engine's default
+    assert seen == [8000 - prompter.CONTEXT_MARGIN] * 2

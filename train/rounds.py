@@ -80,8 +80,9 @@ def _emit(on_event, **event) -> None:
 def _session(model, db, trace: dict, scan_id: str, repo: str):
     """(leads, actions, results, clean) of one sampled session. `clean` = only run_cypher steps that ran,
     then a valid final: the actions are replayed through `tools.run_cypher` to rebuild the results, so a
-    kept trace has the same shape as a templated one (`examples.cut`)."""
-    from orion.lm import prompter
+    kept trace has the same shape as a templated one (`examples.cut`). The budget is the runtime's
+    (`engine.prompter_cap`: `prompter.CONTEXT_MARGIN` below the model's hard cap)."""
+    from orion.lm import engine, prompter
     if hasattr(model, "reset_cache"):
         model.reset_cache()
     seen: list[str] = []
@@ -91,7 +92,8 @@ def _session(model, db, trace: dict, scan_id: str, repo: str):
         seen.append(res.text)
         return res
 
-    leads, steps = prompter.run_session(generate, db, repo, scan_id, [trace["case"]])
+    leads, steps = prompter.run_session(generate, db, repo, scan_id, [trace["case"]],
+                                        context_cap=engine.prompter_cap(model))
     actions = [fmt.parse_action(t) for t in seen]
     clean = (bool(steps) and steps[-1]["kind"] == "final" and steps[-1]["error"] is None
              and all(s["kind"] == "run_cypher" and s["error"] is None for s in steps[:-1])
@@ -118,8 +120,9 @@ def rollout_round(stage2_cases, db, load, model_path, *, samples: int, seed: int
     the caller must rebuild the Stage 2 scans first. A pair whose scans are missing is skipped
     (`scan_missing`, via `db.node_count`). `repo_for(pair_id, side)` returns the source tree for `read_code`
     (side is "vulnerable" or "patched"). A sample passes when `pair_test` holds and both sessions are
-    clean (see `_session`). Only the vulnerable side is emitted: one trace row per pair with a passing
-    sample, `{case, actions, results, meta}` with `meta.rollout_seed`, ready for `examples.cut`.
+    clean (see `_session`). Both sides of a pair's best passing sample are emitted: the vulnerable trace,
+    then the patched one (meta label `patched`: a clean silent trace), each `{case, actions, results, meta}`
+    with `meta.rollout_seed`, ready for `examples.cut`.
     `on_event(dict)` gets `{"kind": "skip", "pair_id", "reason"}` (unpaired, no_fix_site, scan_missing,
     no_pass) and a final `{"kind": "summary", ...counts}`. It does not train: see the module docstring
     for the caller's retrain-from-base contract."""
@@ -145,19 +148,23 @@ def rollout_round(stage2_cases, db, load, model_path, *, samples: int, seed: int
             pid = p["pair_id"]
             v, p_ = p["vulnerable"], p["patched"]
             vl, va, vr, vok = _session(model, db, v, f"{pid}:vulnerable", repo_for(pid, "vulnerable"))
-            pl, _, _, pok = _session(model, db, p_, f"{pid}:patched", repo_for(pid, "patched"))
+            pl, pa, pr, pok = _session(model, db, p_, f"{pid}:patched", repo_for(pid, "patched"))
             passes = vok and pok and pair_test(vl, pl, p["fix_site"])
-            cands[pid].append({"trace": va, "results": vr, "passes": passes, "seed": seed + i})
+            cands[pid].append({"trace": va, "results": vr, "patched_trace": pa, "patched_results": pr,
+                               "passes": passes, "seed": seed + i})
     out = []
     for p in live:
         best = _best(cands[p["pair_id"]])
         if best is None:
             tally({"kind": "skip", "pair_id": p["pair_id"], "reason": "no_pass"})
             continue
-        v = p["vulnerable"]
+        v, p_ = p["vulnerable"], p["patched"]
+        tag = {"tier": "rollout", "rollout_seed": best["seed"]}
         out.append({"case": v["case"], "actions": best["trace"], "results": best["results"],
-                    "meta": {**(v.get("meta") or {}), "tier": "rollout", "rollout_seed": best["seed"]}})
+                    "meta": {**(v.get("meta") or {}), **tag}})
+        out.append({"case": p_["case"], "actions": best["patched_trace"], "results": best["patched_results"],
+                    "meta": {**(p_.get("meta") or {}), **tag, "label": "patched"}})
+        counts["kept"] += 1
     counts["pairs"] = len(pairs)
-    counts["kept"] = len(out)
     _emit(on_event, kind="summary", **counts)
     return out

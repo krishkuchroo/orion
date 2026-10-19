@@ -35,6 +35,7 @@ from orion.lm.codeindex import RepoIndex
 
 SHAPE = "LM"
 DEFAULT_K = 1  # one enriched case per session
+DEFAULT_MAX_FLOWS = 50  # top-ranked flows worked per scan (train/stage2.py samples its negatives from this range)
 MIN_CONTEXT_CAP = 512  # floor for the prompter's budget cap; below this no session can do useful work
 _CONFIDENCES: tuple[Confidence, ...] = ("LOW", "MEDIUM", "HIGH")
 # Step kinds -> progress-event names. run_cypher is a `query`; the rest of a session is `tool`, except
@@ -51,6 +52,16 @@ def _event(*, event: str, detail: str = "", lead: int | None = None, turn: int |
     """Same dict shape as `discover._event` / `cli._event`; phase and shape are fixed for this engine."""
     return {"ts": _now(), "phase": "discover", "shape": SHAPE, "lead": lead,
             "turn": turn, "event": event, "detail": detail}
+
+
+def _raw_cap(model) -> int:
+    return int(getattr(model, "context_cap", 8000)) - prompter.CONTEXT_MARGIN
+
+
+def prompter_cap(model) -> int:
+    """The prompter's budget cap for `model`: `prompter.CONTEXT_MARGIN` below its hard `context_cap` (8000 when
+    the object has none), floored at MIN_CONTEXT_CAP. `discover_lm` and the training rounds both use it."""
+    return max(_raw_cap(model), MIN_CONTEXT_CAP)
 
 
 # ---- seams (monkeypatched by the token-free test) ------------------------------------------------
@@ -215,7 +226,7 @@ def _enrich(flows: list[dict], repo_path: str, on_event: OnEvent, budget: CaseBu
 # ---- the stage ----------------------------------------------------------------------------------
 
 def discover_lm(scan_id: str, repo_path: str, on_event: OnEvent, *, profile=None, model=None, k: int = DEFAULT_K,
-                max_flows: int = 50, on_step=None, stop=None, flows=None, db=None,
+                max_flows: int = DEFAULT_MAX_FLOWS, on_step=None, stop=None, flows=None, db=None,
                 case_budget: CaseBudget | None = None, index: RepoIndex | None = None) -> list[Lead]:
     """Run the Orion-LM discovery stage and return deduped `list[Lead]` (shape "LM").
 
@@ -239,8 +250,8 @@ def discover_lm(scan_id: str, repo_path: str, on_event: OnEvent, *, profile=None
     # A wrapper exposes `.generate`; a bare callable is accepted as-is. Anything else fails inside the
     # session, where it becomes an `error` event per batch rather than a crash here.
     generate = model.generate if hasattr(model, "generate") else model
-    raw_cap = int(getattr(model, "context_cap", 8000)) - prompter.CONTEXT_MARGIN
-    context_cap = max(raw_cap, MIN_CONTEXT_CAP)
+    raw_cap = _raw_cap(model)
+    context_cap = prompter_cap(model)
     k = max(1, int(k))
     max_flows = max(0, int(max_flows))
 
