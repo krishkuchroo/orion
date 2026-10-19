@@ -19,10 +19,10 @@ MAX_ROUNDS = 3
 
 def pair_test(vuln_leads: list[dict], patched_leads: list[dict], fix_site: dict) -> bool:
     """True iff a vulnerable lead matches the fix site, no patched lead does, and at most one vulnerable
-    lead misses it (anti-spray). Matching is `eval.match.l1_fix_site`: the Stage 2 fix site is the
-    vulnerable trace's final lead, a single {file, line, function}."""
-    hits = sum(1 for ld in vuln_leads if match.l1_fix_site(ld, fix_site))
-    if hits == 0 or any(match.l1_fix_site(ld, fix_site) for ld in patched_leads):
+    lead misses it (anti-spray). `fix_site` is answer-key shaped, {file, function, line_start, line_end} from
+    the fix hunk (`stage2._lead`), and matching is `eval.match.l1`: the frozen test rule."""
+    hits = sum(1 for ld in vuln_leads if match.l1(ld, fix_site))
+    if hits == 0 or any(match.l1(ld, fix_site) for ld in patched_leads):
         return False
     return len(vuln_leads) - hits <= 1
 
@@ -47,8 +47,8 @@ def should_stop(dev_scores: list[dict]) -> bool:
 
 def _pairs(stage2_cases: list[dict], on_event=None) -> list[dict]:
     """Train-split (vulnerable trace, patched trace) pairs, grouped by `meta.pair_id`. A pair missing a
-    side (`unpaired`) or whose vulnerable trace has no final lead (`no_lead`) is dropped with a skip event:
-    no pair test is possible."""
+    side (`unpaired`) or whose vulnerable trace has no `meta.fix_site` (`no_fix_site`) is dropped with a
+    skip event: no pair test is possible."""
     sides: dict[str, dict] = {}
     for tr in stage2_cases:
         meta = tr.get("meta") or {}
@@ -60,14 +60,15 @@ def _pairs(stage2_cases: list[dict], on_event=None) -> list[dict]:
         if "vulnerable" not in s or "patched" not in s:
             _emit(on_event, kind="skip", pair_id=pid, reason="unpaired")
             continue
-        leads = s["vulnerable"].get("actions", [{}])[-1].get("leads") or []
-        if not leads:
-            _emit(on_event, kind="skip", pair_id=pid, reason="no_lead")
+        fix_site = (s["vulnerable"].get("meta") or {}).get("fix_site")
+        if not fix_site:
+            _emit(on_event, kind="skip", pair_id=pid, reason="no_fix_site")
             continue
-        # The gold flow's sink (`stage2._lead`): from the data, not model output, and the same lead the
-        # Stage 2 SFT targets teach, so the rounds reward exactly what SFT trains.
+        # The fix site on the gold path (`stage2._lead`): from the data, not model output. It is the location
+        # the Stage 2 SFT lead teaches, as the answer key the test rule (`eval.match.l1`) scores, so the rounds
+        # reward exactly what SFT trains and the test counts.
         out.append({"pair_id": pid, "vulnerable": s["vulnerable"], "patched": s["patched"],
-                    "fix_site": leads[0]})
+                    "fix_site": fix_site})
     return out
 
 
@@ -119,10 +120,10 @@ def rollout_round(stage2_cases, db, load, model_path, *, samples: int, seed: int
     (side is "vulnerable" or "patched"). A sample passes when `pair_test` holds and both sessions are
     clean (see `_session`). Only the vulnerable side is emitted: one trace row per pair with a passing
     sample, `{case, actions, results, meta}` with `meta.rollout_seed`, ready for `examples.cut`.
-    `on_event(dict)` gets `{"kind": "skip", "pair_id", "reason"}` (unpaired, no_lead, scan_missing,
+    `on_event(dict)` gets `{"kind": "skip", "pair_id", "reason"}` (unpaired, no_fix_site, scan_missing,
     no_pass) and a final `{"kind": "summary", ...counts}`. It does not train: see the module docstring
     for the caller's retrain-from-base contract."""
-    counts = {"pairs": 0, "unpaired": 0, "no_lead": 0, "scan_missing": 0, "no_pass": 0, "kept": 0}
+    counts = {"pairs": 0, "unpaired": 0, "no_fix_site": 0, "scan_missing": 0, "no_pass": 0, "kept": 0}
 
     def tally(event):
         if event["kind"] == "skip":

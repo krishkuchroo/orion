@@ -551,7 +551,7 @@ Add a test that `export` never writes a `dev` or `oldcve` pair_id into `train.js
   - `repo_sizes.fetch_sizes(repos: list[str], cache: str, *, run=None) -> dict[str, int | None]`: `gh api repos/<o>/<r> --jq .size` (KB). Cached as JSONL and resumable; 404 → `None`.
   - `stage2.select(pairs, splits, sizes, *, n: int, max_repo_kb: int, seed: int) -> list[dict]`: dataflow pairs in the `train`/`dev` splits with a known size ≤ `max_repo_kb`, picked round-robin across js/py/java in a seeded order.
   - `stage2.cases_from_graph(db, yield_rec, pair, vuln_tree, patched_tree, *, budget, n_negatives, seed) -> list[dict]`. Same example shape as Stage 1, plus `stage: 2`:
-    - **vulnerable:** the gold flow's case. Its lead is the sink node's file/function/line plus `primary_cwe`.
+    - **vulnerable:** the gold flow's case. Its lead is the fix-site node on the gold path (file/line, tree-sitter enclosing function) plus `primary_cwe` (final-review I1; it was the sink node). No fix-site node on the path: the pair is skipped (`no_fix_site_node`).
     - **patched:** the gold flow's counterpart on the patched scan. If the gold flow's uid is in `flows_gone_on_patched`, it's omitted (`flow_gone`); if it's in `flows_unresolved`, it's omitted (`flow_unresolved`).
     - To find the counterpart, add a public `fixmap.patched_counterpart(db, gold_flow, hunks, *, vulnerable_scan_id, patched_scan_id, root=None) -> dict | None` that MOVES D3's existing private matching into a reusable function (no second copy). `pair_yield` then calls it too.
     - **negatives:** seeded vulnerable-scan flows whose path touches no fix site.
@@ -708,7 +708,7 @@ Before writing the assertions, check how `eval.match.l1` reads an answer key: th
 - [ ] **Step 2: Run it and confirm it fails.** **Step 3: Implement.** **Step 4: Run it and confirm it passes.**
 - [ ] **Step 5: Commit:** `git commit -m "train: pair test (flag vuln, silent at fix on patched, anti-spray) + ReST-EM rounds for Stage-2 traces"`
 
-> **Status (2026-10-18):** functions and tests shipped (`train/rounds.py`). Rounds skipped: no templates yet (`train/templates/queries.json` is Krish's). Built as: `pair_test` uses `eval.match.l1_fix_site` (the Stage 2 fix site is the gold flow's sink, a single line); `rollout_round` takes a required `repo_for(pair_id, side)` and an optional `on_event`, skips pairs whose scans are gone (`scan_missing`), and never trains. The caller rebuilds Stage 2 scans and retrains from the base model each round.
+> **Status (2026-10-18):** functions and tests shipped (`train/rounds.py`). Rounds skipped: no templates yet (`train/templates/queries.json` is Krish's). Built as: `pair_test` scores with `eval.match.l1` against an answer-key-shaped fix site `{file, function, line_start, line_end}` built from the fix hunk (final-review I1, 2026-10-18: ONE location convention, the FIX SITE, in Stage 1, the Stage 2 lead (`stage2._lead`: the fix-site node on the gold path, never the sink), the rounds and the test rule; Stage 2 writes it as `meta.fix_site` on the vulnerable trace); `rollout_round` takes a required `repo_for(pair_id, side)` and an optional `on_event`, skips pairs whose scans are gone (`scan_missing`), and never trains. The caller rebuilds Stage 2 scans and retrains from the base model each round.
 
 ---
 

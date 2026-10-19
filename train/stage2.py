@@ -10,17 +10,22 @@ Examples (`cases_from_graph`) have the Stage 1 row shape `{pair_id, label, tier,
 split}` plus `stage: 2`:
 
     vulnerable  the gold flow (the best-ranked CandidateFlow through a fix site) as a CodeCase from
-                `case_from_flow`; the lead is its SINK node's file / enclosing function / line + the
-                primary CWE
+                `case_from_flow`; the lead is the FIX SITE on the gold path (the first path node that is a
+                fix-site call: its file / line / tree-sitter enclosing function) + the primary CWE, the
+                same location convention as Stage 1 and the test rule (`eval.match.l1`). The row also
+                carries `fix_site` = {file, function, line_start, line_end}: that node's fix hunk as an
+                answer key (old-side range; an add-only hunk is its insertion line), which `rounds` scores
+                with `eval.match.l1`. A gold path with no fix-site node skips the pair (`no_fix_site_node`;
+                never a fallback to the sink)
     patched     the gold flow's counterpart on the PATCHED scan (`fixmap.patched_counterpart`), no lead.
                 Omitted when the flow is gone (`flow_gone`), cannot be matched (`flow_unresolved`), has no
                 counterpart, or there is no patched scan
     negative    seeded vulnerable-scan flows whose path touches no fix-site call, no lead
 
 Traces (`trace_for`) are `{case, actions: [*run_cypher, final], results, meta}`; `meta` carries `pair_id`
-and `split` (train/examples.py `export` needs them). They are written only when `train/templates/
-queries.json` exists (Krish writes it, see train/templates/README.md); until then only the example rows
-are produced. Every model input is built later by orion/lm/format.py from these CodeCases; nothing here
+and `split` (train/examples.py `export` needs them), plus `fix_site` on the vulnerable trace (train/rounds.py).
+They are written only when `train/templates/queries.json` exists (Krish writes it, see
+train/templates/README.md); until then only the example rows are produced. Every model input is built later by orion/lm/format.py from these CodeCases; nothing here
 builds a message by hand.
 
 Ledger line per pair (null/absent when not measured, never estimated): id, status (ok | no_gold |
@@ -96,13 +101,31 @@ def _find_flow(flows: list[dict], gold: dict) -> dict | None:
     return next((f for f in same if f["rank"] == gold.get("rank")), same[0] if same else None)
 
 
-def _lead(case: dict, cwe: str, tree: str) -> dict | None:
-    sink = (case.get("nodes") or [{}])[-1]
-    snips = case.get("snippets") or []
-    if not snips or not sink.get("file") or not isinstance(sink.get("line"), int):
-        return None
-    return {"flow_id": case["flow_id"], "file": fixmap.norm_path(sink["file"], tree),
-            "function": snips[0]["function"], "line": sink["line"], "cwe": cwe, "confidence": "HIGH"}
+def _lead(db, scan_id: str, flow: dict, sites: list[dict], case: dict, cwe: str, idx: RepoIndex,
+          tree: str) -> tuple[dict | None, dict | None, str | None]:
+    """(lead, fix_site, None) at the fix site on `flow`'s path, else (None, None, reason).
+
+    The node is the first path uid that is a fix-site call (`path_uids` & the sites' `call_uids`, the set D3's
+    `_through` reports as `site_uids`); its file and line come from the graph, its function is the tree-sitter
+    enclosing span (as in Stage 1). `fix_site` is that node's hunk as an answer key for `eval.match.l1`."""
+    by_uid = {u: s for s in sites for u in s.get("call_uids", ())}
+    uid = next((u for u in flow.get("path_uids") or [] if u in by_uid), None)
+    if uid is None:
+        return None, None, "no_fix_site_node"
+    nodes = lm_slice.flow_slice(db, scan_id, {"path_uids": [uid]})["nodes"]
+    node = nodes[0] if nodes else {}
+    f, line = fixmap.norm_path(node.get("file"), tree), node.get("line")
+    if f is None or not isinstance(line, int) or isinstance(line, bool):
+        return None, None, "no_fix_site_node"
+    span = idx.enclosing(f, line)
+    if span is None:
+        return None, None, "fix_site_unindexed"
+    site = by_uid[uid]
+    lead = {"flow_id": case["flow_id"], "file": f, "function": span.name, "line": line, "cwe": cwe,
+            "confidence": "HIGH"}
+    fix_site = {"file": site["file"], "function": span.name, "line_start": site["start"],
+                "line_end": max(site["start"], site["end"])}
+    return lead, fix_site, None
 
 
 def _graph_cases(db, yield_rec: dict, pair: dict, vuln_tree: str, patched_tree: str, *,
@@ -124,11 +147,14 @@ def _graph_cases(db, yield_rec: dict, pair: dict, vuln_tree: str, patched_tree: 
     vflow = _find_flow(flows, gold)
     if vflow is None:
         return [], ["gold_not_in_candidates"]
+    sites = fixmap.fix_sites(db, vscan, hunks, side="vulnerable") if hunks else []
     vcase = _cases.case_from_flow(lm_slice.flow_slice(db, vscan, vflow), vidx, budget=budget)
-    lead = _lead(vcase, cwe, vuln_tree)
-    if not vcase["snippets"] or lead is None:
+    if not vcase["snippets"]:
         return [], ["no_snippet"]
-    out = [_example(pair, klass, "vulnerable", "graph", vcase, lead)]
+    lead, fix_site, miss = _lead(db, vscan, vflow, sites, vcase, cwe, vidx, vuln_tree)
+    if lead is None:
+        return [], [miss]
+    out = [{**_example(pair, klass, "vulnerable", "graph", vcase, lead), "fix_site": fix_site}]
 
     guid = gold.get("uid")
     if pscan is None:
@@ -149,10 +175,7 @@ def _graph_cases(db, yield_rec: dict, pair: dict, vuln_tree: str, patched_tree: 
             else:
                 why.append("patched_no_snippet")
 
-    site_uids: set[str] = set()
-    if hunks:
-        for s in fixmap.fix_sites(db, vscan, hunks, side="vulnerable"):
-            site_uids.update(s["call_uids"])
+    site_uids = {u for s in sites for u in s["call_uids"]}
     pool = [f for f in flows if not site_uids.intersection(f["path_uids"])
             and (f["source_uid"], f["sink_uid"]) != (vflow["source_uid"], vflow["sink_uid"])]
     random.Random(f"{seed}:{pair['id']}").shuffle(pool)
@@ -174,8 +197,8 @@ def cases_from_graph(db, yield_rec: dict, pair: dict, vuln_tree: str, patched_tr
 
     `yield_rec` is D3's `pair_yield` record (`gold_flow` is a dict {uid, source_uid, sink_uid, sink_category,
     rank}; `vulnerable_scan_id`, `patched_scan_id`, `flows_gone_on_patched`, `flows_unresolved`). `hunks` are
-    the fix hunks (D2's record carries them): they locate the fix sites for the negatives and map lines
-    for the patched counterpart; without them nothing is excluded from the negatives except the gold flow."""
+    the fix hunks (D2's record carries them): they locate the fix sites for the lead and the negatives and map
+    lines for the patched counterpart; without them there is no fix site, so the pair is skipped."""
     return _graph_cases(db, yield_rec, pair, vuln_tree, patched_tree, budget=budget, n_negatives=n_negatives,
                         seed=seed, hunks=hunks)[0]
 
@@ -366,7 +389,7 @@ def _one_pair(pair, db, mirror_root, work_root, *, budget, n_negatives, seed, te
             tr = trace_for(e["case"], db, y["patched_scan_id"] if e["label"] == "patched" else y["vulnerable_scan_id"],
                            templates, lead=e["lead"],
                            meta={"pair_id": pair["id"], "split": pair["split"], "label": e["label"],
-                                 "tier": e["tier"]})
+                                 "tier": e["tier"], **({"fix_site": e["fix_site"]} if e.get("fix_site") else {})})
             if tr is not None:      # the trace REPLACES the single-step row: same prompt, different target
                 rows.append(tr)
             else:

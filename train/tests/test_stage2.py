@@ -177,6 +177,49 @@ def test_graph_cases_reports_why_the_patched_example_is_missing(trees):
     assert why == ["flow_unresolved"]
 
 
+# I1: the lead is the FIX SITE on the gold path (the test rule's location), not the sink.
+XV = "function handler(x){\n  find(x)\n}\nfunction find(y){\n  exec(y)\n}\n"
+XHUNK = {"file": "a.js", "old_file": "a.js", "old_start": 2, "old_end": 2, "new_start": 2, "new_end": 2}
+
+
+def xgraph():
+    """The fix (line 2, in `handler`) and the sink (line 5, in `find`) are in different functions."""
+    return StubDB({"P:vulnerable": {
+        "calls": [_call("vs0", "a.js", 2, "find", "handler"), _call("vk0", "a.js", 5, "exec", "find")],
+        "methods": [{"fn": "handler", "f": "a.js", "l": 1}, {"fn": "find", "f": "a.js", "l": 4}],
+        "flows": [_flow("fl0", ["vs0", "vk0"], 0)]}})
+
+
+def test_lead_is_the_fix_site_node_on_the_gold_path_not_the_sink(tmp_path):
+    from eval import match
+    vt = tmp_path / "vt"
+    vt.mkdir()
+    (vt / "a.js").write_text(XV)
+    ex, why = stage2._graph_cases(xgraph(), yrec(patched_scan_id=None), PAIR, str(vt), str(vt),
+                                  budget=cases.CaseBudget(), n_negatives=0, seed=0, hunks=[XHUNK])
+    (v,) = ex
+    assert v["case"]["sink_uid"] == "vk0"                       # the case is still the whole gold flow
+    assert v["lead"] == {"flow_id": "F0", "file": "a.js", "function": "handler", "line": 2, "cwe": "CWE-78",
+                         "confidence": "HIGH"}
+    assert v["fix_site"] == {"file": "a.js", "function": "handler", "line_start": 2, "line_end": 2}
+    assert match.l1(v["lead"], v["fix_site"]) and why == ["no_patched_scan"]
+
+
+def test_pair_without_a_fix_site_node_on_the_gold_path_is_skipped_with_a_reason(trees):
+    off_path = {**HUNK, "file": "b.js", "old_file": "b.js"}          # site call bk is not on the gold path
+    for hunks in ([off_path], None):
+        ex, why = stage2._graph_cases(graph(), yrec(), PAIR, *trees, budget=cases.CaseBudget(), n_negatives=1,
+                                      seed=0, hunks=hunks)
+        assert ex == [] and why == ["no_fix_site_node"]          # never a fallback to the sink
+
+
+def test_fix_site_of_an_add_only_hunk_is_its_insertion_line(trees):
+    add = {"file": "a.js", "old_file": "a.js", "old_start": 2, "old_end": 1, "new_start": 2, "new_end": 2}
+    (v, *_), _ = stage2._graph_cases(graph(), yrec(), PAIR, *trees, budget=cases.CaseBudget(), n_negatives=0,
+                                     seed=0, hunks=[add])
+    assert v["fix_site"] == {"file": "a.js", "function": "run", "line_start": 2, "line_end": 2}
+
+
 # ───────────────────────────── trace_for ─────────────────────────────
 
 CASE = {"flow_id": "F0", "rank": 0, "sink_category": "code_exec", "source_uid": "vs0", "sink_uid": "vk0",
@@ -300,6 +343,9 @@ def test_build_with_templates_adds_traces_carrying_pair_id_and_split(tmp_path):
     assert "'pk0'" in by["patched"]["actions"][0]["query"]          # patched case is queried on the patched scan
     assert by["vulnerable"]["actions"][-1]["leads"] and by["negative"]["actions"][-1]["leads"] == []
     assert any(sid == "P:patched" and "'pk0'" in q for sid, q in db.queries)
+    # I1: rounds score against the fix-site answer key, which only the vulnerable trace carries
+    assert by["vulnerable"]["meta"]["fix_site"] == {"file": "a.js", "function": "run", "line_start": 2, "line_end": 2}
+    assert "fix_site" not in by["patched"]["meta"] and "fix_site" not in by["negative"]["meta"]
 
 
 def test_build_rejects_bad_templates_before_doing_any_work(tmp_path):

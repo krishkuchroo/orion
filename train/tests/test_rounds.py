@@ -23,6 +23,17 @@ def test_pair_test_one_hit_one_miss_passes_and_no_hit_fails():
     assert not rounds.pair_test([], [], FIX)
 
 
+def test_pair_test_scores_the_fix_hunk_answer_key_with_l1():
+    """I1: the fix site is answer-key shaped ({file, function, line_start, line_end} from the fix hunk) and a
+    lead matches it by `eval.match.l1`, the frozen test rule: function match OR line within the range +-10."""
+    key = {"file": "c.js", "function": "handler", "line_start": 20, "line_end": 24}
+    assert rounds.pair_test([{"file": "c.js", "function": "other", "line": 34}], [], key)     # 24 + 10
+    assert rounds.pair_test([{"file": "c.js", "function": "handler", "line": 90}], [], key)   # function match
+    assert rounds.pair_test([{"file": "c.js", "function": "other", "line": 10}], [], key)     # 20 - 10
+    assert not rounds.pair_test([{"file": "c.js", "function": "other", "line": 35}], [], key)
+    assert not rounds.pair_test([{"file": "d.js", "function": "handler", "line": 22}], [], key)
+
+
 def test_pick_shortest_passing_and_stop_rule():
     assert rounds._pick([{"trace": [1, 2, 3], "passes": True}, {"trace": [1, 2], "passes": True}, {"trace": [1], "passes": False}]) == [1, 2]
     assert rounds.should_stop([{"pair_correct": 0.3}, {"pair_correct": 0.3}]) and not rounds.should_stop([{"pair_correct": 0.1}, {"pair_correct": 0.2}])
@@ -43,10 +54,16 @@ CASE = {"flow_id": "F0", "rank": 0, "sink_category": None, "source_uid": None, "
 Q = "MATCH (c:CpgCall {scan_id:$scan_id}) RETURN c.code"
 
 
+FIX_KEY = {"file": "a.js", "function": "f", "line_start": 10, "line_end": 10}    # stage2 meta.fix_site
+
+
 def _trace(pid, label, split="train"):
     final = {"action": "final", "leads": [LEAD] if label == "vulnerable" else []}
+    meta = {"pair_id": pid, "split": split, "label": label, "tier": "graph"}
+    if label == "vulnerable":
+        meta["fix_site"] = FIX_KEY
     return {"case": CASE, "actions": [{"action": "run_cypher", "query": Q}, final], "results": [{"row_count": 1}],
-            "meta": {"pair_id": pid, "split": split, "label": label, "tier": "graph"}}
+            "meta": meta}
 
 
 class FakeDB:
@@ -152,18 +169,26 @@ def test_scan_missing_skips_pair_and_reports():
     assert events[-1]["kind"] == "summary" and events[-1]["scan_missing"] == 1 and events[-1]["kept"] == 0
 
 
-def test_events_for_unpaired_no_lead_no_pass_and_summary():
+def test_events_for_unpaired_no_fix_site_no_pass_and_summary():
     events = []
-    nolead = _trace("L1", "vulnerable")
-    nolead["actions"] = [{"action": "final", "leads": []}]
-    nolead["results"] = []
-    cases = PAIR + [_trace("U1", "vulnerable"), nolead, _trace("L1", "patched")]
+    nofix = _trace("L1", "vulnerable")
+    del nofix["meta"]["fix_site"]                 # e.g. a trace written before the fix-site convention
+    cases = PAIR + [_trace("U1", "vulnerable"), nofix, _trace("L1", "patched")]
     out = _rr(cases, model=ScriptModel([[RUN, FINAL_NONE], [RUN, FINAL_NONE]]), events=events)
     assert out == []
     skips = {(e["pair_id"], e["reason"]) for e in events if e["kind"] == "skip"}
-    assert skips == {("U1", "unpaired"), ("L1", "no_lead"), ("P1", "no_pass")}
-    assert events[-1] == {"kind": "summary", "pairs": 1, "unpaired": 1, "no_lead": 1, "scan_missing": 0,
+    assert skips == {("U1", "unpaired"), ("L1", "no_fix_site"), ("P1", "no_pass")}
+    assert events[-1] == {"kind": "summary", "pairs": 1, "unpaired": 1, "no_fix_site": 1, "scan_missing": 0,
                           "no_pass": 1, "kept": 0}
+
+
+def test_rollout_rewards_the_fix_site_not_the_traces_own_lead():
+    """I1: the reward is the fix site from meta (the hunk), never the vulnerable trace's final lead."""
+    vuln = _trace("P1", "vulnerable")
+    vuln["actions"][-1] = {"action": "final", "leads": [OTHER]}    # e.g. a lead written at the sink
+    out = _rr([vuln, _trace("P1", "patched")], model=FakeModel([[LEAD], []]))
+    assert [r["meta"]["pair_id"] for r in out if r["meta"]["label"] == "vulnerable"] == ["P1"]
+    assert _rr([vuln, _trace("P1", "patched")], model=FakeModel([[OTHER], []])) == []
 
 
 def test_repo_for_called_with_pair_and_side():
