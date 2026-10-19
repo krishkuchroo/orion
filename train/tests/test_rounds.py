@@ -50,6 +50,12 @@ def _trace(pid, label, split="train"):
 
 
 class FakeDB:
+    def __init__(self, missing=()):
+        self.missing = set(missing)
+
+    def node_count(self, scan_id):
+        return 0 if scan_id in self.missing else 5
+
     def run_cypher(self, scan_id, query, limit=50, **kw):      # same contract as GraphDB.run_cypher(bounded=True)
         if query.startswith("EXPLAIN"):
             return {"row_count": 0, "rows": [], "query_type": "r"}
@@ -88,7 +94,7 @@ def test_rollout_round_skips_non_train_seeds_and_drops_failures():
     cases = [_trace("P1", "vulnerable"), _trace("P1", "patched"),
              _trace("T1", "vulnerable", split="test"), _trace("T1", "patched", split="test"),
              _trace("N1", "vulnerable")]            # no patched side: dropped
-    out = rounds.rollout_round(cases, FakeDB(), load, "base", samples=2, seed=10)
+    out = rounds.rollout_round(cases, FakeDB(), load, "base", samples=2, seed=10, repo_for=lambda pid, side: "/r")
     assert seeds == [("base", 10), ("base", 11)]
     assert [r["meta"]["pair_id"] for r in out] == ["P1"]
     assert out[0]["meta"]["rollout_seed"] == 11 and out[0]["meta"]["tier"] == "rollout"
@@ -100,4 +106,67 @@ def test_rollout_round_no_passing_sample_yields_nothing():
         return FakeModel([[OTHER], []])
 
     assert rounds.rollout_round([_trace("P1", "vulnerable"), _trace("P1", "patched")], FakeDB(), load, "base",
-                                samples=2, seed=0) == []
+                                samples=2, seed=0, repo_for=lambda pid, side: "/r") == []
+
+
+PAIR = [_trace("P1", "vulnerable"), _trace("P1", "patched")]
+
+
+def _rr(cases, db=None, model=None, events=None, repo_for=lambda pid, side: "/r"):
+    return rounds.rollout_round(cases, db or FakeDB(), lambda path, *, seed: model or FakeModel([[LEAD], []]),
+                                "base", samples=1, seed=0, repo_for=repo_for,
+                                on_event=None if events is None else events.append)
+
+
+class ScriptModel:
+    """One reply list per session; the replies are raw texts."""
+    def __init__(self, sessions):
+        self.sessions, self.n, self.turn = sessions, -1, 0
+
+    def reset_cache(self):
+        self.n += 1
+        self.turn = 0
+
+    def generate(self, messages):
+        t = self.sessions[self.n][self.turn]
+        self.turn += 1
+        return _res(t)
+
+
+FINAL_HIT = fmt.dumps_action({"action": "final", "leads": [LEAD]})
+FINAL_NONE = fmt.dumps_action({"action": "final", "leads": []})
+RUN = fmt.dumps_action({"action": "run_cypher", "query": Q})
+
+
+def test_unclean_sessions_never_pass():
+    read = fmt.dumps_action({"action": "read_code", "file": "a.js", "start": 1, "end": 2})
+    for bad in ([read, FINAL_HIT], ["not json", RUN, FINAL_HIT]):      # read_code step; malformed reply
+        assert _rr(PAIR, model=ScriptModel([bad, [FINAL_NONE]])) == []
+    assert len(_rr(PAIR, model=ScriptModel([[RUN, FINAL_HIT], [FINAL_NONE]]))) == 1     # control: clean passes
+
+
+def test_scan_missing_skips_pair_and_reports():
+    events = []
+    assert _rr(PAIR, db=FakeDB(missing={"P1:patched"}), events=events) == []
+    assert {"kind": "skip", "pair_id": "P1", "reason": "scan_missing"} in events
+    assert events[-1]["kind"] == "summary" and events[-1]["scan_missing"] == 1 and events[-1]["kept"] == 0
+
+
+def test_events_for_unpaired_no_lead_no_pass_and_summary():
+    events = []
+    nolead = _trace("L1", "vulnerable")
+    nolead["actions"] = [{"action": "final", "leads": []}]
+    nolead["results"] = []
+    cases = PAIR + [_trace("U1", "vulnerable"), nolead, _trace("L1", "patched")]
+    out = _rr(cases, model=ScriptModel([[RUN, FINAL_NONE], [RUN, FINAL_NONE]]), events=events)
+    assert out == []
+    skips = {(e["pair_id"], e["reason"]) for e in events if e["kind"] == "skip"}
+    assert skips == {("U1", "unpaired"), ("L1", "no_lead"), ("P1", "no_pass")}
+    assert events[-1] == {"kind": "summary", "pairs": 1, "unpaired": 1, "no_lead": 1, "scan_missing": 0,
+                          "no_pass": 1, "kept": 0}
+
+
+def test_repo_for_called_with_pair_and_side():
+    calls = []
+    _rr(PAIR, repo_for=lambda pid, side: calls.append((pid, side)) or "/r")
+    assert calls == [("P1", "vulnerable"), ("P1", "patched")]
