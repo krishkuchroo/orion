@@ -178,6 +178,12 @@ class RepoIndex:
         self._by_name: dict[str, list[Span]] | None = None
         self._walk()
 
+    def _outside(self, full: str) -> bool:
+        """True for a symlink or a path whose realpath leaves the root: repo text is untrusted, and a link
+        could pull in any file on the machine (same containment rule as `tools.read_code`)."""
+        root = os.path.realpath(self.root)
+        return os.path.islink(full) or not os.path.realpath(full).startswith(root + os.sep)
+
     def _walk(self) -> None:
         for dirpath, dirnames, filenames in os.walk(self.root):
             dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
@@ -186,6 +192,9 @@ class RepoIndex:
                     continue
                 full = os.path.join(dirpath, fn)
                 rel = os.path.relpath(full, self.root).replace(os.sep, "/")
+                if self._outside(full):
+                    self.skipped[rel] = "symlink"
+                    continue
                 if fn.endswith(".min.js"):
                     self.skipped[rel] = "minified"
                     continue
@@ -230,7 +239,10 @@ class RepoIndex:
     def source(self, file: str, start: int, end: int) -> str:
         text = self._text.get(file)
         if text is None:
-            with open(os.path.join(self.root, file), encoding="utf-8", errors="replace") as f:
+            full = os.path.join(self.root, file)
+            if self._outside(full):
+                raise OSError(f"symlink or path outside the repo: {file}")
+            with open(full, encoding="utf-8", errors="replace") as f:
                 text = f.read()
         return "\n".join(_split_lines(text)[max(start, 1) - 1:end])
 

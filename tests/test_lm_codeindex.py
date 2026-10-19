@@ -1,3 +1,5 @@
+import pytest
+
 from orion.lm import codeindex as ci
 
 
@@ -70,3 +72,21 @@ def test_source_and_lines_split_on_newline_only(tmp_path):
     assert idx.source("p.py", f.start, f.end) == "def f():\n    s = 'a b'\n    return g(s)"
     assert idx.enclosing("p.py", 8).name == "g"
     assert idx.enclosing("p.py", 1).name == "<module>"
+
+
+def test_symlinks_are_never_indexed_or_read(tmp_path):
+    """Final review I2: a symlink (escaping or not) is skipped, so outside text never reaches a snippet."""
+    repo, outside = tmp_path / "repo", tmp_path / "outside.py"
+    repo.mkdir()
+    outside.write_text("def stolen():\n    return SECRET\n")
+    (repo / "app.py").symlink_to(outside)                       # escapes the root
+    (repo / "real.py").write_text("def ok():\n    return 1\n")
+    (repo / "alias.py").symlink_to(repo / "real.py")            # stays inside, still a symlink
+    idx = ci.RepoIndex(str(repo))
+    assert "app.py" not in idx.files and idx.skipped["app.py"] == "symlink"
+    assert "alias.py" not in idx.files and idx.skipped["alias.py"] == "symlink"
+    assert "real.py" in idx.files
+    for rel in ("app.py", "alias.py"):
+        with pytest.raises(OSError):
+            idx.source(rel, 1, 2)
+    assert idx.source("real.py", 1, 1) == "def ok():"
