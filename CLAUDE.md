@@ -92,6 +92,8 @@ writes Cypher over the Joern→Neo4j graph and judges code vulnerable/safe; then
 `orion-lm` / `orion-lm-base` vs `plain-sonnet5` / `plain-opus5` / `plain-gpt` on the post-2026-05-31
 CVEs (vulnerable AND patched commits) + OWASP Benchmark as the false-alarm set.
 
+- **Design change (2026-10-18):** training is now hybrid (Stage 1 code+context on all pairs, Stage 2
+  graph pairs); see `docs/superpowers/plans/2026-10-18-orion-lm-hybrid.md`.
 - **Status (2026-10-18):** design approved; research + codebase exploration folded in (Appendix A has
   file:line integration notes). All §8 decisions made: Qwen excluded; second labeler proposed = Love
   Kush (to confirm with them); 5 pp false-alarm margin; scoring code built on this branch, human

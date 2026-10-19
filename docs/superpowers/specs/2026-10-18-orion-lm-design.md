@@ -162,6 +162,30 @@ sources ─► pairs (vulnerable commit, patched commit, fix sites, CWE)
 - **Size:** set on Day 1 from measured Joern build+load time per commit on the M4. No number is
   committed before that measurement.
 
+#### Design change: hybrid (Krish, 2026-10-18)
+
+The original design trained the model only on graph traces. That needed about 8,100 Joern builds, which is too big. Approved instead:
+- **Stage 1 (big, cheap):** all ~4,058 mined pairs, as code plus context. The vulnerable function gets a lead, the fixed function gets no lead, and random unchanged functions are negatives.
+- **Stage 2 (small):** a few hundred dataflow pairs built with real Orion graphs, so the model sees the exact test-time input. A few graph queries come from Krish's templates once those exist.
+- **Test:** unchanged. Orion builds graphs for the test repos only, and the model judges the candidate flows.
+
+What this costs:
+- "The model explores the graph" is weakened to "the model may query", and Stage 1 examples are single-step.
+- Positioning moves toward LLMxCPG (graph slice → judge). VulAgentRL (2607.26656) is the main related work to cite.
+
+| Original task | Status under this plan |
+|---|---|
+| D1 pair mining | done (`2efa200`, `d20173a`) |
+| D2 dual-commit builds, D3 fixmap | done on `train/d2-d3` (`91c3a7e`, `8594969`, `0fcc7e9`); used by H6/H8 and E5 |
+| D4 gold traces | replaced by H8 (Stage 2 cases/traces) + H11 (pair_test) |
+| D5 SFT cutter / text2cypher / Juliet / convert / notebook | replaced by H7 + H10 (Juliet dropped: Stage 1 has plenty of real negatives) |
+| D6 rounds | replaced by H11 (Stage 2 only) |
+| C2 bake-off | replaced by H9 |
+| B5 engine | modified by H3 (K=1, case enrichment) |
+| Open decision #5 | now K=1 + `CaseBudget` values + Stage mix shares + negative ratio + class mix + Stage 2 size (all frozen at `orion-lm-prereg-v1`) |
+
+Full task list: `docs/superpowers/plans/2026-10-18-orion-lm-hybrid.md`.
+
 ### 5.3 Base model — bake-off, not a leaderboard pick
 
 Candidates (fit ≈10 GB with an 8k context; Unsloth-supported; Apache-2.0):
