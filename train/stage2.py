@@ -26,7 +26,8 @@ builds a message by hand.
 Ledger line per pair (null/absent when not measured, never estimated): id, status (ok | no_gold |
 no_examples | no_hunks | <build_pair status> | error), reason, yield_reason (pair_yield's reason), the D2
 `sides` records (stage timings, node counts, cpg size, RSS), build_total_s, n_examples, n_traces,
-traces_dropped, evicted. Example rows are written before the ledger line; `build` first drops rows of
+traces_dropped, evicted (n_examples = cases written as single-step rows, n_traces = cases written as
+traces; a case with a trace is NOT also written as an example row). Example rows are written before the ledger line; `build` first drops rows of
 pairs without a ledger line (a crashed pair) and a torn last line.
 """
 from __future__ import annotations
@@ -359,21 +360,22 @@ def _one_pair(pair, db, mirror_root, work_root, *, budget, n_negatives, seed, te
         if not examples:
             row.update(status="no_examples", reason=",".join(why) or None)
             return [], row
-        rows = []
+        rows, n_single = [], 0
         for e in examples:
             e["split"] = pair["split"]
-            rows.append(e)
-        for e in examples:
             tr = trace_for(e["case"], db, y["patched_scan_id"] if e["label"] == "patched" else y["vulnerable_scan_id"],
                            templates, lead=e["lead"],
                            meta={"pair_id": pair["id"], "split": pair["split"], "label": e["label"],
                                  "tier": e["tier"]})
-            if tr is not None:
+            if tr is not None:      # the trace REPLACES the single-step row: same prompt, different target
                 rows.append(tr)
-            elif templates:
-                row["traces_dropped"] += 1
-        row.update(status="ok", reason=",".join(why) or None, n_examples=len(examples),
-                   n_traces=len(rows) - len(examples))
+            else:
+                rows.append(e)
+                n_single += 1
+                if templates:
+                    row["traces_dropped"] += 1
+        row.update(status="ok", reason=",".join(why) or None, n_examples=n_single,
+                   n_traces=len(rows) - n_single)
         _append(out_jsonl, rows)       # before the ledger line, so a crash redoes the pair (see _reconcile)
         return rows, row
     except Exception as exc:  # noqa: BLE001 -- one bad pair must not stop a long run

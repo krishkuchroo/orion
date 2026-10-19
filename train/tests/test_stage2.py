@@ -143,11 +143,25 @@ def test_patched_example_omitted_when_patched_scan_has_no_flows(trees):
 
 def test_negatives_never_touch_a_fix_site_and_are_seeded(trees):
     db = graph()
-    db.scans["P:vulnerable"]["flows"].append(_flow("fl2", ["vs0", "vk0"], 2))   # shares the fix-site call
+    # a different source and sink than the gold flow, but its path runs THROUGH the fix-site call vk0:
+    # only the fix-site filter can exclude it
+    db.scans["P:vulnerable"]["flows"].append(_flow("fl2", ["bs", "vk0", "bk"], 2))
     ex = run_cases(db, trees, n_negatives=5)
     assert [e["case"]["sink_uid"] for e in ex if e["label"] == "negative"] == ["bk"]
-    assert run_cases(db, trees, n_negatives=0) and \
-        [e["label"] for e in run_cases(db, trees, n_negatives=0)] == ["vulnerable", "patched"]
+    assert [e["case"]["rank"] for e in ex if e["label"] == "negative"] == [1]      # fl1, not fl2
+    assert [e["label"] for e in run_cases(db, trees, n_negatives=0)] == ["vulnerable", "patched"]
+
+
+def test_negative_sampling_is_deterministic_per_seed(trees):
+    db = graph()
+    for k in range(2, 12):    # many eligible flows so that the seed matters
+        db.scans["P:vulnerable"]["flows"].append(_flow(f"fx{k}", [f"s{k}", f"k{k}"], k))
+        db.scans["P:vulnerable"]["calls"] += [_call(f"s{k}", "b.js", 1, "src", "other"),
+                                              _call(f"k{k}", "b.js", 2, "eval", "other")]
+    pick = lambda seed: [e["case"]["sink_uid"] for e in run_cases(db, trees, n_negatives=3, seed=seed)
+                         if e["label"] == "negative"]
+    assert pick(0) == pick(0) and len(pick(0)) == 3
+    assert any(pick(s) != pick(0) for s in range(1, 8))
 
 
 def test_no_gold_flow_gives_no_examples(trees):
@@ -334,3 +348,46 @@ def test_build_reconciles_rows_of_a_pair_that_crashed_before_its_ledger_line(tmp
     (tmp_path / "ledger.jsonl").write_text(json.dumps({"id": "DONE", "status": "ok"}) + "\n")
     run_build(tmp_path, graph(), selected=[])
     assert [r["pair_id"] for r in read(str(out))] == ["DONE"]
+
+
+def test_a_case_with_a_trace_is_written_only_as_the_trace_and_export_has_no_conflicting_prompts(tmp_path):
+    """The single-step row (target: final) and the trace's first step (target: run_cypher) of the same
+    case have the same prompt and different targets; only the trace may be written for such a case."""
+    from train import examples
+    db = graph()
+    db.scans["P:vulnerable"]["other"] = [{"code": "exec(x)"}]
+    db.scans["P:patched"]["other"] = [{"code": "exec(clean(x))"}]
+    _, _, a = run_build(tmp_path, db, selected=[{**PAIR, "split": "dev"}], templates=[TPL])
+    rows = read(a["out_jsonl"])
+    assert sum("actions" in r for r in rows) == 3 and not any("label" in r and "actions" not in r for r in rows)
+    (led,) = read(a["ledger"])
+    assert led["n_examples"] == 0 and led["n_traces"] == 3
+    s1 = tmp_path / "s1.jsonl"
+    s1.write_text("")
+    out = tmp_path / "out"
+    examples.export(str(s1), a["out_jsonl"], [], out_dir=str(out), schema_text="SCHEMA",
+                    shares={"stage2": 1.0}, seed=0)
+    sft = read(str(out / "dev.jsonl"))
+    assert sft
+    targets: dict[str, set[str]] = {}
+    for r in sft:
+        targets.setdefault(json.dumps(r["messages"], sort_keys=True), set()).add(r["target"])
+    assert all(len(t) == 1 for t in targets.values())
+
+
+def test_a_case_whose_trace_is_dropped_keeps_its_single_step_row(tmp_path):
+    db = graph()      # no "other" rows for the template -> rows empty but no error; force an error instead
+    orig = db.run_cypher
+
+    def run(scan_id, query, limit=50, **kw):
+        if not query.startswith("EXPLAIN") and "c.uid = " in query and scan_id == "P:patched":
+            return {"error": "boom"}
+        return orig(scan_id, query, limit=limit, **kw)
+
+    db.run_cypher = run
+    _, _, a = run_build(tmp_path, db, templates=[TPL])
+    rows = read(a["out_jsonl"])
+    assert [r["label"] for r in rows if "actions" not in r] == ["patched"]
+    assert sum("actions" in r for r in rows) == 2
+    (led,) = read(a["ledger"])
+    assert led["n_examples"] == 1 and led["n_traces"] == 2 and led["traces_dropped"] == 1
