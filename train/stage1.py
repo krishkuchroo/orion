@@ -22,13 +22,25 @@ index is never mutated (a later `cases_from` sees the pristine vulnerable tree).
 """
 from __future__ import annotations
 
+import argparse
+import json
+import os
 import posixpath
 import random
+import shutil
+import signal
+import subprocess
+import sys
+import time
 from collections import Counter
 
 from orion.lm import cases as _cases
-from orion.lm.codeindex import MODULE, RepoIndex, Span, is_test_path, parse_text
-from train.fixmap import map_line
+from orion.lm.codeindex import LANG_BY_EXT, MODULE, RepoIndex, Span, is_test_path, parse_text
+from train import snapshot
+from train.build import _children_detached, _safe, resolve_commits
+from train.fixmap import fix_hunks, map_line
+from train.snapshot import LANG_GLOBS, SnapshotError, _dir_bytes, show
+from train.splits import load as load_splits
 from train.sources import DATAFLOW_CWES, cwe_class, norm_cwe
 
 MAX_MULTI = 3
@@ -347,3 +359,219 @@ def cases_from(pair: dict, hunks: list[dict], vuln_idx: RepoIndex, patched_text:
     rec.update(status="ok", reason=",".join(dict.fromkeys(reasons)) or None, n_targets=len(used),
                tiers=dict(Counter(t["tier"] for t in used)), n_negatives=n_neg)
     return examples, rec
+
+
+# ───────────────────────────── runner ─────────────────────────────
+
+def _repo_url(pair: dict) -> str:
+    return pair.get("repo_url") or f"https://github.com/{pair.get('repo_canonical') or pair['repo']}.git"
+
+
+def _globs(pairs: list[dict]) -> list[str]:
+    """Union of the language globs of a repo's pairs (a mixed / unknown language gets every language)."""
+    langs = {p.get("language") for p in pairs}
+    keys = [k for k in LANG_GLOBS if k in langs] if langs <= set(LANG_GLOBS) else list(LANG_GLOBS)
+    return list(dict.fromkeys(g for k in keys for g in LANG_GLOBS[k]))
+
+
+def _done_ids(ledger: str) -> set[str]:
+    done: set[str] = set()
+    if os.path.exists(ledger):
+        with open(ledger) as fh:
+            for line in fh:
+                try:
+                    done.add(json.loads(line)["id"])
+                except (ValueError, KeyError, TypeError):
+                    continue   # a torn last line: that pair is redone
+    return done
+
+
+def _append(path: str, rows: list[dict]) -> None:
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "a") as fh:
+        for r in rows:
+            fh.write(json.dumps(r) + "\n")
+        fh.flush()
+
+
+def _skip_checkout(run):
+    """`snapshot.fetch` checks out the sha it is given, but the vulnerable sha is only known after
+    `resolve_commits` (fix commit's parent). Run the clone + sparse-checkout steps, swallow the final
+    checkout, and let `_one_pair` check out the resolved vulnerable commit itself."""
+    def r(cmd, timeout=None):
+        return "" if cmd[3:4] == ["checkout"] else run(cmd, timeout=timeout)
+    return r
+
+
+def _ledger_row(pair_id: str, status: str, reason=None, **kw) -> dict:
+    row = {"id": pair_id, "status": status, "reason": reason, "seconds_fetch": None, "bytes": None,
+           "seconds_index": None, "n_files": None, "n_skipped": None, "n_examples": None, "tiers": None}
+    row.update(kw)
+    return row
+
+
+def _one_pair(pair: dict, split: str, dest: str, fetch_s: float | None, *, budget, n_negatives, seed, r1, run
+              ) -> tuple[list[dict], dict]:
+    """Resolve, check out the vulnerable commit, index, label. Raises SnapshotError/CalledProcessError for
+    git failures (the caller records snapshot_failed)."""
+    res = resolve_commits(pair, dest, run=r1)
+    if res["status"] != "ok":
+        return [], _ledger_row(pair["id"], res["status"], res["reason"], seconds_fetch=fetch_s)
+    t0 = time.monotonic()
+    r1(["git", "-C", dest, "checkout", "--quiet", "--force", res["vulnerable"]])
+    fetch_s = (fetch_s or 0.0) + (time.monotonic() - t0)
+    size = _dir_bytes(dest)
+    hunks = fix_hunks(dest, res["vulnerable"], res["patched"], fix_shas=res["fix_shas"], run=r1)
+    t0 = time.monotonic()
+    idx = RepoIndex(dest)
+    seconds_index = time.monotonic() - t0
+    patched_text = {}
+    for h in hunks:
+        f = h["file"]
+        if f and f not in patched_text and posixpath.splitext(f)[1].lower() in LANG_BY_EXT:
+            patched_text[f] = show(dest, res["patched"], f, run=run)
+    examples, rec = cases_from(pair, hunks, idx, patched_text, budget=budget, n_negatives=n_negatives, seed=seed)
+    for e in examples:
+        e["split"] = split
+    return examples, _ledger_row(pair["id"], rec["status"], rec["reason"], seconds_fetch=fetch_s, bytes=size,
+                                 seconds_index=seconds_index, n_files=len(idx.files),
+                                 n_skipped=len(idx.skipped), n_examples=len(examples), tiers=rec["tiers"])
+
+
+def build(pairs: list[dict], splits: dict[str, str], *, work_root: str, out_jsonl: str, ledger: str,
+          budget: _cases.CaseBudget, n_negatives: int, seed: int, on_event=print, fetch=snapshot.fetch,
+          run=None) -> dict:
+    """Label every pair not yet in `ledger`; append examples to `out_jsonl` and one line per pair to `ledger`.
+
+    One partial snapshot per repo serves all of its pairs and is deleted after the repo's last pair. Ctrl-C
+    (SIGINT) finishes the current pair, then stops. Examples are written before the ledger line, so a crash
+    between the two re-does that pair (duplicate examples) rather than losing it."""
+    run = run or snapshot._default_run
+    r1 = lambda cmd: run(cmd, timeout=snapshot.CLONE_TIMEOUT_S)  # noqa: E731 - build/fixmap runners take (cmd)
+    done = _done_ids(ledger)
+    todo = [p for p in pairs if p["id"] not in done]
+    groups: dict[str, list[dict]] = {}
+    for p in todo:
+        groups.setdefault(_repo_url(p), []).append(p)
+    totals = {"pairs": len(todo), "done": 0, "interrupted": False, "examples": 0, "status": Counter()}
+    stop = {"flag": False}
+
+    def on_sigint(_sig, _frame):
+        stop["flag"] = True
+        on_event("interrupt: finishing the current pair, then stopping")
+
+    try:
+        old = signal.signal(signal.SIGINT, on_sigint)
+    except ValueError:      # not the main thread
+        old = None
+    i = 0
+
+    def record(pair, row, examples):
+        if examples:
+            _append(out_jsonl, examples)
+        _append(ledger, [row])
+        totals["done"] += 1
+        totals["examples"] += len(examples)
+        totals["status"][row["status"]] += 1
+        on_event(f"    -> {row['status']}" + (f" ({row['reason']})" if row["reason"] else "")
+                 + f", {len(examples)} examples")
+
+    try:
+        with _children_detached():
+            for url, group in groups.items():
+                dest = os.path.join(work_root, _safe(url))
+                snap = None     # fetch result, once tried
+                try:
+                    for pair in group:
+                        if stop["flag"]:
+                            break
+                        i += 1
+                        on_event(f"[{i}/{len(todo)}] {pair['id']} {url}")
+                        split = splits[pair["id"]]
+                        klass = pair.get("cwe_class") or cwe_class(pair.get("cwe"))
+                        if primary_cwe(pair) is None or klass == "unknown":
+                            record(pair, _ledger_row(pair["id"], "skipped", "no_cwe", n_examples=0), [])
+                            continue
+                        if snap is None:
+                            os.makedirs(work_root, exist_ok=True)
+                            snap = fetch(url, "HEAD", dest, globs=_globs(group), run=_skip_checkout(run))
+                            first_fetch = snap["seconds"]
+                        else:
+                            first_fetch = None
+                        if not snap["ok"]:
+                            record(pair, _ledger_row(pair["id"], "snapshot_failed", snap["error"],
+                                                     seconds_fetch=first_fetch), [])
+                            continue
+                        try:
+                            examples, row = _one_pair(pair, split, dest, first_fetch, budget=budget,
+                                                      n_negatives=n_negatives, seed=seed, r1=r1, run=run)
+                        except (SnapshotError, subprocess.SubprocessError, OSError) as exc:
+                            examples, row = [], _ledger_row(pair["id"], "snapshot_failed",
+                                                            snapshot._head(exc), seconds_fetch=first_fetch)
+                        except Exception as exc:  # noqa: BLE001 - one bad pair must not stop an overnight run
+                            examples, row = [], _ledger_row(pair["id"], "error", f"{type(exc).__name__}: {exc}"[:1500],
+                                                            seconds_fetch=first_fetch)
+                        record(pair, row, examples)
+                finally:
+                    shutil.rmtree(dest, ignore_errors=True)
+                if stop["flag"]:
+                    break
+    except KeyboardInterrupt:   # no handler installed (non-main thread) or raised outside a pair
+        stop["flag"] = True
+    finally:
+        if old is not None:
+            signal.signal(signal.SIGINT, old)
+    totals["interrupted"] = stop["flag"]
+    totals["status"] = dict(totals["status"])
+    return totals
+
+
+def select_pairs(pairs: list[dict], *, languages=None, classes=None, per_language: int | None = None,
+                 limit: int | None = None, seed: int = 0) -> list[dict]:
+    """Stage-1 eligible pairs: no `unknown` cwe_class, optional language / class filters, then a seeded sample of
+    `per_language` pairs per language, then `limit`."""
+    out = [p for p in pairs if (p.get("cwe_class") or cwe_class(p.get("cwe"))) != "unknown"]
+    if languages:
+        out = [p for p in out if p.get("language") in languages]
+    if classes:
+        out = [p for p in out if (p.get("cwe_class") or cwe_class(p.get("cwe"))) in classes]
+    if per_language is not None:
+        picked = []
+        for lang in sorted({p.get("language") or "" for p in out}):
+            grp = sorted((p for p in out if (p.get("language") or "") == lang), key=lambda p: p["id"])
+            picked += random.Random(f"{seed}:{lang}").sample(grp, min(per_language, len(grp)))
+        out = picked
+    return out[:limit] if limit is not None else out
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(prog="python -m train.stage1", description=__doc__.splitlines()[0])
+    ap.add_argument("--pairs", default="train/data/pairs.json")
+    ap.add_argument("--splits", default="train/data/splits.json")
+    ap.add_argument("--out", default="train/data/stage1.jsonl")
+    ap.add_argument("--ledger", default="train/data/stage1_ledger.jsonl")
+    ap.add_argument("--work-root", default="train/data/work")
+    ap.add_argument("--limit", type=int)
+    ap.add_argument("--per-language", type=int, help="seeded sample of N pairs per language")
+    ap.add_argument("--languages", help="comma list, e.g. js,py,java")
+    ap.add_argument("--classes", help="comma list of cwe_class, e.g. dataflow,other")
+    ap.add_argument("--n-negatives", type=int, default=2)
+    ap.add_argument("--seed", type=int, default=0)
+    a = ap.parse_args(argv)
+    with open(a.pairs) as f:
+        all_pairs = json.load(f)
+    if not os.path.exists(a.splits):
+        print(f"{a.splits} not found: freeze the splits first (train.splits.write)", file=sys.stderr)
+        return 2
+    splits = load_splits(a.splits, all_pairs)   # checked against the full pair set, before any filtering
+    sel = select_pairs(all_pairs, languages=a.languages.split(",") if a.languages else None,
+                       classes=a.classes.split(",") if a.classes else None,
+                       per_language=a.per_language, limit=a.limit, seed=a.seed)
+    totals = build(sel, splits, work_root=a.work_root, out_jsonl=a.out, ledger=a.ledger,
+                   budget=_cases.CaseBudget(), n_negatives=a.n_negatives, seed=a.seed)
+    print(json.dumps(totals))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
