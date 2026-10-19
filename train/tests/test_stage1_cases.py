@@ -84,12 +84,13 @@ def test_unresolvable_annotation_falls_back_to_changed_function(tmp_path):
 
 def test_add_only_hunk_anchors_on_insertion_line(tmp_path):
     h = [{"file": "app.py", "old_file": "app.py", "old_start": 7, "old_end": 6, "new_start": 8, "new_end": 8}]
-    t, _ = stage1.targets(PAIR, h, _idx(tmp_path), {"app.py": VULN})
+    t, _ = stage1.targets(PAIR, h, _idx(tmp_path), {"app.py": VULN.replace("    x = a\n", "    x = a\n    check(x)\n")})
     assert t[0]["name"] == "other" and t[0]["anchor_old"] == 7
 
 def test_multi_tier_and_unknown_class(tmp_path):
     h = [{"file": "app.py", "old_file": "app.py", "old_start": s, "old_end": s, "new_start": s, "new_end": s} for s in (2, 6)]
-    t, _ = stage1.targets(PAIR, h, _idx(tmp_path), {"app.py": VULN})
+    fixed = VULN.replace("'SELECT ' + r", "'SELECT ' + esc(r)").replace("log(a)", "log(b)")   # both really change
+    t, _ = stage1.targets(PAIR, h, _idx(tmp_path), {"app.py": fixed})
     assert [x["tier"] for x in t] == ["multi", "multi"]
     ex, rec = stage1.cases_from({"id": "X", "cwe": [], "cwe_class": "unknown"}, HUNK, _idx(tmp_path), {"app.py": PATCHED},
                                 budget=cases.CaseBudget(), n_negatives=0, seed=0)
@@ -113,9 +114,10 @@ def _real(tmp_path, hermetic_git, old: dict, new: dict):
     """Vulnerable index + real `git diff -U0` hunks + patched text for a two-commit repo."""
     repo = GitRepo(tmp_path / "r")
     a = repo.commit(old)
-    idx = ci.RepoIndex(repo.path)
     b = repo.commit(new)
-    return idx, diffs.parse_u0(diffs.git_diff_u0(repo.path, a, b)), {k: v for k, v in new.items()}
+    hunks = diffs.parse_u0(diffs.git_diff_u0(repo.path, a, b))
+    repo.checkout(a)            # RepoIndex.source reads the disk: keep the vulnerable tree checked out
+    return ci.RepoIndex(repo.path), hunks, {k: v for k, v in new.items()}
 
 
 def test_negative_never_nested_in_or_around_a_target(tmp_path):
@@ -197,3 +199,47 @@ def test_overloads_each_get_their_own_patched_code(tmp_path, hermetic_git):
     pat = [e["case"]["snippets"][0]["code"] for e in ex if e["label"] == "patched"]
     assert len(pat) == 2 and any("check(a)" in c for c in pat) and any("safe(a) + b" in c for c in pat)
     assert not any("check(a)" in c and "safe(" in c for c in pat)
+
+
+# --- final review I4: a "changed" function whose whole text the fix did not change is not a target ---
+HELPER = "def helper(v):\n    w = v + 1\n    z = w * 2\n    return z\n"
+VIEW_OLD = "def view(r):\n    q = 'SELECT ' + r\n    return db.execute(q)\n"
+VIEW_FIX = "def view(r):\n    return db.execute('SELECT ?', [r])\n"
+OTHER_FN = "def other(a):\n    log(a)\n    x = a\n    y = x\n    return y\n"
+
+
+def test_moved_unchanged_helper_is_not_a_target(tmp_path, hermetic_git):
+    """The fix rewrites view() and moves an unchanged helper() to the top: git's delete hunk spans the old
+    helper, but its whole text is the same on both sides, so it gets no HIGH vulnerable lead."""
+    old = VIEW_OLD + "\n\n" + OTHER_FN + "\n\n" + HELPER
+    new = HELPER + "\n\n" + VIEW_FIX + "\n\n" + OTHER_FN
+    repo = GitRepo(tmp_path / "r")
+    a, b = repo.commit({"app.py": old}), repo.commit({"app.py": new})
+    hunks = diffs.parse_u0(diffs.git_diff_u0(repo.path, a, b))
+    assert any(h["old_start"] <= 13 <= h["old_end"] for h in hunks)        # the hunk does span the old helper
+    repo.checkout(a)                                                       # the index reads the vulnerable tree
+    idx = ci.RepoIndex(repo.path)
+    ex, rec = stage1.cases_from(PAIR, hunks, idx, {"app.py": new}, budget=B, n_negatives=0, seed=0)
+    assert [(e["label"], (e["lead"] or {}).get("function")) for e in ex] == [("vulnerable", "view"), ("patched", None)]
+    assert rec["tiers"] == {"single": 1} and rec["n_targets"] == 1 and "unchanged_target" in rec["reason"]
+    t, _ = stage1.targets(PAIR, hunks, idx, {"app.py": new})
+    assert [(x["name"], x["tier"]) for x in t] == [("view", "single")]    # the tier is recomputed
+
+
+def test_only_unchanged_targets_left_is_no_target(tmp_path):
+    """Line-ending-only edits (CRLF -> LF) read the same under universal newlines: nothing remains, so no_target."""
+    (tmp_path / "app.py").write_bytes(VULN.replace("\n", "\r\n").encode())
+    idx = ci.RepoIndex(str(tmp_path))
+    h = [{"file": "app.py", "old_file": "app.py", "old_start": s, "old_end": s, "new_start": s, "new_end": s}
+         for s in (2, 6)]
+    ex, rec = stage1.cases_from(PAIR, h, idx, {"app.py": VULN}, budget=B, n_negatives=0, seed=0)
+    assert ex == [] and rec["reason"] == "no_target"
+    assert stage1.targets(PAIR, h, idx, {"app.py": VULN}) == ([], "no_target")
+
+
+def test_annotated_targets_are_kept_even_when_unchanged(tmp_path):
+    """I4 applies to the single/multi tiers only: an annotation is the pair's own evidence."""
+    pair = {**PAIR, "vuln_methods": [{"file": "app.py", "method": "third", "start_line": 11, "end_line": 15,
+                                      "vulnerable_lines": [12]}]}
+    ex, rec = stage1.cases_from(pair, HUNK, _idx(tmp_path), {"app.py": VULN}, budget=B, n_negatives=0, seed=0)
+    assert [e["label"] for e in ex] == ["vulnerable"] and rec["tiers"] == {"annotated": 1}

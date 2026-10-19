@@ -16,6 +16,9 @@ Targets, in priority order:
   single     exactly one changed non-test function.
   multi      2..MAX_MULTI changed functions.
 More than MAX_MULTI changed functions is "sprawling"; nothing changed outside tests (or nothing resolves) is "no_target".
+In the single/multi tiers a "changed" function whose whole text equals its patched counterpart (moved by the fix, or a
+line-ending-only edit) is dropped first (reason `unchanged_target`) and the tier is decided on what remains; nothing left
+is "no_target". Annotated targets are kept as they are.
 
 The patched example is built on a copy of `vuln_idx` with the patched text of the changed files applied, so the caller's
 index is never mutated (a later `cases_from` sees the pristine vulnerable tree).
@@ -44,7 +47,7 @@ import time
 from collections import Counter
 
 from orion.lm import cases as _cases
-from orion.lm.codeindex import LANG_BY_EXT, MODULE, RepoIndex, Span, is_test_path, parse_text
+from orion.lm.codeindex import LANG_BY_EXT, MODULE, RepoIndex, Span, _split_lines, is_test_path, parse_text
 from train import snapshot
 from train.build import _children_detached, _safe, resolve_commits
 from train.fixmap import fix_hunks, map_line
@@ -242,8 +245,15 @@ def _src(idx: RepoIndex, span: Span) -> str:
     return idx.source(span.file, span.start, span.end)
 
 
+def _patched_src(span: Span, patched_text: dict) -> str:
+    """The patched span's text, split exactly as `RepoIndex.source` splits it."""
+    return "\n".join(_split_lines(patched_text[span.file])[max(span.start, 1) - 1:span.end])
+
+
 def targets(pair: dict, hunks: list[dict], vuln_idx: RepoIndex,
             patched_text: dict[str, str | None]) -> tuple[list[dict], str | None]:
+    """(targets, reason): reason is why there are none, or `unchanged_target` when single/multi candidates
+    whose whole text the fix left unchanged were dropped (see the module doc)."""
     changed = _changed_functions(hunks, vuln_idx, patched_text)
     ann = _annotated(pair, vuln_idx)[:MAX_MULTI]
     if ann:
@@ -253,16 +263,23 @@ def targets(pair: dict, hunks: list[dict], vuln_idx: RepoIndex,
     elif len(changed) > MAX_MULTI:
         return [], "sprawling"
     else:
-        tier = "single" if len(changed) == 1 else "multi"
-        picked = [(e["span"], None, tier) for e in changed.values()]
-    out = []
+        picked = [(e["span"], None, None) for e in changed.values()]   # tier set once unchanged ones are dropped
+    out, unchanged = [], 0
     for span, ann_anchor, tier in picked:
         ent = changed.get((span.file, span.start, span.end))
         ps, anchor_new, missing = _patched_for(span, hunks, patched_text)
+        if tier is None and ps is not None and _src(vuln_idx, span) == _patched_src(ps, patched_text):
+            unchanged += 1      # moved, or a line-ending-only edit: the fix did not change this function
+            continue
         out.append({"file": span.file, "name": span.name, "vuln_span": span, "patched_span": ps,
                     "anchor_old": _anchor_old(span, ann_anchor, ent), "anchor_new": anchor_new,
                     "tier": tier, "patched_reason": missing})
-    return out, None
+    if not out:
+        return [], "no_target"
+    for t in out:
+        if t["tier"] is None:
+            t["tier"] = "single" if len(out) == 1 else "multi"
+    return out, "unchanged_target" if unchanged else None
 
 
 # ---- examples --------------------------------------------------------------------------------
@@ -328,7 +345,7 @@ def cases_from(pair: dict, hunks: list[dict], vuln_idx: RepoIndex, patched_text:
     def ex(label, tier, case, lead):
         return {"pair_id": pair["id"], "label": label, "tier": tier, "cwe_class": klass, "case": case, "lead": lead}
 
-    examples, reasons, used = [], [], []
+    examples, reasons, used = [], [reason] if reason else [], []
     patched_idx = None
     for t in tgts:
         vs = t["vuln_span"]
