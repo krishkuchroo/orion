@@ -6,7 +6,8 @@ code: `merge_consecutive_roles`, `_turn_end_id` and `encode_prompt` from orion/l
 """
 from __future__ import annotations
 
-from orion.lm.model import _turn_end_id, encode_prompt, merge_consecutive_roles  # noqa: F401  (vendored in the notebook)
+from orion.lm.model import (  # noqa: F401  (vendored in the notebook)
+    _turn_end_id, encode_prompt, merge_consecutive_roles)
 
 
 def resolve_turn_end(tok, *, thinking: bool = False) -> int:

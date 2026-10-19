@@ -26,8 +26,8 @@ split}` plus `stage: 2`:
 Traces (`trace_for`) are `{case, actions: [*run_cypher, final], results, meta}`; `meta` carries `pair_id`
 and `split` (train/examples.py `export` needs them), plus `fix_site` on the vulnerable trace (train/rounds.py).
 They are written only when `train/templates/queries.json` exists (Krish writes it, see
-train/templates/README.md); until then only the example rows are produced. Every model input is built later by orion/lm/format.py from these CodeCases; nothing here
-builds a message by hand.
+train/templates/README.md); until then only the example rows are produced. Every model input is built later
+by orion/lm/format.py from these CodeCases; nothing here builds a message by hand.
 
 Ledger line per pair (null/absent when not measured, never estimated): id, status (ok | no_gold |
 no_examples | no_hunks | <build_pair status> | error), reason, yield_reason (pair_yield's reason), the D2
