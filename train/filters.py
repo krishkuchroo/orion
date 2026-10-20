@@ -3,6 +3,8 @@
 Checks run in a fixed order and the first failing one is the row's reason, so the reasons double as
 a funnel (``STAGES``):
 
+0a. source licensed for training    source_excluded:<why>  (EXCLUDED_SOURCES; runs before dedupe, so a pair
+                                    also in a licensed source survives via that source)
 0. labels not LLM-made              llm_assisted_labels  (unless allow_llm_assisted=True)
 1. a GitHub fix link exists         no_fix_commit / non_github_repo
 2. language is JS/TS, Python, Java  language_unknown / language_unsupported:<lang>
@@ -22,7 +24,10 @@ from __future__ import annotations
 
 from train.sources import ANNOTATION_KEYS, CUTOFF, SOURCE_PRIORITY, SUPPORTED_LANGUAGES, cwe_class
 
-STAGES = ("llm_assisted_labels",
+# Sources kept in collect/leak sets (so leak filtering is unchanged) but never trained on, with the reason.
+EXCLUDED_SOURCES = {"repopairbench": "license_no_rights"}
+
+STAGES = ("source_excluded", "llm_assisted_labels",
           "no_fix_commit", "non_github_repo",
           "language_unknown", "language_unsupported",
           "advisory_date_missing", "advisory_after_cutoff",
@@ -44,6 +49,8 @@ def row_reason(r: dict, *, cutoff: str = CUTOFF, post_cutoff_repos=frozenset(), 
     """First failing per-row check (stages 1-7), or None. ``stop_before_enrichment`` evaluates only
     the checks that need no GitHub data (used to decide which commits are worth fetching). A PR-only
     row is resolved to its merge commit during enrichment, so its PR status is judged at stage 5."""
+    if r.get("source") in EXCLUDED_SOURCES:
+        return f"source_excluded:{EXCLUDED_SOURCES[r['source']]}"
     if r.get("llm_assisted_labels") and not allow_llm_assisted:
         return "llm_assisted_labels"
     if not r.get("repo"):

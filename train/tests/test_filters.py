@@ -169,3 +169,16 @@ def test_unresolved_pr_is_judged_at_the_enrichment_step_not_before_the_date_and_
     _, dropped = filters.keep(pairs, post_cutoff_repos={"o/leaky"})
     assert reasons(dropped) == {"LATE": "advisory_after_cutoff", "LEAK": "post_cutoff_repo",
                                 "OPEN": "fix_pr_unresolved"}
+
+
+def test_excluded_source_is_dropped_before_dedupe_and_duplicate_from_other_source_survives():
+    rpb = row("RPB1", source="repopairbench", aliases=["CVE-2020-1", "RPB1"], fix_sha="a" * 40)
+    osv = row("GHSA-x", source="osv-npm", aliases=["CVE-2020-1", "GHSA-x"], fix_sha="a" * 40)
+    only = row("RPB2", source="repopairbench")
+    kept, dropped = filters.keep([rpb, osv, only], post_cutoff_repos=set())
+    r = reasons(dropped)
+    assert r["RPB1"] == "source_excluded:license_no_rights"
+    assert r["RPB2"] == "source_excluded:license_no_rights"
+    assert filters.reason_kind(r["RPB1"]) == "source_excluded"
+    assert [p["id"] for p in kept] == ["GHSA-x"]
+    assert kept[0]["sources"] and all("repopairbench" not in str(t) for t in kept[0]["sources"])

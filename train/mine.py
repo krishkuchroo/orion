@@ -49,7 +49,8 @@ LOADERS = {
 }
 
 # funnel stages (reason kinds dropped at each step, in check order)
-FUNNEL = (("labels not LLM-assisted", {"llm_assisted_labels"}),
+FUNNEL = (("source licensed for training", {"source_excluded"}),
+          ("labels not LLM-assisted", {"llm_assisted_labels"}),
           ("has GitHub fix link", {"no_fix_commit", "non_github_repo"}),
           ("language JS/TS, Python, Java", {"language_unknown", "language_unsupported"}),
           ("advisory < cutoff", {"advisory_date_missing", "advisory_after_cutoff"}),
