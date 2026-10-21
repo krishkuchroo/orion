@@ -338,6 +338,14 @@ def project_graphson(graphson: dict, profile=None) -> dict:
     # GENERIC/no-framework fallback, their parameters also become taint sources.
     entry_ids = _entry_method_ids(g)
     entry_taint = frozenset(entry_ids) if (profile is not None and profile.entrypoint_params_are_sources) else None
+    verts = {_unwrap(v["id"]): v for v in g.get("vertices", [])}
+    # Each parameter's owning METHOD (its AST parent), so normalize can tell `h(req)` in a.js from
+    # `h(req)` in b.js. Envelope-only, like CALL's file_path: normalize uses it in the uid and does
+    # not persist it. In a stream segment the METHOD->param AST edge is inside the segment too.
+    param_method = {_unwrap(e["inV"]): _prop(verts[_unwrap(e["outV"])], "FULL_NAME")
+                    for e in g.get("edges", [])
+                    if e["label"] == "AST" and e.get("outVLabel") == "METHOD"
+                    and e.get("inVLabel") == "METHOD_PARAMETER_IN" and _unwrap(e["outV"]) in verts}
     nodes = []
     for v in g.get("vertices", []):
         label = v["label"]
@@ -346,6 +354,8 @@ def project_graphson(graphson: dict, profile=None) -> dict:
         props = {k: _prop(v, k) for k in _NODE_PROPS[label]}
         if label == "CALL":
             props["file_path"] = call_files.get(_unwrap(v["id"]))
+        elif label == "METHOD_PARAMETER_IN":
+            props["method_full_name"] = param_method.get(_unwrap(v["id"]))
         nodes.append({"label": label, "id": _unwrap(v["id"]), "props": props})
     edges = []
     for e in g.get("edges", []):
@@ -359,7 +369,6 @@ def project_graphson(graphson: dict, profile=None) -> dict:
             "out_label": e.get("outVLabel"), "in_label": e.get("inVLabel"),
         })
     edges.extend(collapse_flows(g, request_source_names=src_names, entrypoint_method_ids=entry_taint))
-    verts = {_unwrap(v["id"]): v for v in g.get("vertices", [])}
     entry_methods = sorted({
         fn for e in entry_ids
         if (fn := _prop(verts[e], "FULL_NAME")) and verts.get(e) is not None
@@ -447,7 +456,10 @@ def normalize(export: dict, scan_id: str, entry_funcs: list[str] | None = None,
         if name is None:
             continue
         line = n["props"].get("LINE_NUMBER") if isinstance(n["props"].get("LINE_NUMBER"), int) else 0
-        uid = synthesize_uid(scan_id, "METHOD_PARAMETER_IN", "<param>", line, 0, name)
+        # The owning method's full_name (it names the file too) keeps same-name, same-line params of
+        # different methods apart; "<param>" only for a parameter with no METHOD parent.
+        owner = _clean(n["props"].get("method_full_name")) or "<param>"
+        uid = synthesize_uid(scan_id, "METHOD_PARAMETER_IN", owner, line, 0, name)
         p = {"uid": uid, "name": name}
         idx = n["props"].get("INDEX")
         if isinstance(idx, int):

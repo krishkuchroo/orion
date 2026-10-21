@@ -18,7 +18,7 @@ import time
 from datetime import datetime, timezone
 
 from .contracts import OnEvent, ProgressEvent
-from .graph import deps, joern_adapter, pathfind, persist, profiles, reachability
+from .graph import deps, joern_adapter, pathfind, persist, profiles, reachability, scans
 
 
 def _event(phase: str, event: str, *, detail: str = "") -> ProgressEvent:
@@ -61,6 +61,41 @@ def _ambiguity_warning(repo_path: str, language: str | None,
                           f"-- override with `orion scan --language <frontend>` if wrong"))
 
 
+def _persist_warning(summary) -> ProgressEvent | None:
+    """A 'build'/'warn' event when persist's write counters disagree with the batch, else None. An
+    edge whose endpoint is missing is skipped by MATCH...CREATE without any error, so this is the
+    only place a normal (non-strict) run hears about it. Pure -- testable on a real summary."""
+    mismatches = summary.get("mismatches") if isinstance(summary, dict) else None
+    if not mismatches:
+        return None
+    return _event("build", "warn",
+                  detail="persist wrote a different number of rows than the batch holds -- "
+                         + "; ".join(mismatches))
+
+
+def _precompute(on_event: OnEvent | None, label: str, fn) -> dict:
+    """Run one build-time precompute step (reachability / centrality / pathfind) under `_timed`. These
+    are ranking HINTS, so a failure must not cost the scan its graph: it becomes a 'build'/'error'
+    event and {"error": ...} (kept in the scan record), and the build carries on without it."""
+    try:
+        result, _ = _timed(on_event, label, fn)
+        return result
+    except Exception as exc:  # noqa: BLE001 -- a hint step is never fatal to the build
+        if on_event is not None:
+            on_event(_event("build", "error", detail=f"{label} failed, continuing without it: {exc}"))
+        return {"error": f"{type(exc).__name__}: {exc}"}
+
+
+def _record_counts(summary, **precompute) -> dict:
+    """What the scan record keeps: rows written per label / rel type, persist's mismatches, and the
+    precompute summaries."""
+    counts = summary.get("counts", {}) if isinstance(summary, dict) else {}
+    return {"nodes": {k: t["written"] for k, t in counts.get("nodes", {}).items()},
+            "edges": {k: t["written"] for k, t in counts.get("edges", {}).items()},
+            "mismatches": summary.get("mismatches", []) if isinstance(summary, dict) else [],
+            "precompute": precompute}
+
+
 def _commit_sha(repo: str) -> str:
     """The checked-out commit of `repo`, or 'nocommit' if it is not a git repo / git is absent.
     Degrades to the sentinel rather than crashing — a plain directory is a valid scan target."""
@@ -75,10 +110,16 @@ def _commit_sha(repo: str) -> str:
     return "nocommit"
 
 
-def scan_id_for(repo_path: str) -> str:
-    """Deterministic scan identity for a repo (abspath + commit)."""
+def scan_id_for(repo_path: str, profile: profiles.Profile | None = None) -> str:
+    """Deterministic scan identity for a repo (abspath + commit), plus the profile name when the
+    build uses a profile other than the one `select_profile` picks (e.g. `with_lm_sinks`): such a
+    profile changes the CandidateFlows, so it must not share -- and clear -- the default partition.
+    No profile, or the auto-selected one, gives exactly the original abspath|commit id."""
     abspath = os.path.abspath(repo_path)
-    return hashlib.sha1(f"{abspath}|{_commit_sha(abspath)}".encode("utf-8")).hexdigest()
+    key = f"{abspath}|{_commit_sha(abspath)}"
+    if profile is not None and profile.name != profiles.select_profile(repo_path).name:
+        key += f"|{profile.name}"
+    return hashlib.sha1(key.encode("utf-8")).hexdigest()
 
 
 def build(repo_path: str, language: str | None = None,
@@ -111,8 +152,9 @@ def build(repo_path: str, language: str | None = None,
 
     `profile`, when given, is used instead of `profiles.select_profile(...)` for BOTH the taint-source
     model and the pathfind sink vocabulary (e.g. `profiles.with_lm_sinks(...)`); None keeps the
-    auto-selected profile exactly as before."""
-    scan_id = scan_id or scan_id_for(repo_path)
+    auto-selected profile exactly as before. A non-default `profile` also gets its own scan_id (see
+    `scan_id_for`)."""
+    scan_id = scan_id or scan_id_for(repo_path, profile)
     frontend, display_language = joern_adapter.resolve_language(repo_path, language)
     if on_event is not None:
         warn = _ambiguity_warning(repo_path, language, frontend)
@@ -144,27 +186,33 @@ def build(repo_path: str, language: str | None = None,
     # Build-time precompute (Item 1): tag every method/call with entry-point reachability + hop
     # distance, mutating batch.nodes props IN PLACE. Must run BEFORE the on_batch thread below, which
     # reads the same batch concurrently -- doing it here keeps the mutation single-threaded and the
-    # new props are picked up by persist's `SET n += row.props`. Pure/in-memory: never fatal to a build.
-    reach, _ = _timed(on_event, "reachability", lambda: reachability.tag_reachability(batch))
-    if on_event is not None:
+    # new props are picked up by persist's `SET n += row.props`. Pure/in-memory: never fatal to a build
+    # (each step is guarded by _precompute: a failure is an 'error' event + a note in the scan record).
+    reach = _precompute(on_event, "reachability", lambda: reachability.tag_reachability(batch))
+    if on_event is not None and "error" not in reach:
         on_event(_event("build", "timing",
                         detail=f"reachability: {reach['reached_methods']}/{reach['total_methods']} methods, "
                                f"{reach['reached_calls']}/{reach['total_calls']} calls reachable from an entry point"))
     # Item 3a: betweenness centrality over the reachable call graph (chokepoint / blast-radius score).
     # Runs AFTER reachability (reads reachable_from_entry) and, like it, mutates batch props in place
     # before the on_batch thread. networkx; never fatal.
-    cent, _ = _timed(on_event, "centrality", lambda: reachability.tag_centrality(batch))
-    if on_event is not None:
+    cent = _precompute(on_event, "centrality", lambda: reachability.tag_centrality(batch))
+    if on_event is not None and "error" not in cent:
         on_event(_event("build", "timing",
                         detail=f"centrality: {cent['nodes']} reachable nodes, "
                                f"max betweenness {cent['max_centrality']:.3f}"))
     # Item 2: precompute ranked source->sink candidate flows as :CandidateFlow nodes. Runs after
     # centrality (ranks by it) and before the on_batch thread; profile supplies the sink vocabulary.
-    flows, _ = _timed(on_event, "pathfind", lambda: pathfind.pathfind(batch, profile))
-    if on_event is not None:
+    flows = _precompute(on_event, "pathfind", lambda: pathfind.pathfind(batch, profile))
+    if "error" in flows:   # never persist a half-emitted flow list; `orion reanalyze` can redo it
+        batch.nodes[:] = [(label, p) for label, p in batch.nodes if label != "CandidateFlow"]
+    elif on_event is not None:
         on_event(_event("build", "timing",
                         detail=f"pathfind: {flows['flows']} candidate flows from {flows['sources']} "
                                f"sources to {flows['sinks']} sink hits"))
+    # The scan record says 'building' BEFORE persist clears the partition and 'complete' only after it
+    # returns, so a build that dies in between leaves a record `--scan-id` refuses.
+    scans.mark_building(scan_id, commit=_commit_sha(os.path.abspath(repo_path)), profile=profile.name)
     if on_batch is not None:
         # Overlap the batch consumer (semantic index) with persist (item 4). on_batch reads the
         # in-memory batch, so it does not wait on persist; persist's label-scoped clear won't wipe
@@ -185,7 +233,12 @@ def build(repo_path: str, language: str | None = None,
         th.join()
     else:
         summary, _ = _timed(on_event, "persist", lambda: persist.persist(batch))
+    scans.mark_complete(scan_id, _record_counts(summary, reachability=reach, centrality=cent,
+                                                pathfind=flows))
     if on_event is not None:
+        warn = _persist_warning(summary)
+        if warn is not None:
+            on_event(warn)
         # Surface persist's own clear/nodes/edges split when the persist layer reports it (it does
         # once the chunked/parallel persister lands); harmless no-op until then.
         timings = summary.get("timings") if isinstance(summary, dict) else None

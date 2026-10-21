@@ -2,8 +2,10 @@
 semantic index. Four read-only tools (`exploit_search` is verifier-only, gated by the allowlist in
 claude_cli.py, not here).
 
-`run_cypher` delegates straight to GraphDB (write-keyword guard and scan_id binding live there,
-not here). `semantic_search` imports `orion.embed` lazily and tolerates it being unimplemented
+`run_cypher` delegates to GraphDB (write-keyword guard, READ-access session and scan_id binding live
+there) after refusing the clauses that reach past the graph -- LOAD CSV, SHOW, TERMINATE, USE, CALL
+-- which a read session still runs (see `_forbidden_clause`). `semantic_search` imports `orion.embed`
+lazily and tolerates it being unimplemented
 or empty — Task E builds that module in parallel, and this server must not crash on startup or
 on a call just because the semantic index isn't ready yet. `get_schema` reflects Orion's own
 frozen CPG vocabulary (schema.py), so unlike the other two it is not scan_id-scoped.
@@ -15,9 +17,30 @@ from __future__ import annotations
 
 from fastmcp import FastMCP
 
-from .graphdb import GraphDB
+from .graphdb import GraphDB, blank
+from .lm import tools as lm_tools
 
 mcp = FastMCP("orion")
+
+# Clauses a discovery/verifier query never needs and a READ-access session still runs: LOAD CSV makes
+# the Neo4j SERVER fetch a URL (a prompt injection in a scanned repo could send data out in it), SHOW
+# / TERMINATE TRANSACTIONS list or kill other sessions' transactions, USE switches database, CALL runs
+# procedures. The rule and its messages are the Orion-LM tool's (orion/lm/tools.py), reused, not
+# copied. Its scan-scope and syntax rules are deliberately NOT applied: Claude's queries legitimately
+# differ (unscoped label scans, UNION, ...), and the two paths need not behave the same.
+_MCP_FORBIDDEN = ("LOAD", "SHOW", "TERMINATE", "USE", "CALL")
+_FORBIDDEN_RE = [(rx, msg) for (word, _msg), (rx, msg) in zip(lm_tools._FORBIDDEN, lm_tools._FORBIDDEN_RE)
+                 if word in _MCP_FORBIDDEN]
+
+
+def _forbidden_clause(query: str) -> str | None:
+    """The message for the first forbidden clause in `query`, or None. Matched on the blanked text
+    (strings, comments, backtick names removed), so `c.code CONTAINS 'LOAD CSV'` is still allowed."""
+    text = blank(query)
+    for rx, msg in _FORBIDDEN_RE:
+        if rx.search(text):
+            return msg
+    return None
 
 # One GraphDB, opened lazily and reused across calls (a fresh driver per call would be wasteful
 # and would defeat neo4j's own connection pooling).
@@ -32,7 +55,11 @@ def _get_db() -> GraphDB:
 
 
 def run_cypher_impl(query: str, scan_id: str) -> dict:
-    """Delegates to GraphDB().run_cypher. Returns {"row_count","rows"} or {"error"}."""
+    """Refuses a forbidden clause before Neo4j sees the query, else delegates to
+    GraphDB().run_cypher. Returns {"row_count","rows"} or {"error"}."""
+    bad = _forbidden_clause(query)
+    if bad is not None:
+        return {"error": bad}
     return _get_db().run_cypher(scan_id, query)
 
 
@@ -74,7 +101,8 @@ def exploit_search_impl(query: str, k: int = 5) -> list[dict]:
 
 @mcp.tool()
 def run_cypher(query: str, scan_id: str) -> dict:
-    """Run a read-only Cypher query scoped to one scan_id. Write keywords are blocked."""
+    """Run a read-only Cypher query scoped to one scan_id. Write keywords and LOAD CSV / SHOW /
+    TERMINATE / USE / CALL are blocked."""
     return run_cypher_impl(query, scan_id)
 
 

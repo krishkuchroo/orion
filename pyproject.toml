@@ -47,6 +47,9 @@ packages = ["orion", "orion.graph", "orion.lm", "orion.runtime"]
 # targets (a Django authentik checkout, etc.) whose own `tests/` package would shadow this one and
 # break collection. An explicit path arg (e.g. `pytest fixtures/...`) bypasses this, as intended.
 testpaths = ["tests"]
+# Repo root on sys.path so `from tests.<module> import ...` resolves when one test file is run on its
+# own (it otherwise fails to collect: a site-packages `tests` namespace shadows ours).
+pythonpath = ["."]
 markers = [
     "slow: costs no Claude tokens but does real local compute (e.g. embedding-model download/inference); run explicitly.",
 ]

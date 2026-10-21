@@ -34,6 +34,13 @@ JOERN_HEAP_GB = _env("ORION_JOERN_HEAP_GB", "").strip()   # "" -> derive from RA
 PERSIST_CHUNK_SIZE = int(_env("ORION_PERSIST_CHUNK_SIZE", "5000"))   # rows per write transaction
 PERSIST_CONCURRENCY = int(_env("ORION_PERSIST_CONCURRENCY", "4"))    # concurrent write sessions
 
+
+def persist_strict() -> bool:
+    """True when ORION_PERSIST_STRICT is set (and not "0"/"false"): persist then RAISES if Neo4j's
+    write counters disagree with the batch, instead of only reporting it. Read at call time, not
+    import time, so the test suite (tests/conftest.py) and a single test can switch it."""
+    return os.environ.get("ORION_PERSIST_STRICT", "").strip().lower() not in ("", "0", "false", "no")
+
 # --- Headless `claude -p` settings for discovery and verification ---
 MODEL = _env("ORION_MODEL", "sonnet")
 EFFORT = _env("ORION_EFFORT", "high")

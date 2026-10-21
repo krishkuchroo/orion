@@ -23,12 +23,14 @@ def _stub_env(monkeypatch) -> list[dict]:
     import orion.embed as embed
     import orion.graphdb as graphdb
     import orion.monitor as monitor
+    from orion.graph import scans
 
     class _NoDB:
         def __init__(self):
             raise RuntimeError("neo4j stubbed out")
 
     monkeypatch.setattr(graphdb, "GraphDB", _NoDB)
+    monkeypatch.setattr(scans, "check_usable", lambda *a, **k: None)   # the --scan-id record gate
     monkeypatch.setattr(embed, "index", lambda *a, **k: None)
     monkeypatch.setattr(embed, "ensure_exploit_index", lambda *a, **k: False)
     events: list[dict] = []
@@ -122,9 +124,9 @@ def test_lm_engine_skips_verify_and_wraps_inconclusive(monkeypatch, tmp_path, ca
     assert out[0]["decision"] == "INCONCLUSIVE" and "engine=lm" in out[0]["reason"]
     assert out[0]["lead"]["shape"] == "LM" and out[0]["lead"]["file"] == "a.js"
     assert any(e.get("phase") == "verify" and "skipped" in (e.get("detail") or "") for e in events)
-    # --scan-id: the prebuilt graph is used as-is (no lm sink profile at build time) and says so.
-    assert any(e.get("phase") == "discover" and e.get("event") == "warn"
-               and "as-is" in (e.get("detail") or "") for e in events)
+    # --scan-id no longer warns "used as-is": a scan built without the lm profile is refused by the
+    # OrionScan record gate before this point (tests/test_scan_record.py), so nothing to warn about.
+    assert not any("as-is" in (e.get("detail") or "") for e in events)
     # Exactly one discover/start on the lm path (model loading folded into it).
     assert [e for e in events if (e["phase"], e["event"]) == ("discover", "start")].__len__() == 1
     # The rendered report and the JSON both carry the lead.
@@ -161,7 +163,7 @@ def _stub_build(monkeypatch) -> dict:
         return "sid"
 
     monkeypatch.setattr(graph_build, "build", _build)
-    monkeypatch.setattr(graph_build, "scan_id_for", lambda repo: "sid")
+    monkeypatch.setattr(graph_build, "scan_id_for", lambda repo, profile=None: "sid")
     return captured
 
 

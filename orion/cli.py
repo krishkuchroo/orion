@@ -14,8 +14,12 @@ report -- and the run's progress log.
 `--engine lm` (default: `claude`) swaps discovery for the in-process Orion-LM engine
 (`orion/lm/engine.py`, MLX-LM; never `claude_cli`) and SKIPS the verifier: every lead is reported
 as INCONCLUSIVE "unverified (engine=lm)". The lm sink profile (`profiles.with_lm_sinks`) is applied
-at BUILD time so the graph carries the extra CandidateFlows; with `--scan-id` the existing graph is
-used as-is. Nothing on the claude path changes.
+at BUILD time so the graph carries the extra CandidateFlows (and gets its own scan_id). With
+`--scan-id`, the scan's OrionScan record must say it finished building with the profile the engine
+needs, or the scan is refused with the command that rebuilds it.
+
+    orion gc --keep 3 [--prefix P] [--dry-run] [--include-unrecorded]   # delete old scan partitions
+    orion reanalyze --scan-id <id> [--engine claude|lm]   # recompute CandidateFlows, no Joern
 
 graph_build / embed / discover / verify pull in the Neo4j driver, the local embedding model, and
 the `claude` CLI subprocess wrapper. Those are imported LAZILY inside `_run_scan`, not at module
@@ -94,10 +98,6 @@ def _run_scan(args: argparse.Namespace) -> int:
     from . import config, discover, embed, graph_build, graphdb, report, verify
     from .monitor import run_logger, tail
 
-    needs_build = not args.scan_id
-    scan_id = args.scan_id or graph_build.scan_id_for(args.repo)
-    run_dir = _run_dir(scan_id)
-
     # The lm sink profile must be in the graph, so it is chosen BEFORE the build and handed to
     # graph_build.build(profile=). select_profile ignores the language today (it only keys on
     # package.json/express), so passing none here mirrors the discovery-profile pick below; build
@@ -106,6 +106,23 @@ def _run_scan(args: argparse.Namespace) -> int:
     if lm_engine and args.repo:
         from .graph import profiles
         lm_profile = profiles.with_lm_sinks(profiles.select_profile(args.repo))
+
+    # --scan-id trusts only a scan whose OrionScan record says it finished building with the profile
+    # this engine needs; anything else (no record, a crashed build, the other profile) is refused here,
+    # before any discovery runs, with the command that rebuilds it.
+    if args.scan_id:
+        from .graph import scans
+        problem = scans.check_usable(args.scan_id, engine="lm" if lm_engine else "claude", repo=args.repo)
+        if problem:
+            print(f"orion scan: {problem}", file=sys.stderr)
+            return 2
+
+    needs_build = not args.scan_id
+    # The lm profile changes the CandidateFlows, so its graph gets its own scan_id (scan_id_for adds
+    # the profile name); the claude path calls scan_id_for exactly as before.
+    scan_id_kwargs = {"profile": lm_profile} if lm_profile is not None else {}
+    scan_id = args.scan_id or graph_build.scan_id_for(args.repo, **scan_id_kwargs)
+    run_dir = _run_dir(scan_id)
 
     # In --watch mode the foreground `tail` is the one rendering progress (reading the same
     # JSONL), so the background pipeline's own logger stays quiet to avoid printing every event
@@ -148,10 +165,6 @@ def _run_scan(args: argparse.Namespace) -> int:
         on_event(_event("build", "done", detail=f"using existing scan_id {scan_id}"))
         if args.repo:
             _index_semantic()   # --scan-id path: read spans from the already-persisted graph
-        if lm_engine:
-            on_event(_event("discover", "warn",
-                            detail=f"--scan-id: existing graph {scan_id} used as-is (built without the lm "
-                                   "sink profile; rebuild with `orion scan <repo> --engine lm` to add its flows)"))
 
     # Best-effort: ensure the GLOBAL exploit-reference corpus is indexed (once) so the verifier's
     # exploit_search tool works. Builds ONLY if the metadata file is present locally -- never
@@ -309,6 +322,22 @@ def _build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--model", dest="lm_model", metavar="PATH",
                       help="path to the Orion-LM model (engine=lm)")
 
+    re_ = sub.add_parser("reanalyze",
+                         help="recompute a scan's CandidateFlows from the graph in Neo4j (no Joern)")
+    re_.add_argument("--scan-id", dest="scan_id", required=True)
+    re_.add_argument("--engine", choices=["claude", "lm"], default=None,
+                     help="must match the profile the scan was built with (default: the recorded one)")
+
+    gc = sub.add_parser("gc", help="delete old scan partitions, keeping the N newest recorded scans")
+    gc.add_argument("--keep", type=int, required=True, metavar="N",
+                    help="recorded scans to keep (newest first); at least 1")
+    gc.add_argument("--prefix", default="", help="only consider scan_ids starting with this")
+    gc.add_argument("--dry-run", dest="dry_run", action="store_true",
+                    help="list what would be deleted, delete nothing")
+    gc.add_argument("--include-unrecorded", dest="include_unrecorded", action="store_true",
+                    help="also delete scans with no OrionScan record (built before records existed); "
+                         "refused until a --dry-run --include-unrecorded has listed them")
+
     idx = sub.add_parser("index-exploits",
                          help="build/refresh the global Metasploit exploit-reference corpus (one-time)")
     idx.add_argument("--refresh", action="store_true",
@@ -323,6 +352,49 @@ def main(argv: list[str] | None = None) -> int:
         return _run_scan(args)
     if args.cmd == "index-exploits":
         return _run_index_exploits(args)
+    if args.cmd == "gc":
+        return _run_gc(args)
+    if args.cmd == "reanalyze":
+        return _run_reanalyze(args)
+    return 0
+
+
+def _run_reanalyze(args: argparse.Namespace) -> int:
+    """`orion reanalyze`: rebuild one scan's CandidateFlows from Neo4j (see graph/reanalyze.py)."""
+    from .graph import reanalyze
+    try:
+        out = reanalyze.reanalyze(args.scan_id, args.engine)
+    except reanalyze.ReanalyzeRefused as exc:
+        print(f"orion reanalyze: {exc}", file=sys.stderr)
+        return 2
+    pf = out["pathfind"]
+    print(f"reanalyzed {out['scan_id']} (profile {out['profile']}): {out['removed']} CandidateFlows removed, "
+          f"{out['written']} written ({pf['sources']} sources, {pf['sinks']} sink hits)")
+    return 0
+
+
+def _run_gc(args: argparse.Namespace) -> int:
+    """`orion gc`: delete scan partitions beyond the --keep newest recorded ones (see scans.gc)."""
+    from .graph import scans
+    try:
+        out = scans.gc(keep=args.keep, prefix=args.prefix, dry_run=args.dry_run,
+                       include_unrecorded=args.include_unrecorded)
+    except scans.GcRefused as exc:
+        print(f"orion gc: {exc}", file=sys.stderr)
+        return 2
+    verb = "would delete" if args.dry_run else "deleted"
+    for sid in out["kept"]:
+        print(f"kept          {sid}")
+    for row in out["deleted"]:
+        removed = row.get("removed")
+        what = (", ".join(f"{k} {v}" for k, v in removed.items() if v) or "nothing") if removed else ""
+        print(f"{verb:<13} {row['scan_id']} ({row['status'] or 'unrecorded'}){': ' + what if what else ''}")
+    if out["unrecorded"] and not args.include_unrecorded:
+        print(f"{len(out['unrecorded'])} unrecorded scan(s) not touched; list them with "
+              "--dry-run --include-unrecorded")
+    elif args.include_unrecorded and args.dry_run:
+        print(f"{len(out['unrecorded'])} unrecorded scan(s) listed in {scans.UNRECORDED_PLAN}; "
+              "run again without --dry-run to delete them")
     return 0
 
 

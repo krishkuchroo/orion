@@ -17,6 +17,8 @@ import re
 from neo4j import READ_ACCESS, GraphDatabase, Query
 
 from . import config
+from .graph import scans
+from .graph.schema import NODE_KEY
 
 _WRITE = re.compile(r"\b(CREATE|MERGE|DELETE|SET|REMOVE|DROP|DETACH)\b", re.IGNORECASE)
 # Cypher string literals ('...' or "..."), escaped-quote aware.
@@ -97,31 +99,33 @@ class GraphDB:
             return [r["p"] for r in rows]
 
     def node_count(self, scan_id: str) -> int:
-        """Total nodes persisted for this scan. Used to size the discovery timeout to graph size
-        (see config.discover_timeout). Returns 0 for an unknown/empty scan rather than raising."""
+        """Total nodes persisted for this scan: the graph (NODE_KEY labels) plus its semantic-index
+        Chunks -- the same set the old label-less count saw, minus the scan's OrionScan record. Used
+        to size the discovery timeout to graph size (see config.discover_timeout). Returns 0 for an
+        unknown/empty scan rather than raising."""
         with self._driver.session(database=config.NEO4J_DATABASE) as s:
-            rec = s.run(
-                "MATCH (n {scan_id:$scan_id}) RETURN count(n) AS c", scan_id=scan_id
-            ).single()
-            return int(rec["c"]) if rec else 0
+            return sum(scans.count_scan(s, scan_id, (*NODE_KEY, "Chunk")).values())
 
-    def clear_scan(self, scan_id: str) -> None:
-        """Single-scan lifecycle: remove everything for this scan before a reload (idempotent).
+    def clear_scan(self, scan_id: str) -> dict[str, int]:
+        """Single-scan lifecycle: remove everything for this scan -- every SCAN_LABELS label, incl. its
+        semantic Chunks and its OrionScan record (unlike persist._clear, which keeps both) -- in
+        batched per-label transactions. Idempotent; returns {label: nodes deleted}.
 
         Not agent-reachable — agents go through `run_cypher`, which blocks writes. The harness
         calls this directly at the start of a build so each scan is self-contained.
         """
-        with self._driver.session(database=config.NEO4J_DATABASE) as s:
-            s.run("MATCH (n {scan_id:$scan_id}) DETACH DELETE n", scan_id=scan_id)
+        return scans.delete_scan(self._driver, scan_id, scans.SCAN_LABELS)
 
     def schema(self) -> dict:
         """Node labels/properties and relationship types/properties, via Neo4j's built-in
         `db.schema.*` procedures (no APOC — Orion's compose stack doesn't install it). This is
         Orion's own frozen CPG vocabulary (schema.py's NODE_KEY set), not the target repo's
         structure, so the shape is identical regardless of which repo was scanned; unlike
-        run_cypher/semantic_search it is intentionally not scan_id-scoped."""
+        run_cypher/semantic_search it is intentionally not scan_id-scoped. The :OrionScan
+        bookkeeping record (graph/scans.py) is not part of that vocabulary and is left out."""
         with self._driver.session(database=config.NEO4J_DATABASE) as s:
-            node_properties = [dict(r) for r in s.run("CALL db.schema.nodeTypeProperties()")]
+            node_properties = [dict(r) for r in s.run("CALL db.schema.nodeTypeProperties()")
+                               if scans.RECORD not in r["nodeLabels"]]
             relationship_properties = [dict(r) for r in s.run("CALL db.schema.relTypeProperties()")]
             return {
                 "node_properties": node_properties,
