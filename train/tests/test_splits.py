@@ -54,3 +54,38 @@ def test_raw_spellings_of_one_canonical_repo_land_in_one_split():
     for seed in range(20):              # whichever split the repo lands in, all of its pairs go there
         a = splits.assign(pairs, seed=seed)
         assert len({a[f"H{i}"] for i in range(12)}) == 1, seed
+
+
+def test_extend_keeps_every_frozen_pair_and_follows_each_repos_split(tmp_path):
+    old = [{"id": f"P{i}", "repo": f"o/r{i}", "source": "openssf" if i < 5 else "osv"} for i in range(40)]
+    path = tmp_path / "splits.json"
+    frozen = splits.assign(old, seed=0)
+    splits.write(str(path), frozen, seed=0)
+    dev_repo = next(p["repo"] for p in old if frozen[p["id"]] == "dev")
+    gone = old[-1]["id"]
+    new = [p for p in old if p["id"] != gone] + \
+          [{"id": "N-same", "repo": dev_repo.upper(), "source": "morefixes"}] + \
+          [{"id": f"N{i}", "repo": f"o/new{i}", "source": "morefixes"} for i in range(20)]
+    a = splits.extend(str(path), old, new, note="test")
+    assert all(a[p["id"]] == frozen[p["id"]] for p in old if p["id"] != gone)   # nothing frozen moves
+    assert gone not in a and a["N-same"] == "dev"
+    added = [a[f"N{i}"] for i in range(20)]
+    assert added.count("dev") == 3 and "oldcve" not in added                       # 15% of the 20 new repos
+    data = json.loads(path.read_text())
+    assert data["extensions"][-1]["note"] == "test" and data["extensions"][-1]["removed"] == [gone]
+    assert data["extensions"][-1]["added"] == 21
+    assert splits.load(str(path), new) == a
+    with pytest.raises(ValueError):
+        splits.extend(str(path), old, new, note="again")      # old_pairs no longer match the frozen set
+
+
+def test_extend_refuses_a_frozen_pair_whose_repo_now_maps_to_another_split(tmp_path):
+    old = [{"id": f"P{i}", "repo": f"o/r{i}", "source": "osv"} for i in range(40)]
+    path = tmp_path / "splits.json"
+    frozen = splits.assign(old, seed=0)
+    splits.write(str(path), frozen, seed=0)
+    dev_id = next(i for i, s in frozen.items() if s == "dev")
+    train_repo = next(p["repo"] for p in old if frozen[p["id"]] == "train")
+    moved = [dict(p, repo=train_repo) if p["id"] == dev_id else p for p in old]
+    with pytest.raises(ValueError):
+        splits.extend(str(path), old, moved, note="x")
