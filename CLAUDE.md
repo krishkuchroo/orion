@@ -103,6 +103,11 @@ CVEs (vulnerable AND patched commits) + OWASP Benchmark as the false-alarm set.
     be re-split), Stage 1 pilot + full run, Stage 2 builds (need graph-hardening merged), real
     bake-off, running `train/unsloth_lora.ipynb`, and Krish's system prompt (must say "flag the fix
     site" and cover code-only cases with no path) + `train/templates/queries.json`.
+  - **Pairs/splits (2026-10-20):** MoreFixes added (advisory-linked fixes only; Prospector links
+    tagged `heuristic_fix_link`, dropped by default) and every repo name canonicalised via GitHub
+    (leak set too; gone repos dropped as `repo_missing`). 4,850 pairs; the frozen split was
+    EXTENDED with `splits.extend` (no frozen pair moved; 43 left): train 4,120 · dev 702 · oldcve
+    28. Details: `docs/notes/orion-lm-pairs.md` "Current build (2026-10-20)".
   - Open decision: `read_code` is offered at runtime but no training row uses it — keep it in the
     templates or drop it from the tool set. Rounds skipped until templates exist.
 - **Status (2026-10-18):** design approved; research + codebase exploration folded in (Appendix A has

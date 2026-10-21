@@ -5,6 +5,233 @@ comes from actually running `train/mine.py build` on the data listed here. Nothi
 estimated or backfilled; a value that could not be obtained is `null` and is counted under a
 "missing" reason. The OSV exports were downloaded 2026-10-18.
 
+## Current build (2026-10-20): MoreFixes added, repos canonicalised, split extended
+
+This section supersedes the 2026-10-18 counts further down (kept as history). All numbers are
+from `train/mine.py build` on 2026-10-20; the full regenerated tables are at the end of this
+section.
+
+- **4,850 pairs** at ≤10 files (5,065 at ≤20, 5,183 any) from **2,862 repos**: JS/TS 2,296,
+  Java 1,823, Python 731; dataflow 2,203, other 2,376, unknown 271. Latest advisory 2026-05-29,
+  latest fix commit 2026-05-28.
+- **MoreFixes adds 863 pairs** that no other source has (JS 530, Python 248, Java 85; dataflow
+  439, other 411, unknown 13; 2021–2026 advisories mostly). It also confirms 2,234 existing pairs
+  (listed in their `sources`), and its CWEs/dates are merged into them: 26 existing pairs changed
+  `cwe_class` (17 other→dataflow) and 928 took an earlier real advisory date.
+- **MoreFixes handling** (`sources.morefixes`): the pg_dump's COPY blocks are split by hand,
+  never loaded into Postgres. One row per (CVE, repo). A pair uses the commits its NVD/GHSA record
+  links (score 1337, `fix_link = "advisory"`). If it has none, the Prospector-found commits
+  scoring ≥65 are used and the row is tagged `heuristic_fix_link` — **dropped by default**
+  (new reason `heuristic_fix_link`; Prospector precision on implicit fixes is ~73% per
+  arXiv 2506.09702). Allowing them would add 570 pairs. Commits below 65 never become rows.
+  Language comes from file extensions only: the dump's `programming_language` is a guesslang
+  model guess and is ignored. MoreFixes ranks last in `SOURCE_PRIORITY`, so it never displaces
+  an existing survivor.
+- **Repo names are now canonical everywhere** (`enrich_gh` `repo` lookups, `apply_repos`): dump
+  rows (CVEfixes, CrossVul, MoreFixes) carry repo names from mining time, so a renamed repo could
+  slip past the leak check and split as two repos. 3,741 repo names were resolved on GitHub
+  (3,622 ok, 119 gone). The leak set now holds every leak repo's raw AND current name (1,619 →
+  1,659 names), and a row whose repo GitHub reports gone is dropped as `repo_missing` (Stage 1
+  clones from GitHub, so it could never be built).
+- **Frozen split extended, not re-split** (`splits.extend`): every one of the 3,987 surviving
+  frozen pairs kept its split (0 moved). 43 frozen pairs left the pair set (35 train, 8 dev):
+  23 are in repos only MoreFixes names in a post-cutoff advisory, 13 are renamed repos the old
+  raw-name leak check missed (e.g. jeecgboot, misp, etherpad-lite), and 7 are in repos deleted
+  from GitHub. 18 frozen pairs now carry their repo's current name (same split). The 863 new pairs
+  went to their repo's existing split, or (444 new repos) were split by `assign` with seed 0:
+  750 train, 113 dev, 0 oldcve. Result: **train 4,120 · dev 702 · oldcve 28**; no repo is in more
+  than one split; dev share 14.5% (was 14.8%). The extension is logged under `extensions` in
+  `train/data/splits.json`.
+- **Checks on the result:** no CVE/GHSA alias shared by two pairs, no (repo, fix commit) repeated,
+  no full SHA in two repos, no short-SHA-only pair; every row has the shared core fields with the
+  same types; MoreFixes rows add only `fix_link`, `fix_score`, `heuristic_fix_link`.
+- **Backups:** the frozen 2026-10-19 pairs/dropped/splits and the old `mined/` outputs are in
+  `~/Documents/OrionLutherLeo/orion-lm-research/raw/mined/pre-morefixes-2026-10-19/`.
+
+| source | official location | version | downloaded | status |
+|---|---|---|---|---|
+| MoreFixes | zenodo.org/records/20776007 `dump-2026-06-20.sql.gz` (CC BY 4.0; PROMISE 2024) | dump of 2026-06-20 (CVEs to 2026-06-02) | 3,472,298,400 B, md5 `bdff6120f1e65626c77d42656162316e` (matches Zenodo) | used (advisory-linked fix commits only by default). The 3 GB patch-files zip was not needed. |
+
+#### Regenerated tables (2026-10-20)
+
+#### Funnel per source (rows surviving each step)
+
+| source | raw | source licensed for training | labels not LLM-assisted | fix link named by the advisory | has GitHub fix link | language JS/TS, Python, Java | advisory < cutoff | not a post-cutoff repo/package | fix commit found, < cutoff, touches language | after dedupe | files ≤10 | files ≤20 | files any |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| crossvul | 5203 | 5203 | 5203 | 5203 | 5199 | 738 | 738 | 512 | 496 | 43 | 41 | 41 | 43 |
+| cvefixes | 5421 | 5421 | 5421 | 5421 | 5408 | 787 | 787 | 561 | 554 | 166 | 158 | 162 | 166 |
+| cwe-bench-java | 213 | 213 | 213 | 213 | 205 | 205 | 205 | 124 | 114 | 112 | 104 | 110 | 112 |
+| javavulbench | 1736 | 1736 | 1736 | 1736 | 1736 | 1736 | 1736 | 1105 | 1105 | 188 | 174 | 188 | 188 |
+| morefixes | 42933 | 42933 | 42933 | 26691 | 26667 | 6170 | 6149 | 3500 | 3480 | 912 | 863 | 898 | 912 |
+| openssf | 223 | 223 | 223 | 223 | 223 | 223 | 222 | 189 | 181 | 175 | 171 | 174 | 175 |
+| osv-maven | 7077 | 7077 | 7077 | 7077 | 3654 | 3654 | 3333 | 1942 | 1542 | 1335 | 1224 | 1293 | 1335 |
+| osv-npm | 7447 | 7447 | 7447 | 7447 | 4335 | 4335 | 3375 | 1868 | 1658 | 1211 | 1122 | 1178 | 1211 |
+| osv-pypi | 13941 | 13941 | 13941 | 13941 | 8972 | 8972 | 5594 | 887 | 702 | 414 | 396 | 405 | 414 |
+| pyvul | 1155 | 1155 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| repopairbench | 100 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| sap-kb | 1297 | 1297 | 1297 | 1297 | 1166 | 850 | 848 | 583 | 562 | 208 | 192 | 202 | 208 |
+| secbench-js | 600 | 600 | 600 | 600 | 218 | 218 | 181 | 170 | 159 | 72 | 68 | 70 | 72 |
+| vul4j | 129 | 129 | 129 | 129 | 127 | 127 | 74 | 57 | 56 | 51 | 51 | 51 | 51 |
+| vulcan | 957 | 957 | 957 | 957 | 474 | 474 | 464 | 403 | 366 | 296 | 286 | 293 | 296 |
+| **total** | 88432 | 88332 | 87177 | 70935 | 58384 | 28489 | 23706 | 11901 | 10975 | 5183 | 4850 | 5065 | 5183 |
+
+#### Funnel by cwe_class (steps by the row's own CWEs; dedupe/size columns by the merged survivor)
+
+| cwe_class | raw | source licensed for training | labels not LLM-assisted | fix link named by the advisory | has GitHub fix link | language JS/TS, Python, Java | advisory < cutoff | not a post-cutoff repo/package | fix commit found, < cutoff, touches language | after dedupe → files ≤10 | files ≤20 | files any |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| dataflow | 24574 | 24526 | 24228 | 21017 | 17057 | 9090 | 8301 | 4913 | 4510 | 2203 | 2296 | 2353 |
+| other | 51632 | 51580 | 50723 | 38582 | 33418 | 13100 | 11725 | 5588 | 5190 | 2376 | 2483 | 2536 |
+| unknown | 12226 | 12226 | 12226 | 11336 | 7909 | 6299 | 3680 | 1400 | 1275 | 271 | 286 | 294 |
+
+#### Repos losing the most rows to the leak check (post_cutoff_repo)
+
+| repo | rows dropped |
+|---|---|
+| tensorflow/tensorflow | 1238 |
+| openclaw/openclaw | 475 |
+| xwiki/xwiki-platform | 384 |
+| jenkinsci/jenkins | 378 |
+| apache/tomcat | 349 |
+| apache/airflow | 272 |
+| django/django | 209 |
+| fasterxml/jackson-databind | 193 |
+| keycloak/keycloak | 178 |
+| spring-projects/spring-framework | 149 |
+| parse-community/parse-server | 130 |
+| ansible/ansible | 129 |
+| ikus060/rdiffweb | 124 |
+| mlflow/mlflow | 123 |
+| bcgit/bc-java | 110 |
+
+#### Kept pairs by cwe_class
+
+| cwe_class | files ≤10 | files ≤20 | files any |
+|---|---|---|---|
+| dataflow | 2203 | 2296 | 2353 |
+| other | 2376 | 2483 | 2536 |
+| unknown | 271 | 286 | 294 |
+
+#### Kept pairs by language
+
+| language | files ≤10 | files ≤20 | files any |
+|---|---|---|---|
+| js | 2296 | 2391 | 2442 |
+| py | 731 | 745 | 758 |
+| java | 1823 | 1929 | 1983 |
+
+#### Distinct repos in kept pairs
+
+| files ≤10 | files ≤20 | files any |
+|---|---|---|
+| 2862 | 2944 | 2992 |
+
+#### Drop reasons (≤10-files run)
+
+| reason | rows |
+|---|---|
+| language_unsupported | 20374 |
+| heuristic_fix_link | 16242 |
+| no_fix_commit | 12460 |
+| post_cutoff_repo | 11664 |
+| language_unknown | 9521 |
+| duplicate_alias | 5479 |
+| advisory_after_cutoff | 4678 |
+| llm_assisted_labels | 1155 |
+| no_source_files_in_language | 772 |
+| too_many_files | 327 |
+| duplicate_commit | 313 |
+| post_cutoff_package | 141 |
+| advisory_date_missing | 105 |
+| source_excluded | 100 |
+| non_github_repo | 91 |
+| repo_missing | 79 |
+| fix_pr_unresolved | 52 |
+| commit_missing | 21 |
+| files_unknown | 6 |
+| fix_after_cutoff | 2 |
+
+#### Dedupe
+
+| before | after | duplicate_alias | duplicate_commit |
+|---|---|---|---|
+| 10975 | 5183 | 5479 | 313 |
+
+#### Other-language / unknown-language rows skipped, by source
+
+| source | languages (rows) |
+|---|---|
+| crossvul | c 2122, php 977, mixed 537, unknown 204, rb 159, cpp 119, go 80, cc 54, h 51, pm 32, cs 31, sh 12, cxx 11, pl 11, rs 8, scala 7, jsp 6, m 6, lua 6, swift 6, coffee 6, ex 3, hh 3, groovy 2, erl 2, vue 2, hs 1, pas 1, kt 1, sql 1 |
+| cvefixes | c 2105, php 788, mixed 526, unknown 495, cc 164, cpp 147, rb 136, go 76, h 51, pm 29, cs 29, cxx 11, pl 9, swift 8, scala 7, rs 7, coffee 5, lua 5, sh 5, jsp 5, m 3, hh 3, erl 2, ex 2, kt 1, groovy 1, hs 1 |
+| morefixes | unknown 8671, php 3838, c 3412, mixed 1265, go 1208, rb 593, cpp 424, rs 341, cs 153, h 105, cc 88, pm 62, jsp 42, sh 29, cxx 28, scala 26, swift 23, kt 21, groovy 19, erl 18, m 17, pl 17, vue 16, lua 13, dart 11, coffee 10, ex 8, clj 7, hs 7, pas 6, sql 5, cfm 4, hh 4, hpp 3, tcl 1, svelte 1, ml 1 |
+| sap-kb | unknown 151, php 57, mixed 37, rb 30, cpp 18, go 10, c 8, cs 2, scala 1, coffee 1, m 1 |
+
+#### Leak set
+
+| metric | value |
+|---|---|
+| post_cutoff_repos | 1619 |
+| post_cutoff_repo_names_incl_canonical | 1659 |
+| post_cutoff_packages | 1950 |
+| post_cutoff_advisories | 7249 |
+| malware_only_repos_not_in_leak_set | 23 |
+| post_cutoff_repos_with_pre_cutoff_fix_rows | 949 |
+| rows_dropped_only_because_of_non_fix_link_repo_refs | 851 |
+| post_cutoff_repos_from_fix_links_only | 1074 |
+
+#### Missing values (rows dropped because a value could not be obtained)
+
+| reason | rows |
+|---|---|
+| advisory_date_missing | 105 |
+| repo_missing | 79 |
+| fix_pr_unresolved | 52 |
+| enrich_pending | 0 |
+| commit_missing | 21 |
+| enrich_error | 0 |
+| fix_date_missing | 0 |
+| files_unknown | 6 |
+
+#### LLM-assisted-label rows (PyVul; excluded by default)
+
+| metric | value |
+|---|---|
+| rows | 1155 |
+| sources | {'pyvul': 1155} |
+| extra_pairs_if_allowed_files_le10 | 2 |
+| extra_pairs_if_allowed_files_any | 2 |
+| pairs_if_allowed_files_le10 | 4852 |
+
+#### Heuristic fix links (MoreFixes Prospector matches; excluded by default)
+
+| metric | value |
+|---|---|
+| rows | 16242 |
+| sources | {'morefixes': 16242} |
+| rows_with_dump_data | 15425 |
+| extra_pairs_if_allowed_files_le10 | 570 |
+
+#### Enrichment
+
+```
+{
+ "cache_records": 10459,
+ "cache_statuses": {
+  "ok": 10098,
+  "pr_missing": 7,
+  "commit_missing": 234,
+  "error": 1,
+  "repo_missing": 119
+ },
+ "rows_by_enrich_status": {
+  "pending": 32400,
+  "ok": 55713,
+  "commit_missing": 318,
+  "error": 1
+ },
+ "language_from_fix_files": 985
+}
+```
+
 **Rules applied:**
 - Training pairs are pre-cutoff: advisory published < 2026-05-31 AND fix commit < 2026-05-31.
   Both checks are strict.
@@ -46,7 +273,6 @@ to sqlite. Metadata-only files were fetched wherever a dataset offered them.
 
 | source | location | size | why |
 |---|---|---|---|
-| MoreFixes | zenodo.org/records/20776007 `dump-2026-06-20.sql.gz` (+ `patch-files2026-06-20.zip`) | 3,472,298,400 B (+ 3,000,621,180 B) | Over the 3 GB per-source limit, so the user decides. The dump holds CVEs to 2026-06-02, so it would need date filtering. The patch-file names give (repo, sha) but no CVE, CWE or date, so they are unusable alone. |
 | CVEfixes v1.0.8 | zenodo.org/records/13118970 | 12,708,711,268 B | over the limit (v1.0.0 used instead) |
 | CVEfixes v1.0.7 | zenodo.org/records/7029359 | 3,858,462,238 B | over the limit |
 | ReposVul | Google Drive links in github.com/Eshe0922/ReposVul README | unknown | Excluded on provenance: its "vulnerability untangling module" uses LLMs to pick the fix-related files (README). It could be handled like PyVul (tagged, excluded by default) if wanted. |
@@ -56,7 +282,7 @@ to sqlite. Metadata-only files were fetched wherever a dataset offered them.
 
 Total on disk: 1.4 GB. Free disk stayed above 80 GB.
 
-## Headline (measured, final build 2026-10-18)
+## Headline (2026-10-18 build; superseded by the 2026-10-20 section above)
 
 - **45,499 raw rows** across 14 sources. PyVul is collected but excluded.
 - **4,344 unique pre-cutoff, leak-free pairs** survive every check except the size check. By
