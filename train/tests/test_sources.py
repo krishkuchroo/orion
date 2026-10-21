@@ -404,3 +404,80 @@ def test_pyvul_rows_are_tagged_llm_assisted(tmp_path):
     assert rows["plotly/dash"]["id"] == "GHSA-547x" and rows["plotly/dash"]["cwe"] == ["CWE-79"]
     assert rows["o/r"]["id"] == "CVE-2024-5" and rows["o/r"]["cwe"] == ["CWE-362"]
     assert all(r["llm_assisted_labels"] is True and r["source"] == "pyvul" for r in rows.values())
+
+
+SHA4 = "d" * 40
+
+
+def _copy(table, cols, rows):
+    """One pg_dump COPY block; ``rows`` hold already-escaped COPY text fields."""
+    return "\n".join([f"COPY public.{table} ({', '.join(cols)}) FROM stdin;", *("\t".join(r) for r in rows), "\\.", ""])
+
+
+_PG_DUMP = "\n".join([
+    "-- PostgreSQL database dump",
+    "SET statement_timeout = 0;",
+    "CREATE TABLE public.fixes (\n    cve_id text,\n    hash text\n);",
+    _copy("commits", ["hash", "repo_url", "msg", "author_date", "committer_date"], [
+        [SHA1, "https://github.com/O/R", "second\\tfix\\nline", "2021-03-02 10:00:00+00", "2021-03-03 01:00:00+02"],
+        [SHA2, "https://github.com/O/R", "first", "2021-01-01 10:00:00+00", "2021-01-01 10:00:00+00"],
+        [SHA3, "https://github.com/o/p", "prospector find", "2021-05-01 00:00:00+00", "2021-05-01 00:00:00+00"],
+        [SHA4, "https://github.com/O/R", "unrelated", "2021-02-01 00:00:00+00", "2021-02-01 00:00:00+00"]]),
+    _copy("cve", ["cve_id", "published_date", "description"], [
+        ["CVE-2021-1", "2021-04-05T17:29:00.000", "a\\\\b"], ["CVE-2021-2", "2021-06-01T00:00:00.000", "x"],
+        ["GHSA-aaaa-bbbb-cccc", "2021-07-01T00:00:00.000", "x"]]),
+    _copy("cwe_classification", ["cve_id", "cwe_id"], [["CVE-2021-1", "CWE-89"], ["CVE-2021-2", "NVD-CWE-Other"]]),
+    _copy("file_change", ["file_change_id", "hash", "filename", "old_path", "new_path", "diff", "programming_language"], [
+        ["1", SHA2, "a.py", "src/a.py", "src/a.py", "@@ -1 +1 @@\\n-x\\n+y", "Ruby"],   # a wrong guess is ignored
+        ["2", SHA2, "test_a.py", "tests/test_a.py", "tests/test_a.py", "\\N", "Python"],
+        ["3", SHA1, "b.py", "\\N", "src/b.py", "+z", "\\N"],
+        ["4", SHA3, "c.js", "lib/c.js", "lib/c.js", "+w", "JavaScript"]]),
+    _copy("fixes", ["cve_id", "hash", "repo_url", "rel_type", "score", "extraction_status"], [
+        ["CVE-2021-1", SHA1, "https://github.com/O/R", "direct", "1337", "COMPLETED"],
+        ["CVE-2021-1", SHA2, "https://github.com/O/R", "direct", "1337", "COMPLETED"],
+        ["CVE-2021-1", SHA4, "https://github.com/O/R", "prospector", "200", "COMPLETED"],   # direct links win
+        ["CVE-2021-2", SHA3, "https://github.com/o/p", "prospector", "120", "COMPLETED"],
+        ["CVE-2021-3", SHA3, "https://github.com/o/q", "prospector", "40", "NOT_STARTED"],  # below 65: never a row
+        ["GHSA-aaaa-bbbb-cccc", SHA4, "https://gitlab.com/x/y", "direct", "1337", "COMPLETED"]]),
+    _copy("method_change", ["method_change_id", "file_change_id", "name"], [["9", "1", "f"]]),
+    _copy("repository", ["repo_url", "repo_language"], [["https://github.com/O/R", "Python"]]),
+])
+
+
+def test_copy_field_unescapes_postgres_text_format():
+    assert sources._copy_field("\\N") is None
+    assert sources._copy_field("a\\tb\\nc\\\\d\\101\\x42") == "a\tb\nc\\dAB"
+    assert sources._copy_field("plain") == "plain"
+
+
+def test_morefixes_parses_postgres_copy_dump_without_loading_it(tmp_path):
+    f = tmp_path / "dump.sql.gz"
+    with gzip.open(f, "wt") as g:
+        g.write(_PG_DUMP)
+    st: dict = {}
+    rows = {r["id"]: r for r in sources.morefixes(str(f), stats=st)}
+    assert set(rows) == {"CVE-2021-1", "CVE-2021-2", "GHSA-aaaa-bbbb-cccc"}
+    a = rows["CVE-2021-1"]
+    assert a["source"] == "morefixes" and a["repo"] == "o/r"
+    assert a["fix_shas"] == [SHA2, SHA1] and a["fix_sha"] == SHA2           # advisory links only, earliest first
+    assert a["fix_link"] == "advisory" and not a.get("heuristic_fix_link")
+    assert a["advisory_published"] == "2021-04-05" and a["cwe"] == ["CWE-89"] and a["cwe_class"] == "dataflow"
+    assert a["language"] == "py" and a["enrich_status"] == "ok" and a["enrich_basis"] == "morefixes"
+    assert a["language_basis"] == "fix_file_extensions"
+    assert a["fix_commit_date"] == "2021-01-01" and a["n_files"] == 1 and a["n_files_total"] == 2
+    assert a["n_files_lang"] == 1 and a["fix_files"] == ["src/a.py"]
+    b = rows["CVE-2021-2"]
+    assert b["heuristic_fix_link"] is True and b["fix_link"] == "prospector" and b["fix_score"] == 120
+    assert b["fix_sha"] == SHA3 and b["language"] == "js" and b["cwe"] == [] and b["cwe_class"] == "unknown"
+    g = rows["GHSA-aaaa-bbbb-cccc"]
+    assert g["ghsa"] == "GHSA-aaaa-bbbb-cccc" and g["cve"] is None
+    assert g["repo"] is None and g["repo_url"] == "https://gitlab.com/x/y"
+    assert st["fix_links_below_min_score"] == 1 and st["groups_heuristic_only"] == 1
+
+
+def test_iter_copy_dump_strips_crlf_line_ends():
+    dump = _copy("cwe_classification", ["cve_id", "cwe_id"], [["CVE-1", "CWE-79"], ["CVE-2", "a\\rb"]])
+    raw = dump.replace("\n", "\r\n").encode().splitlines(keepends=True)
+    got = list(sources.iter_copy_dump(raw, {"cwe_classification": ("cve_id", "cwe_id")}))
+    assert got == [("cwe_classification", {"cve_id": "CVE-1", "cwe_id": "CWE-79"}),
+                   ("cwe_classification", {"cve_id": "CVE-2", "cwe_id": "a\rb"})]

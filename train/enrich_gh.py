@@ -9,6 +9,9 @@ whose record is final (``ok`` / ``commit_missing`` / ``pr_missing``) and retries
   404/422 => ``commit_missing``; 410/451 (repo gone/blocked) => ``commit_missing`` too.
 * pull request (advisories that only link a PR): ``GET /repos/{repo}/pulls/{n}`` ->
   merged + merge_commit_sha; the merge commit is then fetched like any other commit.
+* repo (a name no fetched commit already resolves): ``GET /repos/{repo}`` -> canonical repo (renamed
+  repos redirect). 404/410/451 => ``repo_missing``. Used for rows whose dates and files come from a
+  dump (CVEfixes, CrossVul, MoreFixes) and for the leak set, so a renamed repo is one repo everywhere.
 
 Rate limits: after every response ``X-RateLimit-Remaining``/``-Reset`` are read; when the quota
 falls to ``reserve`` the client sleeps until the reset. A 403/429 rate-limit answer sleeps until the
@@ -18,7 +21,7 @@ reset (or ``Retry-After``) and retries. 5xx / network errors back off and retry,
 
 Run (resumable; safe to Ctrl-C and rerun)::
 
-    ./.venv/bin/python -I train/enrich_gh.py --candidates <candidates.json> [--cache <file>] [--limit N]
+    ./.venv/bin/python -I train/enrich_gh.py --candidates <candidates.json> [--repos <repos.json>] [--cache <file>] [--limit N]
 """
 from __future__ import annotations
 
@@ -38,7 +41,7 @@ from train.sources import SUPPORTED_LANGUAGES, _date, _is_test, file_lang, langu
 
 API = "https://api.github.com"
 DEFAULT_CACHE = os.path.expanduser("~/Documents/OrionLutherLeo/orion-lm-research/raw/gh-cache/github.jsonl")
-FINAL = {"ok", "commit_missing", "pr_missing"}
+FINAL = {"ok", "commit_missing", "pr_missing", "repo_missing"}
 
 
 def commit_key(repo: str, sha: str) -> str:
@@ -47,6 +50,10 @@ def commit_key(repo: str, sha: str) -> str:
 
 def pr_key(repo: str, number: int) -> str:
     return f"pr:{repo}#{number}"
+
+
+def repo_key(repo: str) -> str:
+    return f"repo:{repo}"
 
 
 def _token() -> str:
@@ -150,6 +157,18 @@ def fetch_pr(client: GitHub, repo: str, number: int) -> dict:
     return rec
 
 
+def fetch_repo(client: GitHub, repo: str) -> dict:
+    status, _, data = client.request(f"/repos/{repo}")
+    rec = {"key": repo_key(repo), "kind": "repo", "repo": repo, "http_status": status, "fetched_at": _now()}
+    if status == 200 and isinstance(data, dict) and data.get("full_name"):
+        rec.update(status="ok", repo_canonical=data["full_name"].lower())
+    elif status in (404, 410, 451):
+        rec["status"] = "repo_missing"
+    else:
+        rec["status"] = "error"
+    return rec
+
+
 class Cache:
     def __init__(self, path: str):
         self.path = path
@@ -212,27 +231,49 @@ def todo(rows, cache: Cache) -> tuple[list[tuple], list[tuple]]:
     return prs, commits
 
 
-def run(rows, cache_path: str = DEFAULT_CACHE, *, get=None, sleep=time.sleep, clock=time.time, log=print,
+def canonical_repos(cache) -> tuple[dict[str, str], set[str]]:
+    """raw repo name -> canonical (current, lowercased) name from cached commit and repo lookups, and the
+    raw names GitHub reports gone (never resolved by any record)."""
+    records = cache.records if isinstance(cache, Cache) else cache
+    canon, gone = {}, set()
+    for rec in records.values():
+        if not rec.get("repo"):
+            continue
+        if rec.get("kind") in ("commit", "repo") and rec.get("status") == "ok" and rec.get("repo_canonical"):
+            canon.setdefault(rec["repo"], rec["repo_canonical"])
+        elif rec.get("kind") == "repo" and rec.get("status") == "repo_missing":
+            gone.add(rec["repo"])
+    return canon, gone - set(canon)
+
+
+def repo_todo(repos, cache: Cache) -> list[tuple]:
+    known, _ = canonical_repos(cache)
+    return [("repo", r, None) for r in dict.fromkeys(repos) if r and r not in known and not cache.done(repo_key(r))]
+
+
+def run(rows, cache_path: str = DEFAULT_CACHE, *, repos=(), get=None, sleep=time.sleep, clock=time.time, log=print,
         limit: int | None = None, reserve: int = 200) -> dict:
     cache = Cache(cache_path)
     client = GitHub(get or urllib_get(_token()), sleep=sleep, clock=clock, reserve=reserve, log=log)
     fetched, counts = 0, {}
-    for phase in ("pr", "commit"):
+    for phase in ("pr", "commit", "repo"):         # repos last: a fetched commit already names its repo
         prs, commits = todo(rows, cache)
-        items = prs if phase == "pr" else commits
+        items = prs if phase == "pr" else commits if phase == "commit" else repo_todo(repos, cache)
         total = len(items)
         log(f"[enrich] {phase}: {total} to fetch ({len(cache.records)} cached records)")
         for i, (_, repo, ident) in enumerate(items, 1):
             if limit is not None and fetched >= limit:
                 break
-            rec = fetch_pr(client, repo, ident) if phase == "pr" else fetch_commit(client, repo, ident)
+            rec = fetch_pr(client, repo, ident) if phase == "pr" else fetch_commit(client, repo, ident) \
+                if phase == "commit" else fetch_repo(client, repo)
             cache.add(rec)
             fetched += 1
             counts[rec["status"]] = counts.get(rec["status"], 0) + 1
             if i % 25 == 0 or i == total:
-                log(f"[{i}/{total}] {phase} {repo} {ident} -> {rec['status']} (quota left {client.remaining})")
+                log(f"[{i}/{total}] {phase} {repo} {ident or ''} -> {rec['status']} (quota left {client.remaining})")
     prs, commits = todo(rows, cache)
-    return {"fetched": fetched, "statuses": counts, "pending_prs": len(prs), "pending_commits": len(commits)}
+    return {"fetched": fetched, "statuses": counts, "pending_prs": len(prs), "pending_commits": len(commits),
+            "pending_repos": len(repo_todo(repos, cache))}
 
 
 def _fill_from_files(r: dict, files: list[str], truncated: bool) -> None:
@@ -249,6 +290,22 @@ def _fill_from_files(r: dict, files: list[str], truncated: bool) -> None:
     lang = r.get("language")
     r["n_files_lang"] = sum(1 for f in non_test if file_lang(f) == lang) if lang in SUPPORTED_LANGUAGES else None
     r["fix_files"] = non_test
+
+
+def apply_repos(rows, canon: dict[str, str], gone: set[str]) -> list[dict]:
+    """Copies of ``rows``: a row without a commit-derived canonical repo takes it from ``canon``
+    (``repo_canonical_basis = "github_repo"``); a row whose repo GitHub reports gone gets
+    ``repo_status = "missing"`` (``filters.keep`` drops it: nothing can be cloned)."""
+    out = []
+    for row in rows:
+        r = dict(row)
+        if r.get("repo") and not r.get("repo_canonical"):
+            if r["repo"] in canon:
+                r["repo_canonical"], r["repo_canonical_basis"] = canon[r["repo"]], "github_repo"
+            elif r["repo"] in gone:
+                r["repo_status"] = "missing"
+        out.append(r)
+    return out
 
 
 def apply(rows, cache) -> list[dict]:
@@ -295,13 +352,18 @@ def main(argv=None) -> int:
 
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--candidates", required=True, help="JSON list of rows to enrich (from `train/mine.py collect`)")
+    ap.add_argument("--repos", default=None, help="JSON list of repo names to resolve (from `train/mine.py collect`)")
     ap.add_argument("--cache", default=DEFAULT_CACHE)
     ap.add_argument("--limit", type=int, default=None, help="stop after this many API objects")
     ap.add_argument("--reserve", type=int, default=200, help="leave this much hourly quota unused")
     args = ap.parse_args(argv)
     with open(args.candidates) as f:
         rows = json.load(f)
-    summary = run(rows, args.cache, limit=args.limit, reserve=args.reserve,
+    repos = []
+    if args.repos:
+        with open(args.repos) as f:
+            repos = json.load(f)
+    summary = run(rows, args.cache, repos=repos, limit=args.limit, reserve=args.reserve,
                   log=lambda *a: print(*a, flush=True))
     print(json.dumps(summary), flush=True)
     return 0

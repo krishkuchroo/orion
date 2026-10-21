@@ -19,7 +19,7 @@ def test_funnel_counts_survivors_per_stage_and_size_buckets():
                {"source": "s", "reason": "post_cutoff_repo"}, {"source": "s", "reason": "duplicate_alias:X"}]
     kept = [{"source": "s", "n_files": 3}, {"source": "s", "n_files": 15}, {"source": "s", "n_files": None}]
     f = mine.funnel(Counter({"s": 8}), dropped, kept)["s"]
-    assert f["raw"] == 8 and f["stages"] == [7, 7, 6, 5, 5, 4, 4, 3]
+    assert f["raw"] == 8 and f["stages"] == [7, 7, 7, 6, 5, 5, 4, 4, 3]
     assert (f["files_le10"], f["files_le20"], f["files_any"], f["files_unknown"]) == (1, 2, 3, 1)
 
 

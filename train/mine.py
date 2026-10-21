@@ -2,8 +2,9 @@
 
     # 1. load every downloaded source, build the leak sets, list the commits worth fetching
     ./.venv/bin/python -I train/mine.py collect --raw <RAW> --work <RAW>/mined
-    # 2. fetch fix-commit dates + files from GitHub (resumable; Ctrl-C safe)
-    ./.venv/bin/python -I train/enrich_gh.py --candidates <RAW>/mined/candidates.json
+    # 2. fetch fix-commit dates + files, and canonical names of the remaining repos, from GitHub
+    #    (resumable; Ctrl-C safe)
+    ./.venv/bin/python -I train/enrich_gh.py --candidates <RAW>/mined/candidates.json --repos <RAW>/mined/repos.json
     # 3. apply the cache, filter, write pairs/dropped + measured count tables
     ./.venv/bin/python -I train/mine.py build --raw <RAW> --work <RAW>/mined --out train/data
 
@@ -46,17 +47,20 @@ LOADERS = {
     "javavulbench": ("javavulbench/benchmark.jsonl", lambda p, st: sources.javavulbench(p)),
     "repopairbench": ("repopairbench/repopairbench_100.jsonl", lambda p, st: sources.repopairbench(p)),
     "pyvul": ("pyvul", lambda p, st: sources.pyvul(p)),   # LLM-assisted labels: tagged, dropped by default
+    # Prospector-found fix commits are tagged heuristic_fix_link and dropped by default
+    "morefixes": ("morefixes/dump-2026-06-20.sql.gz", lambda p, st: sources.morefixes(p, stats=st)),
 }
 
 # funnel stages (reason kinds dropped at each step, in check order)
 FUNNEL = (("source licensed for training", {"source_excluded"}),
           ("labels not LLM-assisted", {"llm_assisted_labels"}),
+          ("fix link named by the advisory", {"heuristic_fix_link"}),
           ("has GitHub fix link", {"no_fix_commit", "non_github_repo"}),
           ("language JS/TS, Python, Java", {"language_unknown", "language_unsupported"}),
           ("advisory < cutoff", {"advisory_date_missing", "advisory_after_cutoff"}),
           ("not a post-cutoff repo/package", {"post_cutoff_repo", "post_cutoff_package"}),
           ("fix commit found, < cutoff, touches language",
-           {"fix_pr_unresolved", "enrich_pending", "commit_missing", "enrich_error", "fix_date_missing", "fix_after_cutoff",
+           {"repo_missing", "fix_pr_unresolved", "enrich_pending", "commit_missing", "enrich_error", "fix_date_missing", "fix_after_cutoff",
             "no_source_files_in_language"}),
           ("after dedupe", {"duplicate_alias", "duplicate_commit"}))
 
@@ -114,6 +118,8 @@ def collect(raw: str, work: str, *, cve_cache: str = cve_dates.DEFAULT_CACHE, lo
                                             sorted(v) if isinstance(v, set) else v for k, v in leak.items()})
     _dump(os.path.join(work, "candidates.json"), cand)
     _dump(os.path.join(work, "cve_todo.json"), cve_todo)
+    # every repo the leak check or a surviving row names, so build can compare canonical names
+    _dump(os.path.join(work, "repos.json"), sorted(set(leak["repos"]) | {r["repo"] for r in pre if r.get("repo")}))
     keys = {(r["repo"], r.get("fix_sha") or f"pr{r.get('fix_pr')}") for r in cand}
     stats["_collect"] = {"rows": len(rows), "pass_pre_enrichment_checks": len(pre),
                          "need_github": len(cand), "distinct_github_objects": len(keys),
@@ -169,12 +175,17 @@ def build(raw: str, work: str, out: str, *, cache_path: str = enrich_gh.DEFAULT_
     leak_repos, leak_pkgs = set(leak["repos"]), {tuple(p) for p in leak["packages"]}
     cache = enrich_gh.Cache(cache_path)
     rows = enrich_gh.apply(rows, cache)
+    canon, gone = enrich_gh.canonical_repos(cache)
+    rows = enrich_gh.apply_repos(rows, canon, gone)
+    raw_leak_repos = len(leak_repos)
+    leak_repos |= {canon[r] for r in leak_repos if r in canon}       # a renamed leak repo is caught by either name
     kw = dict(post_cutoff_repos=leak_repos, post_cutoff_packages=leak_pkgs)
     kept10, dropped10 = filters.keep(rows, max_files=10, **kw)
     kept20, _ = filters.keep(rows, max_files=20, **kw)
     kept_any, dropped_any = filters.keep(rows, max_files=None, **kw)
     kept_llm10, _ = filters.keep(rows, max_files=10, allow_llm_assisted=True, **kw)
     kept_llm_any, _ = filters.keep(rows, max_files=None, allow_llm_assisted=True, **kw)
+    kept_heur10, _ = filters.keep(rows, max_files=10, allow_heuristic_fix=True, **kw)
 
     os.makedirs(out, exist_ok=True)
     _dump(os.path.join(out, "pairs.json"), kept10)
@@ -205,9 +216,10 @@ def build(raw: str, work: str, out: str, *, cache_path: str = enrich_gh.DEFAULT_
                     "duplicate_commit": sum(1 for d in dropped_any if d["reason"].startswith("duplicate_commit"))}
     st["multi_source_survivors"] = sum(1 for r in kept_any if len(r.get("sources") or []) > 1)
     st["missing"] = {k: st["reasons_max10"].get(k, 0) for k in
-                     ("advisory_date_missing", "fix_pr_unresolved", "enrich_pending", "commit_missing", "enrich_error",
+                     ("advisory_date_missing", "repo_missing", "fix_pr_unresolved", "enrich_pending", "commit_missing", "enrich_error",
                       "fix_date_missing", "files_unknown")}
-    st["leak"] = {"post_cutoff_repos": len(leak_repos), "post_cutoff_packages": len(leak_pkgs),
+    st["leak"] = {"post_cutoff_repos": raw_leak_repos, "post_cutoff_repo_names_incl_canonical": len(leak_repos),
+                  "post_cutoff_packages": len(leak_pkgs),
                   "post_cutoff_advisories": leak.get("n_advisories"),
                   "malware_only_repos_not_in_leak_set": len(leak.get("malware_repos") or []),
                   "post_cutoff_repos_with_pre_cutoff_fix_rows":
@@ -222,6 +234,10 @@ def build(raw: str, work: str, out: str, *, cache_path: str = enrich_gh.DEFAULT_
                           "extra_pairs_if_allowed_files_le10": len(kept_llm10) - len(kept10),
                           "extra_pairs_if_allowed_files_any": len(kept_llm_any) - len(kept_any),
                           "pairs_if_allowed_files_le10": len(kept_llm10)}
+    heur_rows = [r for r in rows if r.get("heuristic_fix_link")]
+    st["heuristic_fix_links"] = {"rows": len(heur_rows), "sources": dict(Counter(r["source"] for r in heur_rows)),
+                                 "rows_with_dump_data": sum(1 for r in heur_rows if r.get("enrich_status") == "ok"),
+                                 "extra_pairs_if_allowed_files_le10": len(kept_heur10) - len(kept10)}
     fix_links = set(leak.get("repos_fix_links") or [])
     st["leak"]["rows_dropped_only_because_of_non_fix_link_repo_refs"] = sum(
         1 for d in dropped_any if d["reason"] == "post_cutoff_repo" and d["repo"] not in fix_links
@@ -299,6 +315,9 @@ def tables(st: dict) -> str:
               _table(["reason", "rows"], list(st["missing"].items())), ""]
     parts += ["### LLM-assisted-label rows (PyVul; excluded by default)\n",
               _table(["metric", "value"], list(st["llm_assisted"].items())), ""]
+    if st.get("heuristic_fix_links"):
+        parts += ["### Heuristic fix links (MoreFixes Prospector matches; excluded by default)\n",
+                  _table(["metric", "value"], list(st["heuristic_fix_links"].items())), ""]
     parts += ["### Enrichment\n", "```\n" + json.dumps(st["enrichment"], indent=1) + "\n```", ""]
     return "\n".join(parts)
 

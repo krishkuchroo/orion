@@ -182,3 +182,27 @@ def test_excluded_source_is_dropped_before_dedupe_and_duplicate_from_other_sourc
     assert filters.reason_kind(r["RPB1"]) == "source_excluded"
     assert [p["id"] for p in kept] == ["GHSA-x"]
     assert kept[0]["sources"] and all("repopairbench" not in str(t) for t in kept[0]["sources"])
+
+
+def test_heuristic_fix_links_are_dropped_unless_explicitly_allowed():
+    pairs = [row("CVE-11", source="morefixes", heuristic_fix_link=True), row("CVE-12", source="morefixes")]
+    kept, dropped = filters.keep(pairs, post_cutoff_repos=set())
+    assert [p["id"] for p in kept] == ["CVE-12"] and reasons(dropped) == {"CVE-11": "heuristic_fix_link"}
+    kept, _ = filters.keep(pairs, post_cutoff_repos=set(), allow_heuristic_fix=True)
+    assert [p["id"] for p in kept] == ["CVE-11", "CVE-12"]
+
+
+def test_lowest_priority_source_never_displaces_an_existing_survivor():
+    osv = row("GHSA-y", source="osv-npm", aliases=["CVE-2020-2", "GHSA-y"], fix_sha="a" * 40)
+    mf = row("CVE-2020-2", source="morefixes", aliases=["CVE-2020-2"], fix_sha="a" * 40, cwe=["CWE-22"])
+    kept, dropped = filters.keep([mf, osv], post_cutoff_repos=set())
+    assert [p["id"] for p in kept] == ["GHSA-y"] and kept[0]["source"] == "osv-npm"
+    assert "morefixes:CVE-2020-2" in kept[0]["sources"]
+    assert reasons(dropped) == {"CVE-2020-2": "duplicate_alias:GHSA-y"}
+
+
+def test_rows_whose_repo_is_gone_are_dropped_and_canonical_names_hit_the_leak_set():
+    pairs = [row("CVE-13", repo_status="missing"), row("CVE-14", repo="o/old", repo_canonical="o/leaky"), row("CVE-15")]
+    kept, dropped = filters.keep(pairs, post_cutoff_repos={"o/leaky"})
+    assert [p["id"] for p in kept] == ["CVE-15"]
+    assert reasons(dropped) == {"CVE-13": "repo_missing", "CVE-14": "post_cutoff_repo"}
