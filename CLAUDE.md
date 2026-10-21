@@ -80,6 +80,61 @@ Rules for working on it:
   `eval/open-weight-study`, cut from local `Dante`). `origin` (lutherleo/orion) was unreachable on
   2026-09-17; work and push to `krish`, not `origin`.
 
+## Orion-LM track (branch `eval/orion-lm`, started 2026-10-18)
+
+Design: `docs/superpowers/specs/2026-10-18-orion-lm-design.md` — **APPROVED 2026-10-18.** Plan:
+`docs/superpowers/plans/2026-10-18-orion-lm.md` (rev 2). **Hybrid plan code built** (branch
+`train/d2-d3`: D2/D3 + H1–H11, each task reviewed; whole-branch review fixes landed and re-checked
+clean); earlier A1–A6, B1–B6, C1, E1–E3 done and reviewed. Status, rulings and Krish-check items: `docs/superpowers/plans/2026-10-18-orion-lm-progress.md`.
+Goal: fine-tune an open-weight model (Unsloth, cloud GPU) that runs
+**in-process inside Orion** (MLX-LM, no Claude, no Ollama) via a **hand-written prompter** that
+writes Cypher over the Joern→Neo4j graph and judges code vulnerable/safe; then benchmark
+`orion-lm` / `orion-lm-base` vs `plain-sonnet5` / `plain-opus5` / `plain-gpt` on the post-2026-05-31
+CVEs (vulnerable AND patched commits) + OWASP Benchmark as the false-alarm set.
+
+- **Design change (2026-10-18):** training is now hybrid (Stage 1 code+context on all pairs, Stage 2
+  graph pairs); see `docs/superpowers/plans/2026-10-18-orion-lm-hybrid.md`.
+- **Hybrid status (2026-10-18):** code only — nothing trained, no model runs, no full data builds.
+  - One lead convention everywhere: the **fix site** (Stage 1 target, Stage 2 lead, rounds key, test
+    L1). Splits group by lowercased `repo_canonical`. `export` refuses the PLACEHOLDER system prompt
+    unless `allow_placeholder=True`. Live-Neo4j tests skip unless `ORION_LIVE_NEO4J=1` (DB-writing)
+    / `ORION_SPEND_TOKENS=1` (claude).
+  - Gated on Krish: freeze splits (H6 Step 6, once the source list is final — `splits.json` can never
+    be re-split), Stage 1 pilot + full run, Stage 2 builds (need graph-hardening merged), real
+    bake-off, running `train/unsloth_lora.ipynb`, and Krish's system prompt (must say "flag the fix
+    site" and cover code-only cases with no path) + `train/templates/queries.json`.
+  - **Pairs/splits (2026-10-20):** MoreFixes added (advisory-linked fixes only; Prospector links
+    tagged `heuristic_fix_link`, dropped by default) and every repo name canonicalised via GitHub
+    (leak set too; gone repos dropped as `repo_missing`). 4,850 pairs; the frozen split was
+    EXTENDED with `splits.extend` (no frozen pair moved; 43 left): train 4,120 · dev 702 · oldcve
+    28. Details: `docs/notes/orion-lm-pairs.md` "Current build (2026-10-20)".
+  - Open decision: `read_code` is offered at runtime but no training row uses it — keep it in the
+    templates or drop it from the tool set. Rounds skipped until templates exist.
+- **Status (2026-10-18):** design approved; research + codebase exploration folded in (Appendix A has
+  file:line integration notes). All §8 decisions made: Qwen excluded; second labeler proposed = Love
+  Kush (to confirm with them); 5 pp false-alarm margin; scoring code built on this branch, human
+  labeling + final test scoring in a separate session; AI-written text2cypher rows dropped and Krish
+  writes the training-target templates + system prompt (Claude writes plumbing only); test set grows
+  to ≈60 dataflow vulns; no cut list. Plan written and being built (see the progress file above).
+- **Confirmed by Krish:** no Claude/Ollama in the model path; own prompter; model writes Cypher in a
+  run→score→retrain loop; must judge unknown code (train with patched commits as negatives); test
+  set run ONCE at the end, tune on dev only; frontier models are competitors only (never training
+  data); headline = efficiency (vulns per 1M tokens) + false-alarm rate, recall reported either way;
+  build in days; plain wording.
+- **On this branch the design overrides the 09-17 rules where they conflict:** the three
+  Ollama/`claude -p` arms are superseded; new prereg tag `orion-lm-prereg-v1`.
+- **Harness bugs found in `eval/` (fix before any run counts; details design §5.4):** fix commit
+  visible via `.git` in checkouts (answer leak); runs 1–3 overwrite each other; plain-arm
+  `findings.json` leaks between arms; failed runs silently requeued; nothing writes
+  `agent_calls`/`resources`; Codex usage parsed from the wrong level; `MODEL_TAGS` says
+  `gemma3:12b`; plain Claude arms pass no `--model`; frontier agents have web access (answer lookup). No scoring code exists in `eval/` yet; `eval-prereg-v1` tag never created.
+- **Research artifacts** (OSV counting scripts, OWASP CSVs, paper extracts):
+  `~/Documents/OrionLutherLeo/orion-lm-research/` (outside the repo).
+- Facts to remember: Unsloth pip can't train on Apple Silicon; Gemma 4 12B peaks ≈9.4 GB at 4k on
+  M4 16 GB (too tight with Neo4j) → E4B / Granite 4.1 8B bake-off; base model must publish a
+  training cutoff before 2026-05-31; ≈40% of repos with post-cutoff advisories also have pre-cutoff
+  ones — drop them from training.
+
 ## Working agreement (how Love Kush wants to build)
 
 - Build in three layers, in order: **Build** (the graph) → **Orchestration** (the agents) →

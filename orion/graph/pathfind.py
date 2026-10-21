@@ -26,7 +26,7 @@ from . import schema
 # pick the category when a call matches several, and to rank flows. Unknown categories default to 3.
 _SINK_SEVERITY = {
     "code_exec": 5, "deserialize": 5,
-    "sql": 4, "nosql": 4, "ssrf": 4, "template": 4,
+    "sql": 4, "nosql": 4, "ssrf": 4, "template": 4, "xxe": 4, "prototype_pollution": 4,
     "path": 3,
     "redirect": 2, "render": 2,
     "log": 1,

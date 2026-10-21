@@ -1,16 +1,13 @@
 import json
 import subprocess
 
-_TEST_MARKERS = ("/test/", "/tests/", ".test.", "_test.", "spec.")
-
-
 def _default_run(cmd: list[str]) -> str:
     return subprocess.run(cmd, capture_output=True, text=True, check=True).stdout
 
 
 def _is_test(path: str) -> bool:
-    p = "/" + path
-    return any(m in p for m in _TEST_MARKERS)
+    from orion.lm.codeindex import is_test_path
+    return is_test_path(path)
 
 
 def commit_meta(repo: str, sha: str, *, run=_default_run) -> dict:

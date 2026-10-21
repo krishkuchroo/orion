@@ -23,3 +23,15 @@ def test_shim_tees_stdout_to_usage_log(tmp_path):
     assert '"input_tokens":7' in out.stdout          # passed through to caller
     assert '"input_tokens":7' in log.read_text()      # AND captured to the log
     assert out.returncode == 0
+
+
+def test_shim_overwrites_usage_log_each_run(tmp_path):
+    log = tmp_path / "usage.jsonl"
+    wrapper = os.path.join(shim_setup.shim_dir(), "claude")
+    for n in (1, 2):
+        fake = tmp_path / f"real{n}"
+        fake.write_text(f'#!/bin/bash\necho \'{{"run":{n}}}\'\n')
+        fake.chmod(0o755)
+        env = dict(os.environ, EVAL_USAGE_LOG=str(log), EVAL_REAL_CLAUDE=str(fake))
+        subprocess.run([wrapper, "-p", "hi"], capture_output=True, text=True, env=env)
+    assert log.read_text().strip() == '{"run":2}'

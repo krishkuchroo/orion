@@ -1,11 +1,15 @@
 import os
 import subprocess
 
+_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".config")
+
 _CHECKS = [
-    ("ollama", ["ollama", "--version"]),
-    ("ollama-serve", ["curl", "-sf", "http://localhost:11434/api/tags"]),
     ("codex", ["codex", "--version"]),
     ("claude", ["claude", "--version"]),
+    # the clean config homes need a copied login (README one-time step) or every run is
+    # "Not logged in" / 401
+    ("claude-login", ["test", "-s", os.path.join(_CONFIG, "claude", ".credentials.json")]),
+    ("codex-login", ["test", "-s", os.path.join(_CONFIG, "codex", "auth.json")]),
     ("docker", ["docker", "ps"]),
     ("joern", [os.path.expanduser("~/joern/joern-cli/joern-parse"), "--version"]),
     ("neo4j", ["curl", "-sf", "http://localhost:7475"]),

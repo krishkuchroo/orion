@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Literal
 
-Shape = Literal["A", "B", "C", "D"]
+Shape = Literal["A", "B", "C", "D", "LM"]  # "LM" = the in-process Orion-LM engine (orion/lm/engine.py)
 Confidence = Literal["LOW", "MEDIUM", "HIGH"]
 Decision = Literal["CONFIRM", "REJECT", "INCONCLUSIVE", "ERROR"]
 
@@ -29,6 +29,15 @@ class Lead:
     # which fall back to lexical dedup.
     source_uid: str | None = None
     sink_uid: str | None = None
+    # Location fields, set by the Orion-LM engine (shape "LM") from the model's final answer, so the
+    # eval matcher (same file AND function-or-line) can score a lead without parsing `text`. `path`
+    # is the flow's slice: [{file, function, line, code, role}] with role source/step/sink. All default
+    # None so every existing constructor (shapes A-D, tests) keeps working unchanged.
+    file: str | None = None
+    function: str | None = None
+    line: int | None = None
+    cwe: str | None = None
+    path: list[dict] | None = None
 
 
 @dataclass

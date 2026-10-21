@@ -190,7 +190,7 @@ def test_dedup():
 # ---------------------------------------------------------------------------------------------
 
 @pytest.mark.slow
-def test_one_shape_live():
+def test_one_shape_live(spend_tokens, live_neo4j):   # ORION_SPEND_TOKENS=1 + claude on PATH, then Neo4j up
     """Run ONE real discovery shape (A) via claude_cli.run_agent against the loaded NodeGoat scan
     graph, over the real mcp__orion__* MCP tools. Assert at least one grounded lead comes back,
     citing at least one query it actually ran."""

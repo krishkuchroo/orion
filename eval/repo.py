@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 
 
@@ -6,13 +7,32 @@ def _default_run(cmd: list[str]) -> str:
     return subprocess.run(cmd, capture_output=True, text=True, check=True).stdout
 
 
-def vulnerable_commit(fix_sha: str, *, run=_default_run) -> str:
-    return run(["git", "rev-parse", f"{fix_sha}^"]).strip()
-
-
-def prepare(repo_url: str, dest: str, commit: str, *, run=_default_run) -> None:
-    if not os.path.isdir(dest):
-        run(["git", "clone", repo_url, dest])
+def mirror(repo_url: str, mirror_dir: str, *, run=_default_run) -> None:
+    """Reusable bare mirror (no working tree): clone once, fetch afterwards."""
+    if os.path.isdir(mirror_dir):
+        run(["git", "-C", mirror_dir, "fetch", "--all", "--tags", "--prune"])
     else:
-        run(["git", "-C", dest, "fetch", "--all"])
-    run(["git", "-C", dest, "checkout", "--detach", commit])
+        tmp = f"{mirror_dir}.tmp"
+        shutil.rmtree(tmp, ignore_errors=True)  # leftover partial clone
+        run(["git", "clone", "--bare", "--", repo_url, tmp])
+        os.rename(tmp, mirror_dir)
+
+
+def vulnerable_commit(fix_sha: str, mirror_dir: str, *, run=_default_run) -> str:
+    return run(["git", "-C", mirror_dir, "rev-parse", f"{fix_sha}^"]).strip()
+
+
+def export_tree(mirror_dir: str, sha: str, dest: str, *, run=_default_run) -> None:
+    """Fresh working tree of `sha` with NO .git (so the fix commit is not reachable).
+
+    Known limits: export-ignore files and submodules are not exported.
+    """
+    tar = f"{dest}.tar"
+    shutil.rmtree(dest, ignore_errors=True)  # stale tree from an earlier attempt
+    os.makedirs(dest, exist_ok=True)
+    try:
+        run(["git", "-C", mirror_dir, "archive", "--format=tar", "-o", tar, sha])
+        run(["tar", "-xf", tar, "-C", dest])
+    finally:
+        if os.path.exists(tar):
+            os.remove(tar)

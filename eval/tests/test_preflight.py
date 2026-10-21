@@ -1,3 +1,5 @@
+import os
+
 from eval import preflight
 
 
@@ -17,3 +19,18 @@ def test_render_flags_missing():
             {"tool": "claude", "ok": True, "detail": "2.1.210"}]
     out = preflight.render(rows)
     assert "MISSING: codex" in out
+
+
+def test_checks_cover_the_model_clis_and_graph_stack_without_ollama():
+    tools = [t for t, _ in preflight._CHECKS]
+    assert "ollama" not in tools and "ollama-serve" not in tools
+    for t in ("claude", "codex", "docker", "joern", "neo4j", "cloc"):
+        assert t in tools
+    assert not any("11434" in " ".join(cmd) for _, cmd in preflight._CHECKS)
+
+
+def test_checks_require_the_copied_logins_in_the_clean_homes():
+    cmds = dict(preflight._CHECKS)
+    assert cmds["claude-login"][-1].endswith(os.path.join("eval", ".config", "claude", ".credentials.json"))
+    assert cmds["codex-login"][-1].endswith(os.path.join("eval", ".config", "codex", "auth.json"))
+    assert cmds["claude-login"][:2] == ["test", "-s"]   # exists and non-empty

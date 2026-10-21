@@ -4,8 +4,8 @@ from eval import db
 
 def test_schema_and_run_lifecycle(tmp_path):
     conn = db.connect(str(tmp_path / "t.db"))
-    rid = db.start_run(conn, arm="orion-gemma4", repo="nocobase-1", tier="headline",
-                       run_no=1, model_tag="gemma3:12b", cli_versions="ollama=0.30.11",
+    rid = db.start_run(conn, arm="orion-lm", repo="nocobase-1", tier="headline",
+                       run_no=1, model_tag="orion-lm-v1", cli_versions="claude=2.1.302",
                        orion_commit="ec3e9d8")
     assert isinstance(rid, int)
     db.log_event(conn, rid, stage="build", level="info", message="graph done")

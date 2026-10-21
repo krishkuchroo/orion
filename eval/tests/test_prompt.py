@@ -6,9 +6,9 @@ def test_prompt_mentions_output_file_and_is_frozen_nonempty():
     assert len(prompt.TASK_PROMPT) > 200  # a real instruction, not a stub
 
 
-def test_schema_has_the_seven_fields():
+def test_schema_has_the_seven_fields_plus_optional_path():
     props = prompt.FINDINGS_SCHEMA["properties"]["findings"]["items"]["properties"]
-    assert set(props) == {"file", "function", "line_start", "line_end", "cwe", "title", "explanation"}
+    assert set(props) == {"file", "function", "line_start", "line_end", "cwe", "title", "explanation", "path"}
 
 
 def test_validate_accepts_good_and_rejects_bad():
