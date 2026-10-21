@@ -10,6 +10,13 @@ from orion.contracts import Lead
 from orion.lm import engine
 
 
+@pytest.fixture(autouse=True)
+def _cheap_index(monkeypatch, tmp_path_factory):
+    """Tests that pass a dummy repo path ('.', '/repo') must not walk the real tree: give them an empty one."""
+    real, empty = engine.RepoIndex, str(tmp_path_factory.mktemp("empty"))
+    monkeypatch.setattr(engine, "RepoIndex", lambda root: real(empty if root in (".", "/repo") else root))
+
+
 def scripted(leads, steps):
     """Stand-in for `engine._session`: delivers each step via `on_step` as the real prompter does, then
     returns `(leads, steps)` (the same records, which the engine must NOT replay)."""
@@ -36,7 +43,7 @@ def test_discover_lm_maps_leads_by_flow_id(monkeypatch):
     monkeypatch.setattr(engine, "_session", scripted(
         [{"flow_id": "F1", "file": "b.js", "function": "g", "line": 20, "cwe": "CWE-89", "confidence": "HIGH"}],
         [{"step_no": 0, "kind": "final"}]))
-    leads = engine.discover_lm("s", ".", events.append, model=object(), on_step=steps.append)
+    leads = engine.discover_lm("s", ".", events.append, model=object(), on_step=steps.append, k=2)  # one batch of both
     assert leads[0].file == "b.js" and leads[0].source_uid == "s1" and leads[0].sink_uid == "k1"  # F1, not F0
     assert leads[0].text and leads[0].evidence          # non-empty, required downstream
     assert steps == [{"step_no": 0, "kind": "final"}]
@@ -92,7 +99,7 @@ def test_batches_of_k_each_get_their_own_session_and_turn(monkeypatch):
     leads = engine.discover_lm("s", ".", events.append, model=object(), k=1)
     assert batches == [["F0"], ["F1"]]
     assert [l.source_uid for l in leads] == ["s0", "s1"] and [l.index for l in leads] == [0, 1]
-    assert {e["turn"] for e in events if e["event"] in ("query", "tool")} == {1, 2}
+    assert {e["turn"] for e in events if e["event"] in ("query", "tool") and e["turn"] is not None} == {1, 2}  # index event has no turn
     assert [e["event"] for e in events if e["turn"] == 1 and e["event"] in ("query", "tool")] == ["query", "tool", "tool"]
     assert all(e["shape"] == "LM" and e["phase"] == "discover" for e in events)
     assert sum(e["event"] == "lead" for e in events) == 2
@@ -224,7 +231,7 @@ def test_lead_events_use_post_dedup_indices(monkeypatch):
     monkeypatch.setattr(engine, "_session", scripted(
         [{"flow_id": "F0", "confidence": "HIGH"}, {"flow_id": "F0", "confidence": "LOW"},   # dup collapses
          {"flow_id": "F1", "confidence": "HIGH"}], []))
-    leads = engine.discover_lm("s", ".", events.append, model=object())
+    leads = engine.discover_lm("s", ".", events.append, model=object(), k=2)  # both flows in one batch
     lead_events = [e for e in events if e["event"] == "lead"]
     assert [e["lead"] for e in lead_events] == [l.index for l in leads] == [0, 1]
     assert all(e["turn"] == 1 for e in lead_events)
@@ -254,3 +261,65 @@ def test_stop_is_reported_in_done_and_tiny_cap_is_floored_with_a_warn(monkeypatc
     assert captured["context_cap"] == engine.MIN_CONTEXT_CAP
     assert any(e["event"] == "warn" and "floored" in e["detail"] for e in events)
     assert events[-1]["event"] == "done" and "stopped early" in events[-1]["detail"]
+
+
+def test_each_flow_enriched_and_judged_alone(monkeypatch, tmp_path):
+    """K=1: one session per flow; the sink's function is in the case; a flow with no code is still judged."""
+    (tmp_path / "a.js").write_text("function run(x){\n  exec(x)\n}\n")
+    flows = [{**FLOWS[0], "nodes": [{"file": "a.js", "function": "run", "line": 2, "code": "exec(x)"}]}, FLOWS[1]]
+    seen = []
+    monkeypatch.setattr(engine, "_load_flows", lambda db, sid, max_flows: flows)
+    monkeypatch.setattr(engine, "_session", lambda gen, db, repo, sid, batch, **k: seen.append(batch) or ([], []))
+    engine.discover_lm("s", str(tmp_path), lambda e: None, model=object(), db=object())
+    assert [len(b) for b in seen] == [1, 1]
+    assert seen[0][0]["snippets"][0]["function"] == "run" and seen[1][0]["snippets"] == []
+
+
+def test_default_k_is_one():
+    assert engine.DEFAULT_K == 1
+
+
+def test_index_event_and_single_build_per_scan(monkeypatch, tmp_path):
+    (tmp_path / "a.js").write_text("function run(x){\n  exec(x)\n}\n")
+    events, built = [], []
+    real = engine.RepoIndex
+    monkeypatch.setattr(engine, "RepoIndex", lambda root: built.append(root) or real(root))
+    monkeypatch.setattr(engine, "_session", lambda *a, **k: ([], []))
+    engine.discover_lm("s", str(tmp_path), events.append, model=object(), db=object(), flows=FLOWS)
+    assert built == [str(tmp_path)]
+    (ev,) = [e for e in events if e["event"] == "tool" and e["detail"].startswith("index:")]
+    assert ev["phase"] == "discover" and ev["shape"] == "LM"
+    import re
+    assert re.fullmatch(r"index: 1 files, 0 skipped, \d+(\.\d+)?s", ev["detail"])
+
+
+def test_given_index_is_reused_and_not_rebuilt(monkeypatch, tmp_path):
+    idx = engine.RepoIndex(str(tmp_path))
+    monkeypatch.setattr(engine, "RepoIndex", lambda root: pytest.fail("index was given"))
+    monkeypatch.setattr(engine, "_session", lambda *a, **k: ([], []))
+    engine.discover_lm("s", str(tmp_path), lambda e: None, model=object(), db=object(), flows=FLOWS, index=idx)
+
+
+def test_enrichment_failure_keeps_the_flow_path_only_with_a_warn(monkeypatch):
+    events, seen = [], []
+
+    def flaky(flow, index, *, budget):
+        if flow["flow_id"] == "F0":
+            raise RuntimeError("bad node")
+        return dict(flow, snippets=[])
+
+    monkeypatch.setattr(engine.cases, "case_from_flow", flaky)
+    monkeypatch.setattr(engine, "_session", lambda gen, db, repo, sid, batch, **k: seen.append(batch) or ([], []))
+    engine.discover_lm("s", ".", events.append, model=object(), db=object(), flows=FLOWS)
+    assert [b[0]["flow_id"] for b in seen] == ["F0", "F1"]
+    assert seen[0][0]["nodes"] == FLOWS[0]["nodes"] and "snippets" not in seen[0][0]
+    assert any(e["event"] == "warn" and "F0" in e["detail"] and "bad node" in e["detail"] for e in events)
+
+
+def test_case_budget_is_forwarded(monkeypatch):
+    got = []
+    budget = engine.CaseBudget(max_target_lines=7)
+    monkeypatch.setattr(engine.cases, "case_from_flow", lambda flow, index, *, budget: got.append(budget) or dict(flow, snippets=[]))
+    monkeypatch.setattr(engine, "_session", lambda *a, **k: ([], []))
+    engine.discover_lm("s", ".", lambda e: None, model=object(), db=object(), flows=FLOWS[:1], case_budget=budget)
+    assert got == [budget]

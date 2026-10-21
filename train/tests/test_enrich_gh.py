@@ -170,3 +170,32 @@ def test_cache_skips_a_truncated_last_line(tmp_path):
     p.write_text(json.dumps({"key": "commit:o/r@a", "status": "ok"}) + "\n" + '{"key": "commit:o/r@b", "sta')
     c = enrich_gh.Cache(str(p))
     assert c.done("commit:o/r@a") and not c.done("commit:o/r@b") and c.skipped_lines == 1
+
+
+def test_fetch_repo_resolves_renames_and_marks_deleted_repos():
+    client, _ = gh(FakeGet({"/repos/owner/old-name": [(200, OK_HDR, json.dumps({"full_name": "Owner/New"}).encode())],
+                            "/repos/x/flaky": [(502, OK_HDR, b"")]}))
+    assert enrich_gh.fetch_repo(client, "owner/old-name")["repo_canonical"] == "owner/new"
+    assert enrich_gh.fetch_repo(client, "gone/repo")["status"] == "repo_missing"
+    assert enrich_gh.fetch_repo(client, "x/flaky")["status"] == "error"
+
+
+def test_run_looks_up_only_repos_no_commit_record_already_names(tmp_path):
+    cache = tmp_path / "c.jsonl"
+    enrich_gh.Cache(str(cache)).add({"key": enrich_gh.commit_key("o/known", SHA), "kind": "commit", "repo": "o/known",
+                                     "status": "ok", "repo_canonical": "o/known2"})
+    get = FakeGet({"/repos/o/new": [(200, OK_HDR, json.dumps({"full_name": "o/new"}).encode())]})
+    s = enrich_gh.run([], str(cache), repos=["o/known", "o/new", "o/gone"], get=get, log=lambda *a: None)
+    assert sorted(u.rsplit("/repos/", 1)[1] for u in get.calls) == ["o/gone", "o/new"]
+    assert s["statuses"] == {"ok": 1, "repo_missing": 1} and s["pending_repos"] == 0
+    canon, gone = enrich_gh.canonical_repos(enrich_gh.Cache(str(cache)))
+    assert canon == {"o/known": "o/known2", "o/new": "o/new"} and gone == {"o/gone"}
+
+
+def test_apply_repos_fills_canonical_only_where_missing_and_flags_gone_repos():
+    rows = [{"id": "A", "repo": "o/old"}, {"id": "B", "repo": "o/old", "repo_canonical": "o/kept"},
+            {"id": "C", "repo": "o/gone"}, {"id": "D", "repo": None}]
+    a, b, c, d = enrich_gh.apply_repos(rows, {"o/old": "o/new"}, {"o/gone"})
+    assert a["repo_canonical"] == "o/new" and a["repo_canonical_basis"] == "github_repo"
+    assert b["repo_canonical"] == "o/kept" and c["repo_status"] == "missing" and "repo_canonical" not in d
+    assert "repo_canonical" not in rows[0]                      # inputs are copied, never mutated

@@ -34,6 +34,7 @@ import re
 from dataclasses import dataclass, field
 
 from orion.graphdb import BT_PLACEHOLDER, STR_PLACEHOLDER, _has_write_keyword, _lex
+from orion.lm.codeindex import _split_lines
 
 ROW_LIMIT = 25
 MAX_WINDOW = 200  # max lines returned by read_code
@@ -432,7 +433,7 @@ def read_code(repo_path: str, file: str, start: int, end: int) -> dict:
     end = min(end, start + MAX_WINDOW - 1)
     try:
         with open(full, encoding="utf-8", errors="replace") as f:
-            lines = f.read().splitlines()
+            lines = _split_lines(f.read())   # "\n" only, as the code index and the graph number lines
     except OSError as e:
         return {"error": str(e)}
     end = min(end, len(lines))

@@ -135,22 +135,27 @@ def _render_flow(flow: dict) -> str:
             f"source_uid={_s(flow.get('source_uid'))} sink_uid={_s(flow.get('sink_uid'))}")
     lines = [head]
     nodes = flow.get("nodes") or []
-    if not nodes:
+    snippets = flow.get("snippets") or []
+    if not nodes and not snippets:
         lines.append("  (no path nodes found in the graph)")
     for i, n in enumerate(nodes):
         role = "source" if i == 0 else ("sink" if i == len(nodes) - 1 else "step")
         code = str(n.get("code") if n.get("code") is not None else "").replace("\n", " ")
         lines.append(f"  [{role}] {_s(n.get('file'))}:{_s(n.get('line'))} in {_s(n.get('function'))}: "
                      f"{code_inline(code)}")
+    for sn in snippets:
+        lines.append(f"  [{_s(sn.get('role'))}] {_s(sn.get('file'))}:{_s(sn.get('start'))}-{_s(sn.get('end'))} "
+                     f"in {_s(sn.get('function'))}")
+        lines.append(code_block(str(sn.get("code") if sn.get("code") is not None else "")))
     return "\n".join(lines)
 
 
 def task_message(flows: list[dict]) -> dict:
-    body = "\n".join(_render_flow(f) for f in flows) if flows else "(no candidate flows)"
-    content = ("TASK: Decide which of the candidate flows below are real vulnerabilities. Each flow is a "
-               "source->sink path from the graph (path nodes only). Query the graph with run_cypher and read "
-               "the source with read_code as needed, then emit final with one lead per vulnerable flow "
-               "(leads name their flow_id).\n\n" + body)
+    body = "\n".join(_render_flow(f) for f in flows) if flows else "(no candidates)"
+    content = ("TASK: Decide which of the candidates below are real vulnerabilities. Each candidate may carry "
+               "a source->sink path from the graph and code snippets (the target function first). Query the "
+               "graph with run_cypher and read the source with read_code as needed, then emit final with one "
+               "lead per vulnerable candidate (leads name their flow_id).\n\n" + body)
     return {"role": "user", "content": content}
 
 
@@ -208,5 +213,6 @@ def parse_action(text: str) -> dict | None:
 
 
 def dumps_action(action: dict) -> str:
-    """Canonical action text — the training target (`train/examples.py`)."""
-    return json.dumps(action, sort_keys=True, separators=(",", ":"))
+    """Canonical action text — the training target (`train/examples.py`). Non-ASCII stays raw
+    (`ensure_ascii=False`): the constrained decoder's JSON grammar cannot emit `\\uXXXX` escapes."""
+    return json.dumps(action, sort_keys=True, separators=(",", ":"), ensure_ascii=False)

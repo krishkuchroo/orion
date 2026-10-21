@@ -33,3 +33,8 @@ fixtures/
 # Raw downloads and caches live outside the repo (~/Documents/OrionLutherLeo/orion-lm-research/raw/).
 train/data/pairs.json
 train/data/dropped.json
+
+# Stage-1 runner outputs (regenerable; splits.json is committed)
+train/data/stage1.jsonl
+train/data/stage1_ledger.jsonl
+train/data/work/

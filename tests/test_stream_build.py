@@ -242,7 +242,7 @@ def test_stream_envelope_parity_nodegoat(tmp_path):
 
 
 @pytest.mark.slow
-def test_stream_two_partition_persist_parity():
+def test_stream_two_partition_persist_parity(live_neo4j_writes):   # writes two scans to the shared Neo4j
     cpg = "fixtures/NodeGoat/cpg.bin"
     if not Path(cpg).exists():
         pytest.skip("NodeGoat cpg.bin not present")

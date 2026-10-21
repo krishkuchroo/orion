@@ -349,3 +349,14 @@ def test_overlong_query_rejected_cheaply():
     q = "MATCH (c:CpgCall {scan_id:$scan_id}) WHERE c.uid IN [" + ", ".join(["'u'"] * 3000) + "] RETURN c"
     db = StubDB()
     assert "too long" in tools.run_cypher(db, "s", q)["error"] and db.ran == []
+
+
+def test_read_code_numbers_lines_like_the_code_index(tmp_path):
+    """Final review M1: form feed / U+2028 do not split a line, so read_code(start, end) built from snippet or
+    graph line numbers returns the same lines RepoIndex.source does."""
+    from orion.lm import codeindex as ci
+    text = "a = 1\n\x0c b = 2\nc = ' '\nd = 4\n"
+    (tmp_path / "m.py").write_text(text)
+    out = tools.read_code(str(tmp_path), "m.py", 3, 4)
+    assert out["lines"] == ci.RepoIndex(str(tmp_path)).source("m.py", 3, 4) == "c = ' '\nd = 4"
+    assert (out["start"], out["end"]) == (3, 4)

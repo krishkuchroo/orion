@@ -3,12 +3,17 @@
 Checks run in a fixed order and the first failing one is the row's reason, so the reasons double as
 a funnel (``STAGES``):
 
+0a. source licensed for training    source_excluded:<why>  (EXCLUDED_SOURCES; runs before dedupe, so a pair
+                                    also in a licensed source survives via that source)
 0. labels not LLM-made              llm_assisted_labels  (unless allow_llm_assisted=True)
+0b. fix link named by the advisory  heuristic_fix_link   (a tool-found commit, e.g. MoreFixes' Prospector
+                                    matches; unless allow_heuristic_fix=True)
 1. a GitHub fix link exists         no_fix_commit / non_github_repo
 2. language is JS/TS, Python, Java  language_unknown / language_unsupported:<lang>
 3. advisory published < cutoff      advisory_date_missing / advisory_after_cutoff
 4. not a test-set candidate repo    post_cutoff_repo / post_cutoff_package
-5. fix commit metadata obtained     fix_pr_unresolved (PR-only link not merged / not found) /
+5. fix commit metadata obtained     repo_missing (GitHub reports the repo gone: nothing to clone) /
+                                    fix_pr_unresolved (PR-only link not merged / not found) /
                                     enrich_pending / commit_missing / enrich_error / fix_date_missing
 6. fix commit date < cutoff         fix_after_cutoff
 7. fix touches the language         no_source_files_in_language
@@ -22,12 +27,15 @@ from __future__ import annotations
 
 from train.sources import ANNOTATION_KEYS, CUTOFF, SOURCE_PRIORITY, SUPPORTED_LANGUAGES, cwe_class
 
-STAGES = ("llm_assisted_labels",
+# Sources kept in collect/leak sets (so leak filtering is unchanged) but never trained on, with the reason.
+EXCLUDED_SOURCES = {"repopairbench": "license_no_rights"}
+
+STAGES = ("source_excluded", "llm_assisted_labels", "heuristic_fix_link",
           "no_fix_commit", "non_github_repo",
           "language_unknown", "language_unsupported",
           "advisory_date_missing", "advisory_after_cutoff",
           "post_cutoff_repo", "post_cutoff_package",
-          "fix_pr_unresolved", "enrich_pending", "commit_missing", "enrich_error", "fix_date_missing",
+          "repo_missing", "fix_pr_unresolved", "enrich_pending", "commit_missing", "enrich_error", "fix_date_missing",
           "fix_after_cutoff",
           "no_source_files_in_language",
           "duplicate_alias", "duplicate_commit",
@@ -40,12 +48,17 @@ def reason_kind(reason: str) -> str:
 
 def row_reason(r: dict, *, cutoff: str = CUTOFF, post_cutoff_repos=frozenset(), post_cutoff_packages=frozenset(),
                languages=SUPPORTED_LANGUAGES, stop_before_enrichment: bool = False,
-               allow_unknown_language: bool = False, allow_llm_assisted: bool = False) -> str | None:
+               allow_unknown_language: bool = False, allow_llm_assisted: bool = False,
+               allow_heuristic_fix: bool = False) -> str | None:
     """First failing per-row check (stages 1-7), or None. ``stop_before_enrichment`` evaluates only
     the checks that need no GitHub data (used to decide which commits are worth fetching). A PR-only
     row is resolved to its merge commit during enrichment, so its PR status is judged at stage 5."""
+    if r.get("source") in EXCLUDED_SOURCES:
+        return f"source_excluded:{EXCLUDED_SOURCES[r['source']]}"
     if r.get("llm_assisted_labels") and not allow_llm_assisted:
         return "llm_assisted_labels"
+    if r.get("heuristic_fix_link") and not allow_heuristic_fix:
+        return "heuristic_fix_link"
     if not r.get("repo"):
         return "non_github_repo" if r.get("repo_url") else "no_fix_commit"
     if not r.get("fix_sha") and not r.get("fix_pr"):
@@ -67,6 +80,8 @@ def row_reason(r: dict, *, cutoff: str = CUTOFF, post_cutoff_repos=frozenset(), 
         return "post_cutoff_package"
     if stop_before_enrichment:
         return None
+    if r.get("repo_status") == "missing":
+        return "repo_missing"
     if not r.get("fix_sha"):
         return "fix_pr_unresolved"
     status = r.get("enrich_status")
@@ -163,13 +178,13 @@ def _dedupe(rows: list[dict]) -> tuple[list[dict], list[dict]]:
 
 def keep(pairs: list[dict], *, cutoff: str = CUTOFF, post_cutoff_repos, post_cutoff_packages=frozenset(),
          max_files: int | None = 10, languages=SUPPORTED_LANGUAGES,
-         allow_llm_assisted: bool = False) -> tuple[list[dict], list[dict]]:
+         allow_llm_assisted: bool = False, allow_heuristic_fix: bool = False) -> tuple[list[dict], list[dict]]:
     """Returns ``(kept, dropped)``; every dropped row is a copy of the input row plus ``reason``."""
     passed, dropped = [], []
     for r in pairs:
         why = row_reason(r, cutoff=cutoff, post_cutoff_repos=post_cutoff_repos,
                          post_cutoff_packages=post_cutoff_packages, languages=languages,
-                         allow_llm_assisted=allow_llm_assisted)
+                         allow_llm_assisted=allow_llm_assisted, allow_heuristic_fix=allow_heuristic_fix)
         if why:
             dropped.append(dict(r, reason=why))
         else:

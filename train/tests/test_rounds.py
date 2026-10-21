@@ -1,0 +1,226 @@
+from types import SimpleNamespace
+
+from orion.lm import format as fmt
+from train import rounds
+
+FIX = {"file": "a.js", "line": 10, "function": "f", "line_start": 10, "line_end": 10}
+
+
+def test_pair_test_flag_vuln_silent_patched():
+    assert rounds.pair_test([{"file": "a.js", "line": 10, "function": "f"}], [{"file": "b.js", "line": 99, "function": "o"}], FIX)
+    assert not rounds.pair_test([{"file": "a.js", "line": 10, "function": "f"}], [{"file": "a.js", "line": 10, "function": "f"}], FIX)
+
+
+def test_pair_test_rejects_spray():
+    v = [{"file": "a.js", "line": 10, "function": "f"}, {"file": "z.js", "line": 1, "function": "g"}, {"file": "y.js", "line": 2, "function": "h"}]
+    assert not rounds.pair_test(v, [], FIX)
+
+
+def test_pair_test_one_hit_one_miss_passes_and_no_hit_fails():
+    hit, miss = {"file": "a.js", "line": 10, "function": "f"}, {"file": "z.js", "line": 1, "function": "g"}
+    assert rounds.pair_test([hit, miss], [], FIX)
+    assert not rounds.pair_test([miss], [], FIX)
+    assert not rounds.pair_test([], [], FIX)
+
+
+def test_pair_test_scores_the_fix_hunk_answer_key_with_l1():
+    """I1: the fix site is answer-key shaped ({file, function, line_start, line_end} from the fix hunk) and a
+    lead matches it by `eval.match.l1`, the frozen test rule: function match OR line within the range +-10."""
+    key = {"file": "c.js", "function": "handler", "line_start": 20, "line_end": 24}
+    assert rounds.pair_test([{"file": "c.js", "function": "other", "line": 34}], [], key)     # 24 + 10
+    assert rounds.pair_test([{"file": "c.js", "function": "handler", "line": 90}], [], key)   # function match
+    assert rounds.pair_test([{"file": "c.js", "function": "other", "line": 10}], [], key)     # 20 - 10
+    assert not rounds.pair_test([{"file": "c.js", "function": "other", "line": 35}], [], key)
+    assert not rounds.pair_test([{"file": "d.js", "function": "handler", "line": 22}], [], key)
+
+
+def test_pick_shortest_passing_and_stop_rule():
+    assert rounds._pick([{"trace": [1, 2, 3], "passes": True}, {"trace": [1, 2], "passes": True}, {"trace": [1], "passes": False}]) == [1, 2]
+    assert rounds.should_stop([{"pair_correct": 0.3}, {"pair_correct": 0.3}]) and not rounds.should_stop([{"pair_correct": 0.1}, {"pair_correct": 0.2}])
+
+
+def test_pick_none_and_should_stop_edges():
+    assert rounds._pick([{"trace": [1], "passes": False}]) is None
+    assert not rounds.should_stop([]) and not rounds.should_stop([{"pair_correct": 0.0}])
+    assert rounds.should_stop([{"pair_correct": 0.1}, {"pair_correct": 0.2}, {"pair_correct": 0.3}])
+
+
+# ---- rollout_round, with stubbed load / generate / db ----
+
+LEAD = {"flow_id": "F0", "file": "a.js", "function": "f", "line": 10, "cwe": "CWE-89", "confidence": "HIGH"}
+OTHER = {"flow_id": "F0", "file": "b.js", "function": "o", "line": 99, "cwe": "CWE-89", "confidence": "HIGH"}
+CASE = {"flow_id": "F0", "rank": 0, "sink_category": None, "source_uid": None, "sink_uid": None, "nodes": [],
+        "snippets": [{"role": "target", "file": "a.js", "function": "f", "start": 1, "end": 20, "code": "x"}]}
+Q = "MATCH (c:CpgCall {scan_id:$scan_id}) RETURN c.code"
+
+
+FIX_KEY = {"file": "a.js", "function": "f", "line_start": 10, "line_end": 10}    # stage2 meta.fix_site
+
+
+def _trace(pid, label, split="train"):
+    final = {"action": "final", "leads": [LEAD] if label == "vulnerable" else []}
+    meta = {"pair_id": pid, "split": split, "label": label, "tier": "graph"}
+    if label == "vulnerable":
+        meta["fix_site"] = FIX_KEY
+    return {"case": CASE, "actions": [{"action": "run_cypher", "query": Q}, final], "results": [{"row_count": 1}],
+            "meta": meta}
+
+
+class FakeDB:
+    def __init__(self, missing=()):
+        self.missing = set(missing)
+
+    def node_count(self, scan_id):
+        return 0 if scan_id in self.missing else 5
+
+    def run_cypher(self, scan_id, query, limit=50, **kw):      # same contract as GraphDB.run_cypher(bounded=True)
+        if query.startswith("EXPLAIN"):
+            return {"row_count": 0, "rows": [], "query_type": "r"}
+        return {"row_count": 1, "rows": [{"c.code": "exec(x)"}]}
+
+
+def _res(text):
+    return SimpleNamespace(text=text, prompt_tokens=1, completion_tokens=1, cached_tokens=0, spliced=False)
+
+
+class FakeModel:
+    """Replies per `script`: a list of lead-lists per session; each session = one run_cypher then a final."""
+    def __init__(self, leads_by_session):
+        self.sessions, self.n, self.turn = leads_by_session, -1, 0
+
+    def reset_cache(self):
+        self.n += 1
+        self.turn = 0
+
+    def generate(self, messages):
+        self.turn += 1
+        if self.turn == 1:
+            return _res(fmt.dumps_action({"action": "run_cypher", "query": Q}))
+        return _res(fmt.dumps_action({"action": "final", "leads": self.sessions[self.n]}))
+
+
+def test_rollout_round_skips_non_train_seeds_and_drops_failures():
+    seeds = []
+    # sample 0 sprays nothing but misses the fix site; sample 1 hits it on the vulnerable scan, silent on patched
+    plans = {10: FakeModel([[OTHER], []]), 11: FakeModel([[LEAD], []])}
+
+    def load(path, *, seed):
+        seeds.append((path, seed))
+        return plans[seed]
+
+    cases = [_trace("P1", "vulnerable"), _trace("P1", "patched"),
+             _trace("T1", "vulnerable", split="test"), _trace("T1", "patched", split="test"),
+             _trace("N1", "vulnerable")]            # no patched side: dropped
+    out = rounds.rollout_round(cases, FakeDB(), load, "base", samples=2, seed=10, repo_for=lambda pid, side: "/r")
+    assert seeds == [("base", 10), ("base", 11)]
+    assert [(r["meta"]["pair_id"], r["meta"]["label"]) for r in out] == [("P1", "vulnerable"), ("P1", "patched")]
+    assert out[0]["meta"]["rollout_seed"] == 11 and out[0]["meta"]["tier"] == "rollout"
+    assert [a["action"] for a in out[0]["actions"]] == ["run_cypher", "final"] and len(out[0]["results"]) == 1
+
+
+def test_rollout_round_no_passing_sample_yields_nothing():
+    def load(path, *, seed):
+        return FakeModel([[OTHER], []])
+
+    assert rounds.rollout_round([_trace("P1", "vulnerable"), _trace("P1", "patched")], FakeDB(), load, "base",
+                                samples=2, seed=0, repo_for=lambda pid, side: "/r") == []
+
+
+PAIR = [_trace("P1", "vulnerable"), _trace("P1", "patched")]
+
+
+def _rr(cases, db=None, model=None, events=None, repo_for=lambda pid, side: "/r"):
+    return rounds.rollout_round(cases, db or FakeDB(), lambda path, *, seed: model or FakeModel([[LEAD], []]),
+                                "base", samples=1, seed=0, repo_for=repo_for,
+                                on_event=None if events is None else events.append)
+
+
+class ScriptModel:
+    """One reply list per session; the replies are raw texts."""
+    def __init__(self, sessions):
+        self.sessions, self.n, self.turn = sessions, -1, 0
+
+    def reset_cache(self):
+        self.n += 1
+        self.turn = 0
+
+    def generate(self, messages):
+        t = self.sessions[self.n][self.turn]
+        self.turn += 1
+        return _res(t)
+
+
+FINAL_HIT = fmt.dumps_action({"action": "final", "leads": [LEAD]})
+FINAL_NONE = fmt.dumps_action({"action": "final", "leads": []})
+RUN = fmt.dumps_action({"action": "run_cypher", "query": Q})
+
+
+def test_unclean_sessions_never_pass():
+    read = fmt.dumps_action({"action": "read_code", "file": "a.js", "start": 1, "end": 2})
+    for bad in ([read, FINAL_HIT], ["not json", RUN, FINAL_HIT]):      # read_code step; malformed reply
+        assert _rr(PAIR, model=ScriptModel([bad, [FINAL_NONE]])) == []
+    assert len(_rr(PAIR, model=ScriptModel([[RUN, FINAL_HIT], [FINAL_NONE]]))) == 2     # control: clean passes
+
+
+def test_scan_missing_skips_pair_and_reports():
+    events = []
+    assert _rr(PAIR, db=FakeDB(missing={"P1:patched"}), events=events) == []
+    assert {"kind": "skip", "pair_id": "P1", "reason": "scan_missing"} in events
+    assert events[-1]["kind"] == "summary" and events[-1]["scan_missing"] == 1 and events[-1]["kept"] == 0
+
+
+def test_events_for_unpaired_no_fix_site_no_pass_and_summary():
+    events = []
+    nofix = _trace("L1", "vulnerable")
+    del nofix["meta"]["fix_site"]                 # e.g. a trace written before the fix-site convention
+    cases = PAIR + [_trace("U1", "vulnerable"), nofix, _trace("L1", "patched")]
+    out = _rr(cases, model=ScriptModel([[RUN, FINAL_NONE], [RUN, FINAL_NONE]]), events=events)
+    assert out == []
+    skips = {(e["pair_id"], e["reason"]) for e in events if e["kind"] == "skip"}
+    assert skips == {("U1", "unpaired"), ("L1", "no_fix_site"), ("P1", "no_pass")}
+    assert events[-1] == {"kind": "summary", "pairs": 1, "unpaired": 1, "no_fix_site": 1, "scan_missing": 0,
+                          "no_pass": 1, "kept": 0}
+
+
+def test_rollout_rewards_the_fix_site_not_the_traces_own_lead():
+    """I1: the reward is the fix site from meta (the hunk), never the vulnerable trace's final lead."""
+    vuln = _trace("P1", "vulnerable")
+    vuln["actions"][-1] = {"action": "final", "leads": [OTHER]}    # e.g. a lead written at the sink
+    out = _rr([vuln, _trace("P1", "patched")], model=FakeModel([[LEAD], []]))
+    assert [r["meta"]["pair_id"] for r in out if r["meta"]["label"] == "vulnerable"] == ["P1"]
+    assert _rr([vuln, _trace("P1", "patched")], model=FakeModel([[OTHER], []])) == []
+
+
+def test_repo_for_called_with_pair_and_side():
+    calls = []
+    _rr(PAIR, repo_for=lambda pid, side: calls.append((pid, side)) or "/r")
+    assert calls == [("P1", "vulnerable"), ("P1", "patched")]
+
+
+def test_passing_pair_keeps_its_patched_trace_too():
+    """Final review M5: the patched session of a passing sample is a clean silent trace ("judge unknown code"),
+    kept with meta label `patched`, so rounds do not drift the class balance toward flagging."""
+    out = _rr(PAIR, model=ScriptModel([[RUN, FINAL_HIT], [RUN, FINAL_NONE]]))
+    assert [r["meta"]["label"] for r in out] == ["vulnerable", "patched"]
+    v, p = out
+    assert p["meta"]["pair_id"] == "P1" and p["meta"]["tier"] == "rollout"
+    assert p["meta"]["rollout_seed"] == v["meta"]["rollout_seed"] and "fix_site" not in p["meta"]
+    assert [a["action"] for a in p["actions"]] == ["run_cypher", "final"] and p["actions"][-1]["leads"] == []
+    assert len(p["results"]) == len(p["actions"]) - 1 and p["case"] == PAIR[1]["case"]
+    from train import examples
+    assert len(examples.cut(p, schema_text="S")) == 2            # ready for examples.cut, like the vulnerable row
+
+
+def test_sessions_use_the_engine_budget_below_the_model_cap(monkeypatch):
+    """Final review M4: the same budget as the runtime (engine.prompter_cap: CONTEXT_MARGIN below the model's
+    hard cap, 8000 when it has none), so a session the runtime forces to a final is not lost to ContextOverflow."""
+    from orion.lm import engine, prompter
+    seen, real = [], prompter.run_session
+    monkeypatch.setattr(prompter, "run_session", lambda *a, **kw: seen.append(kw.get("context_cap")) or real(*a, **kw))
+    m = FakeModel([[LEAD], []])
+    m.context_cap = 3000
+    _rr(PAIR, model=m)
+    assert seen == [engine.prompter_cap(m)] * 2 == [3000 - prompter.CONTEXT_MARGIN] * 2
+    seen.clear()
+    _rr(PAIR, model=FakeModel([[LEAD], []]))                      # no context_cap: the engine's default
+    assert seen == [8000 - prompter.CONTEXT_MARGIN] * 2

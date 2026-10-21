@@ -186,8 +186,14 @@ def test_action_regex_admits_exactly_the_canonical_training_target():
                    {"action": "read_code", "file": "app/routes.js", "start": 10, "end": 40},
                    {"action": "final", "leads": [{"flow_id": "F0", "file": "a.js", "function": "f",
                                                   "line": 3, "cwe": "CWE-89", "confidence": "HIGH"}]},
-                   {"action": "final", "leads": []}):
+                   {"action": "final", "leads": []},
+                   # non-ASCII (final review M2): the grammar admits raw characters, never \\uXXXX escapes
+                   {"action": "final", "leads": [{"flow_id": "F0", "file": "src/régles/données.py",
+                                                  "function": "überprüfe", "line": 3, "cwe": "CWE-89",
+                                                  "confidence": "HIGH"}]},
+                   {"action": "run_cypher", "query": "MATCH (c:CpgCall {scan_id:$scan_id}) WHERE c.code CONTAINS '日本' RETURN c.code"}):
         assert rx.fullmatch(fmt.dumps_action(action)), action
+    assert "\\u" not in fmt.dumps_action({"action": "final", "leads": [{"function": "überprüfe"}]})
     # the un-sorted order the schema lists its properties in is NOT what the grammar admits
     assert not rx.fullmatch('{"action":"read_code","file":"a.js","start":1,"end":2}')
     assert not rx.fullmatch('{"action": "final", "leads": []}')  # no whitespace: dumps_action's shape

@@ -14,7 +14,8 @@ Row shape (all loaders)::
     n_files_lang
 
 All downloaded files are parsed as data only; no code from a download is ever executed (the
-CVEfixes SQL dump is tokenised by hand, never fed to sqlite).
+CVEfixes SQL dump is tokenised by hand, never fed to sqlite; the MoreFixes pg_dump's COPY blocks are
+split by hand, never loaded into Postgres).
 """
 from __future__ import annotations
 
@@ -42,7 +43,7 @@ ECOSYSTEM_LANG = {"npm": "js", "pypi": "py", "maven": "java"}
 # Dedupe survivor order: hand-curated ready-made sets first, then reviewed advisories, then mined sets.
 SOURCE_PRIORITY = ("cwe-bench-java", "openssf", "vul4j", "vulcan", "secbench-js",
                    "osv-maven", "osv-npm", "osv-pypi", "sap-kb", "javavulbench", "repopairbench",
-                   "cvefixes", "crossvul", "pyvul")
+                   "cvefixes", "crossvul", "morefixes", "pyvul")
 # Per-pair location annotations a duplicate's survivor inherits (they matter later for locating the bug).
 ANNOTATION_KEYS = ("weaknesses", "locations", "sink_location", "fix_methods", "source_sink", "vuln_methods",
                    "fix_file")
@@ -769,6 +770,123 @@ def cvefixes(path: str) -> list[dict]:
                    advisory_published=cve_date.get(cve))
         if has:
             row.update(enrich_status="ok", enrich_basis="cvefixes", author_date=a_date, committer_date=c_date,
+                       fix_commit_date=max(filter(None, (a_date, c_date)), default=None))
+            if fl is not None:
+                row.update(n_files=len(non_test), n_files_total=len(fl),
+                           n_files_lang=sum(1 for _, lg in non_test if lg == lang) if lang in SUPPORTED_LANGUAGES else None,
+                           fix_files=[p for p, _ in non_test])
+        rows.append(row)
+    return rows
+
+
+# ---- MoreFixes PostgreSQL dump (COPY blocks split by hand; never loaded into Postgres) -----------
+
+_COPY_HEAD = re.compile(rb'COPY (?:"?\w+"?\.)?"?(\w+)"? \(([^)]*)\) FROM stdin;')
+_COPY_ESC = re.compile(r"\\(?:([0-7]{1,3})|x([0-9a-fA-F]{1,2})|(.))", re.S)
+_COPY_CHR = {"b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "\t", "v": "\v"}
+MOREFIXES_DIRECT = 1337        # fixes.score of a commit the NVD/GHSA record itself links
+MOREFIXES_MIN_SCORE = 65       # MoreFixes' own noise floor for Prospector-found commits
+
+
+def _copy_field(s: str):
+    """One field of PostgreSQL COPY text format: ``\\N`` is NULL, backslash escapes are decoded."""
+    if s == "\\N":
+        return None
+    if "\\" not in s:
+        return s
+    return _COPY_ESC.sub(lambda m: chr(int(m.group(1), 8)) if m.group(1) else
+                         chr(int(m.group(2), 16)) if m.group(2) else _COPY_CHR.get(m.group(3), m.group(3)), s)
+
+
+def iter_copy_dump(raw, wanted: dict[str, tuple[str, ...]]):
+    """Yield (table, {column: value}) for rows of the ``wanted`` tables (only the named columns are
+    decoded) from the binary lines of a pg_dump plain-text dump. COPY escapes newlines, so each data
+    row is one line; rows of other tables are skipped unparsed."""
+    cols, skipping = None, False
+    for line in raw:
+        if cols is None and not skipping:
+            if line.startswith(b"COPY "):
+                m = _COPY_HEAD.match(line)
+                table = m.group(1).decode() if m else None
+                if table in wanted:
+                    names = [c.strip().strip('"') for c in m.group(2).decode().split(",")]
+                    cols = (table, [(c, names.index(c)) for c in wanted[table] if c in names])
+                else:
+                    skipping = True
+            continue
+        if line.rstrip(b"\r\n") == b"\\.":
+            cols, skipping = None, False
+            continue
+        if skipping:
+            continue
+        parts = line.rstrip(b"\r\n").split(b"\t")      # the MoreFixes dump has CRLF line ends; data CRs are escaped
+        yield cols[0], {c: _copy_field(parts[i].decode("utf-8", "surrogateescape")) for c, i in cols[1]}
+
+
+def morefixes(path: str, *, min_score: int = MOREFIXES_MIN_SCORE, stats: dict | None = None) -> list[dict]:
+    """MoreFixes (Zenodo 20776007) pg_dump -> one row per (CVE, repo), with commit dates and changed
+    files taken from the dump itself (``enrich_basis = "morefixes"``). Language comes from the changed
+    files' extensions; the dump's ``programming_language`` is a guesslang model guess and is ignored.
+
+    A pair uses the commits its advisory links (score 1337, ``fix_link = "advisory"``) when it has
+    any. Otherwise it uses the Prospector-found commits scoring >= ``min_score`` and is tagged
+    ``heuristic_fix_link`` (``filters.keep`` drops those unless explicitly allowed). Commits below
+    ``min_score`` never become rows; MoreFixes leaves them out of its own data tables too."""
+    want = {"fixes": ("cve_id", "hash", "repo_url", "rel_type", "score"),
+            "commits": ("hash", "repo_url", "author_date", "committer_date"),
+            "file_change": ("hash", "filename", "old_path", "new_path", "programming_language"),
+            "cve": ("cve_id", "published_date"), "cwe_classification": ("cve_id", "cwe_id"),
+            "repository": ("repo_url", "repo_language")}
+    groups: dict = {}
+    commits, files, cve_date, cwes, repo_lang = {}, {}, {}, {}, {}
+    with gzip.open(path, "rb") as raw:
+        for table, r in iter_copy_dump(raw, want):
+            if table == "fixes":
+                score = int(r["score"]) if r.get("score") not in (None, "") else None
+                groups.setdefault((r["cve_id"], r["repo_url"]), []).append((r["hash"], score))
+                _bump(stats, f"fix_links_rel_type:{r.get('rel_type')}:{'direct' if score == MOREFIXES_DIRECT else 'prospector'}")
+            elif table == "commits":
+                commits[(r["hash"], r["repo_url"])] = (_date(r.get("author_date")), _date(r.get("committer_date")))
+            elif table == "file_change":           # programming_language is a guesslang guess: unused
+                p = r.get("new_path") if r.get("new_path") not in (None, "None") else r.get("old_path")
+                p = p or r.get("filename") or ""
+                files.setdefault(r["hash"], []).append((p, file_lang(p)))
+            elif table == "cve":
+                cve_date[r["cve_id"]] = _date(r.get("published_date"))
+            elif table == "cwe_classification":
+                cwes.setdefault(r["cve_id"], set()).add(r["cwe_id"])
+            elif table == "repository":
+                repo_lang[r["repo_url"]] = _LANG_NAMES.get(str(r.get("repo_language") or "").lower())
+    rows = []
+    for (cve, url), links in groups.items():
+        direct = [s for s, sc in links if sc == MOREFIXES_DIRECT]
+        found = {s: sc for s, sc in links if sc != MOREFIXES_DIRECT and sc is not None and sc >= min_score}
+        _bump(stats, "fix_links_below_min_score", sum(1 for _, sc in links if sc is None or sc < min_score))
+        if direct:
+            shas, link = direct, "advisory"
+            _bump(stats, "prospector_links_ignored_for_advisory_links", len(found))
+        elif found:
+            shas, link = list(found), "prospector"
+            _bump(stats, "groups_heuristic_only")
+        else:
+            _bump(stats, "groups_below_min_score_only")
+            continue
+        dated = sorted(dict.fromkeys(shas), key=lambda s: (max(filter(None, commits.get((s, url), (None, None))),
+                                                                default="9999"), s))
+        repo = github_repo(url)
+        fix = dated[0]
+        fl = files.get(fix)
+        non_test = [(p, lg) for p, lg in fl or [] if not _is_test(p)]
+        fams = {lg for _, lg in non_test} - {None}
+        lang = (fams.pop() if len(fams) == 1 else
+                repo_lang.get(url) if repo_lang.get(url) in fams else "mixed" if fams else None)
+        row = _row("morefixes", cve, aliases=[cve], repo=repo, repo_url=None if repo else url, fix_shas=dated,
+                   cwe=sorted(cwes.get(cve, [])), language=lang, language_basis="fix_file_extensions" if lang else None,
+                   advisory_published=cve_date.get(cve), fix_link=link, heuristic_fix_link=link == "prospector",
+                   fix_score=MOREFIXES_DIRECT if link == "advisory" else found[fix])
+        if (fix, url) in commits:
+            a_date, c_date = commits[(fix, url)]
+            row.update(enrich_status="ok", enrich_basis="morefixes", author_date=a_date, committer_date=c_date,
                        fix_commit_date=max(filter(None, (a_date, c_date)), default=None))
             if fl is not None:
                 row.update(n_files=len(non_test), n_files_total=len(fl),

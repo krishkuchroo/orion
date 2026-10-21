@@ -83,15 +83,33 @@ Rules for working on it:
 ## Orion-LM track (branch `eval/orion-lm`, started 2026-10-18)
 
 Design: `docs/superpowers/specs/2026-10-18-orion-lm-design.md` — **APPROVED 2026-10-18.** Plan:
-`docs/superpowers/plans/2026-10-18-orion-lm.md` (rev 2). **Build paused after Task E3** — A1–A6,
-B1–B6, C1, E1–E3 done and reviewed (eval 190 passed; orion 259 passed + 1 expected Neo4j fail);
-next E4. Status, rulings and Krish-check items: `docs/superpowers/plans/2026-10-18-orion-lm-progress.md`.
+`docs/superpowers/plans/2026-10-18-orion-lm.md` (rev 2). **Hybrid plan code built** (branch
+`train/d2-d3`: D2/D3 + H1–H11, each task reviewed; whole-branch review fixes landed and re-checked
+clean); earlier A1–A6, B1–B6, C1, E1–E3 done and reviewed. Status, rulings and Krish-check items: `docs/superpowers/plans/2026-10-18-orion-lm-progress.md`.
 Goal: fine-tune an open-weight model (Unsloth, cloud GPU) that runs
 **in-process inside Orion** (MLX-LM, no Claude, no Ollama) via a **hand-written prompter** that
 writes Cypher over the Joern→Neo4j graph and judges code vulnerable/safe; then benchmark
 `orion-lm` / `orion-lm-base` vs `plain-sonnet5` / `plain-opus5` / `plain-gpt` on the post-2026-05-31
 CVEs (vulnerable AND patched commits) + OWASP Benchmark as the false-alarm set.
 
+- **Design change (2026-10-18):** training is now hybrid (Stage 1 code+context on all pairs, Stage 2
+  graph pairs); see `docs/superpowers/plans/2026-10-18-orion-lm-hybrid.md`.
+- **Hybrid status (2026-10-18):** code only — nothing trained, no model runs, no full data builds.
+  - One lead convention everywhere: the **fix site** (Stage 1 target, Stage 2 lead, rounds key, test
+    L1). Splits group by lowercased `repo_canonical`. `export` refuses the PLACEHOLDER system prompt
+    unless `allow_placeholder=True`. Live-Neo4j tests skip unless `ORION_LIVE_NEO4J=1` (DB-writing)
+    / `ORION_SPEND_TOKENS=1` (claude).
+  - Gated on Krish: freeze splits (H6 Step 6, once the source list is final — `splits.json` can never
+    be re-split), Stage 1 pilot + full run, Stage 2 builds (need graph-hardening merged), real
+    bake-off, running `train/unsloth_lora.ipynb`, and Krish's system prompt (must say "flag the fix
+    site" and cover code-only cases with no path) + `train/templates/queries.json`.
+  - **Pairs/splits (2026-10-20):** MoreFixes added (advisory-linked fixes only; Prospector links
+    tagged `heuristic_fix_link`, dropped by default) and every repo name canonicalised via GitHub
+    (leak set too; gone repos dropped as `repo_missing`). 4,850 pairs; the frozen split was
+    EXTENDED with `splits.extend` (no frozen pair moved; 43 left): train 4,120 · dev 702 · oldcve
+    28. Details: `docs/notes/orion-lm-pairs.md` "Current build (2026-10-20)".
+  - Open decision: `read_code` is offered at runtime but no training row uses it — keep it in the
+    templates or drop it from the tool set. Rounds skipped until templates exist.
 - **Status (2026-10-18):** design approved; research + codebase exploration folded in (Appendix A has
   file:line integration notes). All §8 decisions made: Qwen excluded; second labeler proposed = Love
   Kush (to confirm with them); 5 pp false-alarm margin; scoring code built on this branch, human
