@@ -100,7 +100,7 @@ def test_to_manifest_fields():
     assert mf["fix_sites"][0]["function"] == "sinkfn" and mf["fix_sites"][0]["line"] == 10
     assert mf["sink_or_protected_operation"]["sink_uid"] == "u2"
     assert mf["accepted_entry_points"][0] == {"uid": "ep", "kind": "handler",
-                                              "method_full_name": "handler", "file": "a.js"}
+                                              "method_full_name": "handler", "file": "a.js", "line": 1}
     assert isinstance(mf["entry_evidence"], str) and "ep" in mf["entry_evidence"]
     json.dumps(mf)
 
@@ -109,3 +109,28 @@ def test_to_manifest_fields_missed():
     mf = pathgt.to_manifest_fields(pathgt.candidate_paths(_db(vflows=()), V, P, [HUNK]))
     assert mf["graph_missed"] is True and mf["accepted_entry_points"] == []
     assert mf["sink_or_protected_operation"] is None and mf["labelers"] == []
+
+
+# ---- real Joern full-name formats (eval.names; the names come from real CPGs, see test_names.py) ----
+
+def test_to_manifest_fields_reduces_real_java_and_js_full_names():
+    java = "org.sasanlabs.Application.main:void(java.lang.String[])"
+    js = "app/data/user-dao.js::program:UserDAO:getUserById"
+    mf = pathgt.to_manifest_fields({"fix_sites": [
+        {"file": "A.java", "line": 3, "end": 4, "method_full_name": java},
+        {"file": "u.js", "line": 9, "end": 9, "method_full_name": js},
+        {"file": "u.js", "line": 1, "end": 1, "method_full_name": "app/data/benefits-dao.js::program"}],
+        "graph_missed": False})
+    assert [s["function"] for s in mf["fix_sites"]] == ["main", "getUserById", None]
+    assert mf["fix_sites"][0]["method_full_name"] == java       # the full name is kept for labelers
+
+
+def test_entry_points_carry_the_methods_declaration_line_from_a_real_js_scan_shape():
+    handler = "a.js::program:handler"
+    methods = [{"fn": handler, "f": "a.js", "l": 1}, {"fn": "a.js::program:sinkfn", "f": "a.js", "l": 8}]
+    entry = dict(ENTRY, method_full_name=handler)
+    cp = pathgt.candidate_paths(_db(entries=(entry,), methods=methods), V, P, [HUNK])
+    (ep,) = cp["accepted_entry_points"]
+    assert (ep["method_full_name"], ep["file"], ep["line"]) == (handler, "a.js", 1)
+    mf = pathgt.to_manifest_fields(cp)
+    assert mf["fix_sites"][0]["function"] == "sinkfn"

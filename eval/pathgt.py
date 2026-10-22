@@ -26,6 +26,7 @@ when flows pass through the fix but all survive on the patched scan (no entry po
 """
 from __future__ import annotations
 
+from eval.names import function_name
 from train import fixmap
 from train.fixmap import GraphReadError  # noqa: F401  -- re-exported for callers
 
@@ -84,7 +85,8 @@ def _candidate_paths(db, vuln_scan, patched_scan, hunks, root) -> dict:
         return cp
 
     by_flow = {f["uid"]: f for f in through}
-    method_file = {r["fn"]: fixmap.norm_path(r.get("f"), root) for r in fixmap._rows(db, vuln_scan, fixmap._Q_METHODS)}
+    method_at = {r["fn"]: (fixmap.norm_path(r.get("f"), root), r.get("l"))
+                 for r in fixmap._rows(db, vuln_scan, fixmap._Q_METHODS)}
     entries: dict[str, list[dict]] = {}
     for r in fixmap._rows(db, vuln_scan, _Q_ENTRIES):
         entries.setdefault(r.get("method_full_name"), []).append(r)
@@ -98,33 +100,33 @@ def _candidate_paths(db, vuln_scan, patched_scan, hunks, root) -> dict:
             if r["uid"] in accepted:
                 accepted[r["uid"]]["evidence"] += f"; also flow {g['uid']}"
             else:
+                file, line = method_at.get(method, (None, None))
                 accepted[r["uid"]] = {"uid": r["uid"], "kind": r.get("kind"), "method_full_name": method,
-                                      "file": method_file.get(method), "evidence": ev}
+                                      "file": file, "line": line if isinstance(line, int) else None,
+                                      "evidence": ev}
     cp["accepted_entry_points"] = list(accepted.values())
     return cp
 
 
 def to_manifest_fields(cp: dict) -> dict:
     """The manifest-v2 subset (all JSON-serialisable), for the labelers to confirm or correct:
-    fix_sites: [{file, line, end_line, function, method_full_name}] (function = last name segment,
-      the shape eval.match.path_levels reads); sink_or_protected_operation: {sink_uid, sink_category,
-      file, line, name} | None; accepted_entry_points: [{uid, kind, method_full_name, file}];
+    fix_sites: [{file, line, end_line, function, method_full_name}] (function =
+      eval.names.function_name(method_full_name): None at module level; the shape eval.match reads);
+      sink_or_protected_operation: {sink_uid, sink_category, file, line, name} | None;
+      accepted_entry_points: [{uid, kind, method_full_name, file, line}] (line = the method's
+      declaration line on the vulnerable scan, which orion-lm's file+line path metrics need);
     entry_evidence: str (one line per entry point, '' if none); labelers: always [] (a human signs);
     graph_missed: bool (True -> the human adds the path by hand)."""
     sites = [{"file": s["file"], "line": s["line"], "end_line": s["end"],
-              "function": _last(s.get("method_full_name")), "method_full_name": s.get("method_full_name")}
+              "function": function_name(s.get("method_full_name")),
+              "method_full_name": s.get("method_full_name")}
              for s in cp.get("fix_sites") or []]
     eps = cp.get("accepted_entry_points") or []
     return {"fix_sites": sites,
             "sink_or_protected_operation": cp.get("sink"),
-            "accepted_entry_points": [{k: e.get(k) for k in ("uid", "kind", "method_full_name", "file")}
+            "accepted_entry_points": [{k: e.get(k) for k in ("uid", "kind", "method_full_name", "file", "line")}
                                       for e in eps],
             "entry_evidence": "\n".join(f"{e['uid']}: {e.get('evidence')}" for e in eps),
             "labelers": [],
             "graph_missed": bool(cp.get("graph_missed"))}
 
-
-def _last(full: str | None) -> str | None:
-    if not full:
-        return None
-    return full.replace(":", ".").split(".")[-1] or full

@@ -181,3 +181,57 @@ def test_l2_falls_back_to_cwe_without_cwes():
     hit = {"file": "app.js", "function": "handler", "line": 100}
     assert match.l2({**hit, "cwe": "CWE-89"}, {**AK, "cwes": []})
     assert not match.l2({**hit, "cwe": "CWE-20"}, AK)
+
+
+# ---- I4: real Joern full names on the manifest side; orion-lm nodes compared by file + line -----
+
+JS_HANDLER = "app/routes/index.js::program:index"            # verbatim from fixtures/NodeGoat/cpg.bin
+JAVA_POST = "org.sasanlabs.Application.main:void(java.lang.String[])"   # a real javasrc full name
+
+
+def test_entry_hit_on_real_js_and_java_entry_full_names():
+    for mfn, fn, file in ((JS_HANDLER, "index", "app/routes/index.js"), (JAVA_POST, "main", "A.java")):
+        key = {"fix_sites": [], "accepted_entry_points": [{"uid": "e", "method_full_name": mfn, "file": file}]}
+        f = {"arm": "plain-opus5", "path": [{"file": file, "function": fn, "line": 3}]}
+        assert match.path_levels(f, key)["entry_hit"] is True, mfn
+        assert match.path_levels(f, key)["waypoint_f1"] == 1.0
+
+
+def test_l1_function_match_against_a_key_holding_a_full_name():
+    key = {"file": "A.java", "function": JAVA_POST, "line_start": 500, "line_end": 500}
+    assert match.l1({"file": "A.java", "function": "Application.main", "line": None}, key)
+    assert not match.l1({"file": "A.java", "function": "String)", "line": None}, key)
+
+
+LM_KEY = {"fix_sites": [{"file": "db.js", "line": 20, "end_line": 40, "function": "query"}],
+          "accepted_entry_points": [{"uid": "e1", "method_full_name": JS_HANDLER,
+                                     "file": "app/routes/index.js", "line": 5}]}
+
+
+def test_orion_lm_nodes_are_compared_by_file_and_line_not_the_callee_name():
+    # orion-lm path nodes carry the CALLEE's method_full_name (orion/lm/slice.py)
+    path = [{"file": "app/routes/index.js", "function": "__ecma.Date:getDay", "line": 7, "role": "source"},
+            {"file": "db.js", "function": "mongo.find", "line": 35, "role": "sink"}]
+    pl = match.path_levels({"arm": "orion-lm", "path": path}, LM_KEY)
+    assert pl["fix_traversal"] is True                  # 35 is inside [20-10, 40+10]
+    assert pl["entry_hit"] is True and pl["waypoint_f1"] == 1.0
+    # the same nodes read as a plain arm's: the callee names match nothing
+    plain = match.path_levels({"arm": "plain-opus5", "path": path}, LM_KEY)
+    assert plain["entry_hit"] is False and plain["fix_traversal"] is True
+
+
+def test_orion_lm_entry_without_a_line_is_never_hit_and_windows_are_bounded():
+    far = [{"file": "app/routes/index.js", "function": "x", "line": 16}]        # 5 + 10 < 16
+    assert match.path_levels({"arm": "orion-lm", "path": far}, LM_KEY)["entry_hit"] is False
+    no_line = {**LM_KEY, "accepted_entry_points": [dict(LM_KEY["accepted_entry_points"][0], line=None)]}
+    near = [{"file": "app/routes/index.js", "function": "x", "line": 5}]
+    pl = match.path_levels({"arm": "orion-lm-base", "path": near}, no_line)
+    assert pl["entry_hit"] is False and pl["waypoint_f1"] == 0.0
+
+
+def test_fix_traversal_honours_end_line():
+    key = {"fix_sites": [{"file": "db.js", "line": 20, "end_line": 40}]}
+    inside = {"path": [{"file": "db.js", "function": "q", "line": 50}]}
+    beyond = {"path": [{"file": "db.js", "function": "q", "line": 51}]}
+    assert match.path_levels(inside, key)["fix_traversal"] is True
+    assert match.path_levels(beyond, key)["fix_traversal"] is False

@@ -4,12 +4,11 @@ L1 (frozen 2026-09-17, CLAUDE.md): same file AND (function-name match OR a repor
 patched range +/-10). Path metrics never change an L1 result.
 """
 import json
-import re
 
 from eval import cwe as _cwe
+from eval.names import function_name
 
 _WINDOW = 10
-_SEG = re.compile(r"\.|::")
 
 
 def _norm_file(p):
@@ -37,16 +36,13 @@ def _strip_fn(f):
     return f or None
 
 
-def _last_seg(f):
-    f = _strip_fn(f)
-    return _SEG.split(f)[-1] if f else None
-
-
 def _func_match(finding_fn, key_fn) -> bool:
+    """Same function: equal as written, or equal bare names (eval.names.function_name on both sides,
+    so a Joern full name, "Cls.m", "Cls::m" and "m()" all reduce to "m")."""
     k, f = _strip_fn(key_fn), _strip_fn(finding_fn)
     if k is None or f is None:
         return False
-    return f == k or _last_seg(f) == k
+    return f == k or (function_name(f) is not None and function_name(f) == function_name(k))
 
 
 def _loc(finding, key_file, key_fn, lo, hi) -> bool:
@@ -93,37 +89,80 @@ def _f1(a: set, b: set):
     return 2 * p * r / (p + r)
 
 
+def _in_window(node: dict, site: dict) -> bool:
+    """A path node inside a site's L1 window: same file and line in [line - 10, end_line + 10]
+    (a site without end_line is the single line `line`)."""
+    if node.get("line") is None or not _same_file(node.get("file"), site.get("file")):
+        return False
+    lo, hi = site.get("line"), site.get("end_line")
+    if lo is None and hi is None:
+        return False
+    lo, hi = (hi if lo is None else lo), (lo if hi is None else hi)
+    return min(lo, hi) - _WINDOW <= node["line"] <= max(lo, hi) + _WINDOW
+
+
+def _entry_site(e: dict) -> dict:
+    return {"file": e.get("file"), "line": e.get("line"), "end_line": e.get("end_line")}
+
+
+def _lm_waypoint_f1(path: list, waypoints: list):
+    """Waypoint F1 by file + line (orion-lm nodes): P = share of distinct (file, line) nodes inside
+    some waypoint's window, R = share of waypoints with some node inside their window."""
+    nodes = list({(_norm_file(n.get("file")), n.get("line")): n for n in path}.values())
+    if not nodes or not waypoints:
+        return None
+    node_hits = sum(1 for n in nodes if any(_in_window(n, w) for w in waypoints))
+    wp_hits = sum(1 for w in waypoints if any(_in_window(n, w) for n in nodes))
+    if not node_hits or not wp_hits:
+        return 0.0
+    p, r = node_hits / len(nodes), wp_hits / len(waypoints)
+    return 2 * p * r / (p + r)
+
+
 def path_levels(finding: dict, answer_key: dict) -> dict:
     """Secondary path metrics (spec section 6).
 
     edge_validity is None for now: it needs the code graph to check each hop is a real edge.
-    fix_traversal is deliberately line-only (spec: a path node's file and line +/-10 of a fix site),
-    NOT l1_fix_site: a function-name match would credit any path through the fix function.
+    fix_traversal is deliberately location-only (spec: a path node's file and line within +/-10 of a
+    fix site, i.e. in [line - 10, end_line + 10]), NOT l1_fix_site: a function-name match would credit
+    any path through the fix function.
+
+    orion-lm path nodes (a finding whose arm starts with "orion-lm") carry CpgCall.method_full_name,
+    the CALLEE's full name (orion/lm/slice.py, shared by the runtime and the training data, so it is
+    not changed here), not the enclosing function. For those nodes the path metrics compare file +
+    line only: entry_hit = the first node inside an accepted entry point's window (its declaration
+    `line`, from eval.pathgt, +/-10; an entry point without a line cannot be hit), and waypoint_f1 is
+    computed over (file, line) windows (_lm_waypoint_f1). Plain arms' nodes name the enclosing
+    function, so for them entry_hit and waypoint_f1 compare (file, function) via eval.names.
+    KRISH CHECK: the two rules make the secondary path metrics less comparable across arms.
     """
     path = finding.get("path") or []
     fixes = answer_key.get("fix_sites") or []
     entries = answer_key.get("accepted_entry_points") or []
+    lm_nodes = str(finding.get("arm") or "").startswith("orion-lm")
 
-    fix_traversal = any(
-        _same_file(n.get("file"), fs.get("file")) and n.get("line") is not None
-        and fs.get("line") is not None and abs(n["line"] - fs["line"]) <= _WINDOW
-        for n in path for fs in fixes)
+    fix_traversal = any(_in_window(n, fs) for n in path for fs in fixes)
 
     entry_hit = False
     if path:
         first = path[0]
         for e in entries:
-            fn_ok = _func_match(first.get("function"), _last_seg(e.get("method_full_name")))
-            file_ok = e.get("file") is None or _same_file(first.get("file"), e.get("file"))
-            if fn_ok and file_ok:
+            if lm_nodes:
+                hit = e.get("line") is not None and _in_window(first, _entry_site(e))
+            else:
+                hit = (_func_match(first.get("function"), function_name(e.get("method_full_name")))
+                       and (e.get("file") is None or _same_file(first.get("file"), e.get("file"))))
+            if hit:
                 entry_hit = True
                 break
 
     waypoint_f1 = None
-    if path:
-        got = {(_norm_file(n.get("file")), _last_seg(n.get("function"))) for n in path}
-        want = {(_norm_file(fs.get("file")), _last_seg(fs.get("function"))) for fs in fixes}
-        want |= {(_norm_file(e.get("file")), _last_seg(e.get("method_full_name"))) for e in entries}
+    if path and lm_nodes:
+        waypoint_f1 = _lm_waypoint_f1(path, list(fixes) + [_entry_site(e) for e in entries])
+    elif path:
+        got = {(_norm_file(n.get("file")), function_name(n.get("function"))) for n in path}
+        want = {(_norm_file(fs.get("file")), function_name(fs.get("function"))) for fs in fixes}
+        want |= {(_norm_file(e.get("file")), function_name(e.get("method_full_name"))) for e in entries}
         waypoint_f1 = _f1(got, want)
 
     return {"fix_traversal": fix_traversal, "entry_hit": entry_hit,
