@@ -6,18 +6,31 @@ moves to tier "scale" for ALL arms (reported separately), decided before any arm
 cherry-picked.
 
   buildable(repo_url, sha, *, mirror_root, builder)  -> {ok, seconds, nodes, error, stage}
-  python -m eval.precheck --manifest eval/dataset/manifest.json [--write] [--id ID ...]
+  python -m eval.precheck --manifest eval/dataset/manifest.json [--write] [--id ID ...] [--report PATH]
 
 Run it from the repository root. (Not under `python -I`: isolated mode drops the working directory
 from sys.path, and the venv's editable install points at another checkout, so `eval` would not import.
 The untrusted trees are never the working directory nor on sys.path: they are only exported, parsed by
 Joern and deleted.)
 
-The CLI writes a `precheck` record into every row it checks (measured values only; a missing one stays
-None) and saves the manifest after each row. With --write it also moves a row whose build failed on
-either commit to tier "scale", keeping the old tier in `precheck.tier_before`. A row whose mirror or
-export failed was not checked: its record says "not_checked" and it is never moved; neither is a row
-outside --id.
+What counts as a build failure. Only the COMMIT failing: Joern or the normalizer raising, persist
+failing on the data, or the build's pathfind step failing (graph_build keeps that error in the scan's
+OrionScan record and persists no CandidateFlows; every orion-lm run on that commit would crash). The
+MACHINE failing is not: Neo4j unreachable, a dropped bolt connection, an auth error
+(neo4j ServiceUnavailable / SessionExpired / AuthError, anywhere in the exception chain) or a missing
+Joern binary is stage "setup" -> "not_checked", never moved. So is a mirror or export failure. The CLI
+also refuses to start (exit 1, nothing written) unless Neo4j answers and the Joern binaries exist.
+
+Where records go. Every checked row gets a record {result, joern_heap_gb, orion_commit, checked_at,
+vulnerable: {sha, ok, seconds, nodes, error, stage}, patched: {...}}, result "ok" | "build_failed" |
+"not_checked". Records always go to the report file (--report, default precheck_report.json next to the
+manifest; merged by row id, saved after each row). The manifest is only written with --write: then each
+checked row's `precheck` is updated and a "build_failed" row moves to tier "scale". Without --write the
+manifest is not touched (a dry run).
+
+Re-runs keep the past. A new record carries the earlier ones in `history` (oldest first) and keeps the
+original `tier_before` of a moved row, so a later "ok" build never hides or undoes a move: the row stays
+"scale" (moving a row back is a human decision) with both records visible.
 
 `seconds` is the builder's wall time only (mirror and export excluded); on a failed build it is the
 time until the failure. `nodes` is what the builder reports (the default: the nodes Neo4j wrote, from
@@ -38,6 +51,32 @@ from eval import repo
 JOERN_HEAP_GB = 8   # spec 5.4
 
 
+class InfraError(RuntimeError):
+    """The machine failed, not the commit (e.g. a Joern binary is missing). Never a build failure."""
+
+
+class BuildFailed(RuntimeError):
+    """The commit failed to build; `nodes` keeps what Neo4j wrote when the graph exists (pathfind)."""
+
+    def __init__(self, msg: str, *, nodes=None):
+        super().__init__(msg)
+        self.nodes = nodes
+
+
+def _is_infra(exc) -> bool:
+    """True when `exc` (or anything in its __cause__/__context__ chain) is a machine failure."""
+    from neo4j.exceptions import AuthError, ServiceUnavailable, SessionExpired
+    seen = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        if isinstance(exc, (InfraError, ServiceUnavailable, SessionExpired, AuthError)):
+            return True
+        if isinstance(exc, FileNotFoundError) and "joern" in os.path.basename(str(exc.filename or "")):
+            return True
+        exc = exc.__cause__ or exc.__context__
+    return False
+
+
 def mirror_dir_for(repo_url: str, mirror_root: str) -> str:
     """One bare mirror per repo (github.com/<owner>/<name> -> <mirror_root>/<owner>__<name>), shared by
     every row and both commits of that repo."""
@@ -53,6 +92,13 @@ def _print_event(ev) -> None:
     print("    " + (_format_event(ev) if isinstance(ev, dict) else str(ev)), flush=True)
 
 
+def _joern_missing() -> list:
+    """The Joern executables the streaming build runs (joern-parse, joern) that are not there."""
+    from orion.graph import joern_adapter
+    paths = (joern_adapter._joern_bin("joern-parse"), joern_adapter._joern_bin("joern"))
+    return [str(p) for p in paths if not (p.is_file() and os.access(p, os.X_OK))]
+
+
 def _drop_scan(scan_id: str) -> None:
     """Delete the pre-check's graph partition (and record) from Neo4j: no arm ever reuses it (its
     scan_id is tied to the deleted temp tree), and 500+ builds would otherwise pile up."""
@@ -66,16 +112,30 @@ def _drop_scan(scan_id: str) -> None:
         driver.close()
 
 
+def _nodes_written(scan_id: str):
+    from orion.graph import scans
+    rec = scans.get_record(scan_id)
+    counts = rec.get("counts") if isinstance(rec, dict) else None
+    nodes = counts.get("nodes") if isinstance(counts, dict) else None
+    if not isinstance(nodes, dict):
+        return None
+    return sum(v for v in nodes.values() if isinstance(v, int))
+
+
 def lm_graph_build(tree: str):
     """Build `tree` exactly as the orion-lm arm does (eval.arms.lm._build_graph: lm sink profile,
     streaming build, OrionScan record) with Joern's heap pinned to JOERN_HEAP_GB, and return the number
     of nodes Neo4j wrote (sum of the record's counts.nodes) or None when the record does not say.
-    Joern's temp files (cpg.bin, the stream work dir) are kept in a `tmp` dir next to the tree, so the
-    caller's cleanup removes them too; the scan's Neo4j partition is deleted afterwards. Raises when the
-    build fails."""
+
+    Raises InfraError when a Joern binary is missing, BuildFailed when the build's pathfind step failed
+    (eval.arms.lm._pathfind_error: the same check the arm makes before it runs), and whatever the build
+    raises otherwise. Joern's temp files (cpg.bin, the stream work dir) are kept in a `tmp` dir next to
+    the tree, so the caller's cleanup removes them too; the scan's Neo4j partition is deleted afterwards."""
     from orion import config
-    from orion.graph import scans
     from eval.arms import lm
+    missing = _joern_missing()
+    if missing:
+        raise InfraError(f"Joern binaries not found: {', '.join(missing)} (JOERN_HOME={config.JOERN_HOME})")
     scratch = os.path.join(os.path.dirname(os.path.abspath(tree)), "tmp")
     os.makedirs(scratch, exist_ok=True)
     old_heap, old_tmp = config.JOERN_HEAP_GB, tempfile.tempdir
@@ -83,12 +143,11 @@ def lm_graph_build(tree: str):
     scan_id = None
     try:
         scan_id = lm._build_graph(tree, _print_event)
-        rec = scans.get_record(scan_id)
-        counts = rec.get("counts") if isinstance(rec, dict) else None
-        nodes = counts.get("nodes") if isinstance(counts, dict) else None
-        if not isinstance(nodes, dict):
-            return None
-        return sum(v for v in nodes.values() if isinstance(v, int))
+        nodes = _nodes_written(scan_id)
+        flow_error = lm._pathfind_error(scan_id)
+        if flow_error:
+            raise BuildFailed(f"pathfind failed: {flow_error}", nodes=nodes)
+        return nodes
     finally:
         config.JOERN_HEAP_GB, tempfile.tempdir = old_heap, old_tmp
         if scan_id is not None:
@@ -103,7 +162,8 @@ def buildable(repo_url: str, sha: str, *, mirror_root: str, builder=None, tmp_ro
     """Mirror `repo_url`, export `sha` to a fresh temp dir outside any repo, run `builder(tree)` (default
     lm_graph_build) and time it, then delete the tree. Returns {ok, seconds, nodes, error, stage}:
     stage is how far it got ("setup" | "mirror" | "export" | "build"); only stage "build" with ok False
-    is a build failure. Never raises."""
+    is a build failure. A machine failure inside the build (_is_infra) is reported as stage "setup".
+    Never raises."""
     from eval.run import _leak_guard   # the launcher's rule: no tree under a CLAUDE.md or .git
     builder = builder or lm_graph_build
     out = {"ok": False, "seconds": None, "nodes": None, "error": None, "stage": "setup"}
@@ -126,6 +186,10 @@ def buildable(repo_url: str, sha: str, *, mirror_root: str, builder=None, tmp_ro
     except Exception as e:
         if t0 is not None:
             out["seconds"] = time.monotonic() - t0
+        if out["stage"] == "build" and _is_infra(e):
+            out["stage"] = "setup"
+        if isinstance(e, BuildFailed) and isinstance(e.nodes, int):
+            out["nodes"] = e.nodes
         out["error"] = f"{e.__class__.__name__}: {e}"[:4000]
     finally:
         shutil.rmtree(work, ignore_errors=True)
@@ -137,6 +201,27 @@ def buildable(repo_url: str, sha: str, *, mirror_root: str, builder=None, tmp_ro
 def _orion_commit() -> str:
     from eval.run import git_head
     return git_head(".")
+
+
+def _preflight() -> list:
+    """Why this machine cannot run the pre-check now (empty = ready): Joern binaries present and Neo4j
+    answering a read with Orion's credentials."""
+    from neo4j import GraphDatabase
+    from orion import config
+    problems = []
+    missing = _joern_missing()
+    if missing:
+        problems.append(f"Joern binaries not found: {', '.join(missing)} (JOERN_HOME={config.JOERN_HOME})")
+    try:
+        driver = GraphDatabase.driver(config.NEO4J_URI, auth=config.NEO4J_AUTH, connection_timeout=10)
+        try:
+            with driver.session(database=config.NEO4J_DATABASE) as s:
+                s.run("RETURN 1").consume()
+        finally:
+            driver.close()
+    except Exception as e:
+        problems.append(f"Neo4j at {config.NEO4J_URI} is not usable: {e.__class__.__name__}: {e}"[:600])
+    return problems
 
 
 def _save(path: str, data: dict) -> None:
@@ -155,14 +240,26 @@ def _result(sides: dict) -> str:
     return "not_checked"
 
 
+def _carry(prev, rec: dict) -> dict:
+    """`rec` plus the past: earlier records in `history` (oldest first) and the original tier_before."""
+    if isinstance(prev, dict):
+        rec["history"] = list(prev.get("history") or []) + [{k: v for k, v in prev.items() if k != "history"}]
+        if prev.get("tier_before") is not None:
+            rec["tier_before"] = prev["tier_before"]
+    return rec
+
+
 def main(argv=None) -> int:
     from eval import manifest
     ap = argparse.ArgumentParser(description="Scale-tier pre-check: graph-build both commits of every "
                                              "manifest row (Joern heap 8 GB, no model).")
     ap.add_argument("--manifest", default="eval/dataset/manifest.json")
     ap.add_argument("--write", action="store_true",
-                    help="also move every row whose build failed on either commit to tier 'scale'")
+                    help="write the records into the manifest and move every row whose build failed on "
+                         "either commit to tier 'scale' (without it the manifest is not touched)")
     ap.add_argument("--id", action="append", default=[], help="check only this row id (repeatable)")
+    ap.add_argument("--report", default=None,
+                    help="where every record goes (default: precheck_report.json next to the manifest)")
     ap.add_argument("--mirror-root", default=os.path.join("eval", "mirrors", "precheck"))
     ap.add_argument("--tmp-root", default=None, help="where trees are exported (default: the system temp dir)")
     args = ap.parse_args(argv)
@@ -172,9 +269,21 @@ def main(argv=None) -> int:
     if unknown:
         print(f"unknown row id(s): {', '.join(unknown)}", flush=True)
         return 2
+    problems = _preflight()
+    if problems:   # a machine problem must never be recorded against a commit: touch nothing
+        print("pre-check not started; this machine is not ready:", flush=True)
+        for p in problems:
+            print(f"  {p}", flush=True)
+        return 1
+    report_path = args.report or os.path.join(os.path.dirname(args.manifest) or ".", "precheck_report.json")
+    report = {"manifest": args.manifest, "rows": {}}
+    if os.path.exists(report_path):
+        with open(report_path) as f:
+            report = json.load(f)
     todo = [r for r in rows if not args.id or r.get("id") in args.id]
     commit = _orion_commit()
     moved = []
+    results = []
     for i, row in enumerate(todo, 1):
         sides = {}
         for kind in ("vulnerable", "patched"):
@@ -191,17 +300,22 @@ def main(argv=None) -> int:
             print(f"[{i}/{len(todo)}] {row['id']} {kind}: {what}"[:2000], flush=True)
         rec = {"result": _result(sides), "joern_heap_gb": JOERN_HEAP_GB, "orion_commit": commit,
                "checked_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), **sides}
-        if args.write and rec["result"] == "build_failed" and row.get("tier") != "scale":
-            rec["tier_before"] = row.get("tier")
-            row["tier"] = "scale"
-            moved.append(row["id"])
-        row["precheck"] = rec
-        _save(args.manifest, data)
-    results = [r["precheck"]["result"] for r in todo]
+        results.append(rec["result"])
+        report["rows"][row["id"]] = _carry(report["rows"].get(row["id"]), dict(rec))
+        report["updated_at"] = rec["checked_at"]
+        _save(report_path, report)
+        if args.write:
+            mrec = _carry(row.get("precheck"), dict(rec))
+            if rec["result"] == "build_failed" and row.get("tier") != "scale":
+                mrec["tier_before"] = row.get("tier")
+                row["tier"] = "scale"
+                moved.append(row["id"])
+            row["precheck"] = mrec
+            _save(args.manifest, data)
     print(f"checked {len(todo)} row(s): {results.count('ok')} ok, {results.count('build_failed')} build "
-          f"failed, {results.count('not_checked')} not checked; "
-          + (f"moved to scale: {', '.join(moved) or 'none'}" if args.write else "no tier changes (no --write)"),
-          flush=True)
+          f"failed, {results.count('not_checked')} not checked; records in {report_path}; "
+          + (f"moved to scale: {', '.join(moved) or 'none'}" if args.write
+             else "manifest not touched (no --write)"), flush=True)
     return 0
 
 

@@ -29,15 +29,20 @@ event line with MLX's own peak (`mx.get_peak_memory`), when MLX is the backend.
 
 OWASP case mode (Task F2): given an OWASP `case`, discovery judges only that case. The arm reads the
 scan's CandidateFlows whose path touches the case's file (`eval.owasp.case_flows`) after the build and
-before the model loads, and passes them as `discover_lm(..., flows=...)`. No flow touches the file ->
-flows [] -> a genuine "nothing flagged" (ok, `[]`); a failed read of those flows is "crashed", like a
-failed flow read inside discover_lm.
+before the model loads, and passes them as `discover_lm(..., flows=...)` (mode "flows"). When no flow
+touches the file, the case is judged CODE-ONLY (mode "entry_only"): one one-node slice at the case's
+handler (`eval.owasp.entry_slice`), which discover_lm's `cases.case_from_flow` turns into a CodeCase
+whose target snippet is the handler -- so every case gets a judgement, not a "nothing flagged" by
+construction. `case_meta.json` in the run dir records {case_id, n_flows, mode} for the analysis to
+split flow-backed from code-only judgements. A failed read of the flows (or a handler the case file
+does not declare) is "crashed"; the F3 health checks apply to the case batch as to any other.
 
 Seams (tests replace them; nothing in the tests touches Neo4j, Joern, MLX or a model):
-`_build_graph`, `_scan_problem`, `_pathfind_error`, `_case_flows`, `_load_model`, `_discover`,
-`_free_model_memory`.
+`_build_graph`, `_scan_problem`, `_pathfind_error`, `_case_flows`, `_entry_slice`, `_load_model`,
+`_discover`, `_free_model_memory`.
 """
 import gc
+import json
 import os
 import sys
 import threading
@@ -111,6 +116,12 @@ def _free_model_memory() -> None:
     mx = sys.modules.get("mlx.core")
     if mx is not None and hasattr(mx, "clear_cache"):
         mx.clear_cache()
+
+
+def _entry_slice(repo_dir: str, case: dict) -> dict:
+    """OWASP case mode, no flow touches the case: the one-node slice at its handler (eval.owasp)."""
+    from eval import owasp
+    return owasp.entry_slice(repo_dir, case)
 
 
 def _case_flows(scan_id: str, case: dict) -> list:
@@ -239,6 +250,19 @@ class _DiscoveryHealth:
         return None
 
 
+def _write_case_meta(json_out: str, meta: dict, on_line) -> None:
+    """case_meta.json next to findings.json ({case_id, n_flows, mode}). Never raises: a failed write is
+    a warning line (the same facts are in the run's event log)."""
+    path = os.path.join(os.path.dirname(json_out) or ".", "case_meta.json")
+    try:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(meta, f, indent=1)
+            f.write("\n")
+    except Exception as e:
+        on_line(f"warning: could not write case_meta.json ({e!r})")
+
+
 def _write_findings(json_out: str, leads, on_line):
     """findings.json as `orion scan --engine lm --json` writes it; json_out, or None (a miss) if the
     write fails -- never raises, so the run's steps and tokens still reach run_one."""
@@ -271,7 +295,8 @@ def orion_lm_arm(*, arm, repo_dir, model_tag, json_out, on_line, on_start, graph
     repo_id, commit_sha  the cache key
     case_id      the run's OWASP case id ("" / None for a manifest row); recorded by run_one
     case         an OWASP case (eval/dataset/owasp_sample.json) or None: judge only its flows
-                 (`_case_flows`); None works the scan's own top CandidateFlows
+                 (`_case_flows`), or its handler code-only when it has none (`_entry_slice`);
+                 writes case_meta.json. None works the scan's own top CandidateFlows
     hung_seconds watchdog limit: that long with no step or event sets `stop` -> status "hung"
     _ignored     effort / usage_log / base_env from the shared launcher kwargs (unused here)
 
@@ -324,11 +349,18 @@ def orion_lm_arm(*, arm, repo_dir, model_tag, json_out, on_line, on_start, graph
     if case is not None:
         try:
             flows = _case_flows(scan_id, case)
+            n_flows, mode = len(flows), ("flows" if flows else "entry_only")
+            if not flows:
+                flows = [_entry_slice(repo_dir, case)]
         except Exception as exc:
             on_line(f"orion-lm: discovery crashed: loading the flows of case {case.get('case_id')} "
                     f"failed ({exc.__class__.__name__}: {exc})"[:2000])
             return ArmResult(status="crashed", findings_path=None, usage=[], steps=[])
-        on_line(f"orion-lm: case {case.get('case_id')}: {len(flows)} CandidateFlow(s) touch {case['file']}")
+        on_line(f"orion-lm: case {case.get('case_id')}: {n_flows} CandidateFlow(s) touch {case['file']}; "
+                f"mode {mode}" + (f" (judged code-only at {flows[0]['nodes'][0]['function']})"
+                                  if mode == "entry_only" else ""))
+        _write_case_meta(json_out, {"case_id": case.get("case_id"), "n_flows": n_flows, "mode": mode},
+                         on_line)
 
     # 2. model: loaded only now, after Joern is gone; seed = run number.
     on_line(f"orion-lm: loading model {model_tag} (seed {run_no})")

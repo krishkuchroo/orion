@@ -10,6 +10,7 @@ All cases of a benchmark share one repo and one pinned commit; `runs.case_id` te
   strip_answers(tree)     deletes the answer-bearing files from an exported tree (the launcher calls
                           it right after export_tree for every OWASP item, every arm)
   case_flows(db, ...)     the scan's CandidateFlows whose path touches the case's file (orion-lm arms)
+  entry_slice(tree, case) a one-node slice at the case's handler, for a case no flow touches
   score / youden          per-case confusion row; Youden J = TPR - FPR (spec 6, secondary)
   load_sample / validate_sample   eval/dataset/owasp_sample.json, the run input (not manifest rows:
                           a case has no vulnerable/patched commit pair)
@@ -212,8 +213,8 @@ CASE_FLOW_LIMIT = 10_000
 def case_flows(db, scan_id: str, case: dict) -> list:
     """The scan's CandidateFlows (rank order) whose path touches the case's file, as `flow_slice` dicts
     for `discover_lm(..., flows=...)`. A path node's file is CpgCall.file_path, repo-relative; it is
-    compared with the case's file by the L1 same-file rule. [] when no flow touches the file -- a
-    genuine 'nothing to flag', not an error. Graph errors raise (RuntimeError from slice)."""
+    compared with the case's file by the L1 same-file rule. [] when no flow touches the file (the arm
+    then judges the case code-only, from `entry_slice`). Graph errors raise (RuntimeError from slice)."""
     from orion.lm import slice as lm_slice   # lazy: eval.run imports this module
     out = []
     for flow in lm_slice.candidate_flows(db, scan_id, max_flows=CASE_FLOW_LIMIT):
@@ -221,6 +222,30 @@ def case_flows(db, scan_id: str, case: dict) -> list:
         if any(_same_file(n.get("file"), case["file"]) for n in s["nodes"]):
             out.append(s)
     return out
+
+
+def entry_slice(tree: str, case: dict) -> dict:
+    """A one-node slice at the case's handler, for a case no CandidateFlow touches: the orion-lm arm then
+    judges it code-only instead of reporting nothing by construction.
+
+    Same shape as `slice.flow_slice` (flow_id F0, rank 0, nodes [{file, function, line, code}]). There
+    is no graph flow behind it, so sink_category / source_uid / sink_uid are None, as in
+    `cases.case_from_function`. The node is the handler's declaration line (`void <m>(` / `def <m>(`,
+    with <m> the method `entry` names after '->'), read from the case file in the exported tree;
+    discover_lm's `cases.case_from_flow` turns it into a CodeCase whose target snippet is the handler
+    (`RepoIndex.enclosing` of that line) plus its callers/callees. Raises ValueError when the handler
+    is not in the file (never guessed)."""
+    handler = case["entry"].rsplit("->", 1)[-1].strip()
+    method = handler.rsplit(".", 1)[-1]
+    decl = re.compile(rf"(?:\bdef\s+|\bvoid\s+){re.escape(method)}\s*\(")
+    with open(os.path.join(tree, case["file"]), encoding="utf-8", errors="replace") as f:
+        for n, line in enumerate(f, 1):
+            if decl.search(line):
+                return {"flow_id": "F0", "rank": 0, "sink_category": None, "source_uid": None,
+                        "sink_uid": None,
+                        "nodes": [{"file": case["file"], "function": handler, "line": n, "code": line.strip()}]}
+    raise ValueError(f"{case.get('case_id')}: handler {handler!r} (from entry {case['entry']!r}) is not "
+                     f"declared in {case['file']}")
 
 
 # ---- scoring -------------------------------------------------------------------------------------

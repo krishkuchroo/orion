@@ -86,11 +86,56 @@ def test_mirror_dir_is_one_per_repo_url():
     assert precheck.mirror_dir_for("https://github.com/apache/airflow", "/m") == "/m/apache__airflow"
 
 
+
+
+# ---- machine failures are never build failures (fix round 1) -------------------------------------
+
+@pytest.mark.parametrize("make", [
+    lambda: __import__("neo4j.exceptions", fromlist=["x"]).ServiceUnavailable("Couldn't connect to localhost:7688"),
+    lambda: __import__("neo4j.exceptions", fromlist=["x"]).SessionExpired("connection dropped"),
+    lambda: __import__("neo4j.exceptions", fromlist=["x"]).AuthError("unauthorized"),
+    lambda: precheck.InfraError("Joern binaries not found: /j/joern-parse"),
+    lambda: FileNotFoundError(2, "No such file or directory", "/home/k/joern/joern-cli/joern"),
+])
+def test_a_machine_failure_inside_the_build_is_setup_not_build(tmp_path, make):
+    (tmp_path / "tmp").mkdir()
+
+    def builder(tree):
+        raise make()
+    res, _, _ = _buildable(tmp_path, builder)
+    assert res["ok"] is False and res["stage"] == "setup"
+
+
+def test_a_wrapped_neo4j_failure_is_still_setup(tmp_path):
+    from neo4j.exceptions import ServiceUnavailable
+    (tmp_path / "tmp").mkdir()
+
+    def builder(tree):
+        try:
+            raise ServiceUnavailable("bolt connection lost")
+        except ServiceUnavailable as e:
+            raise RuntimeError("persist failed") from e
+    res, _, _ = _buildable(tmp_path, builder)
+    assert res["stage"] == "setup"
+
+
+# ---- the default builder -------------------------------------------------------------------------
+
+def _default_builder_seams(monkeypatch, *, record, pathfind_error=None, build=None):
+    from orion.graph import scans
+    from eval.arms import lm
+    seen = {}
+    monkeypatch.setattr(lm, "_build_graph", build or (lambda repo_dir, on_event: "sid1"))
+    monkeypatch.setattr(scans, "get_record", lambda sid: record)
+    monkeypatch.setattr(lm, "_pathfind_error", lambda sid: pathfind_error)
+    monkeypatch.setattr(precheck, "_drop_scan", lambda sid: seen.setdefault("dropped", sid))
+    monkeypatch.setattr(precheck, "_joern_missing", lambda: [])
+    return seen
+
+
 def test_default_builder_pins_the_joern_heap_keeps_temp_files_in_the_work_dir_and_cleans_up(tmp_path,
                                                                                               monkeypatch):
     from orion import config
-    from orion.graph import scans
-    from eval.arms import lm
     seen = {}
     tree = tmp_path / "work" / "tree"
     tree.mkdir(parents=True)
@@ -100,29 +145,43 @@ def test_default_builder_pins_the_joern_heap_keeps_temp_files_in_the_work_dir_an
         seen["tmp"] = tempfile.mkdtemp(prefix="orion_cpg_")
         on_event({"phase": "build", "event": "timing", "detail": "persist: 1.0s"})
         return "sid1"
-    monkeypatch.setattr(lm, "_build_graph", fake_build)
-    monkeypatch.setattr(scans, "get_record", lambda sid: {"counts": {"nodes": {"CpgCall": 7, "CpgMethod": 3}}})
-    monkeypatch.setattr(precheck, "_drop_scan", lambda sid: seen.setdefault("dropped", sid))
+    seams = _default_builder_seams(monkeypatch, build=fake_build,
+                                   record={"counts": {"nodes": {"CpgCall": 7, "CpgMethod": 3}}})
     before = (config.JOERN_HEAP_GB, tempfile.tempdir)
     assert precheck.lm_graph_build(str(tree)) == 10
     assert seen["heap"] == "8"
     assert seen["tmp"].startswith(str(tmp_path / "work"))         # Joern's temp files die with the tree
-    assert seen["dropped"] == "sid1"                              # Neo4j partition deleted
+    assert seams["dropped"] == "sid1"                             # Neo4j partition deleted
     assert (config.JOERN_HEAP_GB, tempfile.tempdir) == before     # restored
 
 
 def test_default_builder_reports_unknown_nodes_as_none(tmp_path, monkeypatch):
-    from orion.graph import scans
-    from eval.arms import lm
     tree = tmp_path / "work" / "tree"
     tree.mkdir(parents=True)
-    monkeypatch.setattr(lm, "_build_graph", lambda repo_dir, on_event: "sid1")
-    monkeypatch.setattr(scans, "get_record", lambda sid: None)
-    monkeypatch.setattr(precheck, "_drop_scan", lambda sid: None)
+    _default_builder_seams(monkeypatch, record={"status": "complete"})
     assert precheck.lm_graph_build(str(tree)) is None
 
 
-# ---- the CLI -----------------------------------------------------------------------------------
+def test_a_commit_whose_pathfind_failed_is_a_build_failure(tmp_path, monkeypatch):
+    (tmp_path / "tmp").mkdir()
+    seams = _default_builder_seams(monkeypatch, record={"counts": {"nodes": {"CpgCall": 5}}},
+                                   pathfind_error="RecursionError: maximum recursion depth exceeded")
+    res, _, _ = _buildable(tmp_path, None)                        # the default builder
+    assert res["ok"] is False and res["stage"] == "build"         # a real failure of this commit
+    assert "pathfind failed: RecursionError" in res["error"]
+    assert res["nodes"] == 5                                      # the graph exists: measured, kept
+    assert seams["dropped"] == "sid1"
+
+
+def test_default_builder_with_joern_missing_is_a_machine_failure(tmp_path, monkeypatch):
+    (tmp_path / "tmp").mkdir()
+    _default_builder_seams(monkeypatch, record=None)
+    monkeypatch.setattr(precheck, "_joern_missing", lambda: ["/j/joern-parse"])
+    res, _, _ = _buildable(tmp_path, None)
+    assert res["stage"] == "setup" and "joern-parse" in res["error"]
+
+
+# ---- the CLI -------------------------------------------------------------------------------------
 
 ROWS = [
     {"id": "CVE-1", "repo_url": "https://github.com/a/one", "tier": "headline",
@@ -146,54 +205,113 @@ OUTCOMES = {
 }
 
 
-def _cli(tmp_path, monkeypatch, *args):
+def _manifest(tmp_path):
     man = tmp_path / "manifest.json"
-    man.write_text(json.dumps({"version": 2, "repos": [dict(r) for r in ROWS]}, indent=1) + "\n")
+    if not man.exists():
+        man.write_text(json.dumps({"version": 2, "repos": [dict(r) for r in ROWS]}, indent=1) + "\n")
+    return man
+
+
+def _cli(tmp_path, monkeypatch, *args, outcomes=OUTCOMES, preflight=()):
+    man = _manifest(tmp_path)
     calls = []
 
     def fake(repo_url, sha, **kw):
         calls.append((repo_url, sha))
-        return dict(OUTCOMES[sha])
+        return dict(outcomes[sha])
     monkeypatch.setattr(precheck, "buildable", fake)
     monkeypatch.setattr(precheck, "_orion_commit", lambda: "deadbeef")
+    monkeypatch.setattr(precheck, "_preflight", lambda: list(preflight))
     rc = precheck.main(["--manifest", str(man), *args])
-    return rc, json.loads(man.read_text()), calls
+    report = tmp_path / "precheck_report.json"
+    return rc, json.loads(man.read_text()), calls, (json.loads(report.read_text()) if report.exists() else None)
 
 
-def test_cli_checks_both_commits_of_every_row_and_writes_a_record_per_row(tmp_path, monkeypatch):
-    rc, data, calls = _cli(tmp_path, monkeypatch)
+def test_cli_checks_both_commits_and_a_dry_run_leaves_the_manifest_untouched(tmp_path, monkeypatch):
+    man = _manifest(tmp_path)
+    before = man.read_bytes()
+    rc, data, calls, report = _cli(tmp_path, monkeypatch)
     assert rc == 0
     assert calls == [("https://github.com/a/one", "v1"), ("https://github.com/a/one", "p1"),
                      ("https://github.com/a/two", "v2"), ("https://github.com/a/two", "p2"),
                      ("https://github.com/a/three", "v3"), ("https://github.com/a/three", "p3")]
-    one, two, three = data["repos"]
-    assert one["precheck"]["result"] == "ok"
-    assert one["precheck"]["vulnerable"] == dict(_ok(), sha="v1")
-    assert one["precheck"]["joern_heap_gb"] == 8 and one["precheck"]["orion_commit"] == "deadbeef"
-    assert two["precheck"]["result"] == "build_failed"
-    assert two["precheck"]["patched"]["error"] == "OOM"
-    assert three["precheck"]["result"] == "not_checked"
-    assert [r["tier"] for r in data["repos"]] == ["headline"] * 3   # no --write: no tier moves
-    assert data["version"] == 2                                        # rest of the file kept
+    assert man.read_bytes() == before                                  # truly dry
+    one, two, three = (report["rows"][k] for k in ("CVE-1", "CVE-2", "CVE-3"))
+    assert one["result"] == "ok" and one["vulnerable"] == dict(_ok(), sha="v1")
+    assert one["joern_heap_gb"] == 8 and one["orion_commit"] == "deadbeef"
+    assert two["result"] == "build_failed" and two["patched"]["error"] == "OOM"
+    assert three["result"] == "not_checked"
 
 
 def test_cli_write_moves_only_rows_whose_build_failed_on_either_commit(tmp_path, monkeypatch):
-    rc, data, _ = _cli(tmp_path, monkeypatch, "--write")
+    rc, data, _, report = _cli(tmp_path, monkeypatch, "--write")
     assert rc == 0
     one, two, three = data["repos"]
-    assert one["tier"] == "headline"
+    assert one["tier"] == "headline" and one["precheck"]["result"] == "ok"
     assert two["tier"] == "scale" and two["precheck"]["tier_before"] == "headline"
-    assert three["tier"] == "headline"            # export failed: not checked, never moved
+    assert three["tier"] == "headline" and three["precheck"]["result"] == "not_checked"   # never moved
+    assert data["version"] == 2 and set(report["rows"]) == {"CVE-1", "CVE-2", "CVE-3"}
+
+
+def test_cli_a_machine_failure_never_moves_a_row(tmp_path, monkeypatch):
+    down = {"ok": False, "seconds": 0.2, "nodes": None, "stage": "setup",
+            "error": "ServiceUnavailable: Couldn't connect to localhost:7688"}
+    rc, data, _, _ = _cli(tmp_path, monkeypatch, "--write", outcomes={k: dict(down) for k in OUTCOMES})
+    assert rc == 0
+    assert [r["tier"] for r in data["repos"]] == ["headline"] * 3
+    assert {r["precheck"]["result"] for r in data["repos"]} == {"not_checked"}
+
+
+def test_cli_a_failing_preflight_writes_nothing(tmp_path, monkeypatch, capsys):
+    man = _manifest(tmp_path)
+    before = man.read_bytes()
+    rc, _, calls, report = _cli(tmp_path, monkeypatch, "--write",
+                                preflight=["Neo4j at bolt://localhost:7688 is not usable: ServiceUnavailable"])
+    assert rc == 1 and calls == [] and report is None
+    assert man.read_bytes() == before
+    assert "not usable" in capsys.readouterr().out
+
+
+def test_cli_a_rerun_keeps_the_move_and_the_first_failure(tmp_path, monkeypatch):
+    rc, _, _, _ = _cli(tmp_path, monkeypatch, "--write")
+    assert rc == 0
+    healed = dict(OUTCOMES, p2=_ok(seconds=3.0))                       # the second run builds CVE-2 fine
+    rc, data, _, report = _cli(tmp_path, monkeypatch, "--write", outcomes=healed)
+    assert rc == 0
+    two = data["repos"][1]
+    assert two["tier"] == "scale"                                       # never silently restored
+    assert two["precheck"]["result"] == "ok"
+    assert two["precheck"]["tier_before"] == "headline"                 # carried forward
+    (first,) = two["precheck"]["history"]
+    assert first["result"] == "build_failed" and first["patched"]["error"] == "OOM"
+    assert [h["result"] for h in report["rows"]["CVE-2"]["history"]] == ["build_failed"]
 
 
 def test_cli_id_filter_checks_and_moves_only_the_named_rows(tmp_path, monkeypatch):
-    rc, data, calls = _cli(tmp_path, monkeypatch, "--write", "--id", "CVE-1")
+    rc, data, calls, report = _cli(tmp_path, monkeypatch, "--write", "--id", "CVE-1")
     assert rc == 0 and [sha for _, sha in calls] == ["v1", "p1"]
     one, two, three = data["repos"]
     assert "precheck" in one and "precheck" not in two and "precheck" not in three
     assert two["tier"] == "headline"              # never moved: it was not checked
+    assert set(report["rows"]) == {"CVE-1"}
 
 
 def test_cli_refuses_an_unknown_id(tmp_path, monkeypatch, capsys):
-    rc, _, calls = _cli(tmp_path, monkeypatch, "--id", "CVE-9")
+    rc, _, calls, _ = _cli(tmp_path, monkeypatch, "--id", "CVE-9")
     assert rc == 2 and calls == [] and "CVE-9" in capsys.readouterr().out
+
+
+def test_preflight_reports_neo4j_down_and_missing_joern(monkeypatch):
+    import neo4j
+    from neo4j.exceptions import ServiceUnavailable
+
+    class Driver:
+        def session(self, **kw):
+            raise ServiceUnavailable("Couldn't connect to localhost:7688")
+
+        def close(self):
+            pass
+    monkeypatch.setattr(neo4j.GraphDatabase, "driver", lambda *a, **k: Driver())
+    monkeypatch.setattr(precheck, "_joern_missing", lambda: ["/j/joern"])
+    problems = precheck._preflight()
+    assert any("Joern" in p for p in problems) and any("ServiceUnavailable" in p for p in problems)

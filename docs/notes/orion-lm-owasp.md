@@ -176,13 +176,32 @@ stripped. They do not change behaviour, but every arm reads them.
   - It uses the same findings shape as `TASK_PROMPT`, including `path`. The shape text is cut from
     `TASK_PROMPT`, whose sha256 a test pins.
   - The case's `real` never reaches the prompt.
-- **orion-lm arms**:
+- **orion-lm arms** (two modes; fix round 1):
   - After the build, `owasp.case_flows` keeps the scan's CandidateFlows with any path node in the
     case's file. A path node's file is `CpgCall.file_path`, repo-relative, compared by the L1
     same-file rule.
-  - Those flows go to `discover_lm(..., flows=...)`.
-  - Zero flows gives status ok and `[]`, a genuine "nothing flagged".
-  - A failed flow read is "crashed". The F3 checks still apply.
+  - Mode `flows`: when there are such flows, they go to `discover_lm(..., flows=...)`.
+  - Mode `entry_only`: when there are none, the case is judged code-only instead of being an empty
+    "nothing flagged" by construction.
+    - `owasp.entry_slice` builds a one-node `flow_slice`-shaped dict at the handler's declaration
+      line: `F0`, rank 0, `sink_category` / `source_uid` / `sink_uid` None, as in
+      `cases.case_from_function`. The line comes from `void doPost(` / `def <id>_post(` in the case
+      file.
+    - The real `discover_lm` path turns it into a CodeCase: `cases.case_from_flow`, then
+      `RepoIndex.enclosing`. Its target snippet is the handler, plus callers and callees.
+    - Checked on the real trees: the target snippet is the case's handler for 60 of 60 Java and
+      60 of 60 Python sampled cases.
+  - Every run writes `case_meta.json` (`{case_id, n_flows, mode}`) in its run dir, so the analysis
+    can split flow-backed from code-only judgements.
+  - A failed flow read, or a handler the case file does not declare, is "crashed". The F3 checks
+    still apply (an entry-only batch that fails is crashed).
+  - Entry-only cases carry no category (`sink_category=None`); flow cases carry pathfind's sink
+    category. The plain arms are told the OWASP category in `CASE_PROMPT`. Keep this asymmetry in
+    mind when comparing arms.
+  - Orion's `RepoIndex` resolves callers and callees by bare name across the repo. In all 60 Java
+    entry-only cases the context snippets include code from other files, e.g. the `doGet` of
+    *other* `BenchmarkTest` cases, which call `doPost` too. This is `orion/lm/codeindex.py`
+    behaviour, unchanged here, and it can carry other cases' hint comments (below).
 - **Scoring**: `owasp.score(findings, case)` counts a case as flagged when any normalized finding
   is in the case's file (after `./` and tree-root stripping). `owasp.youden(rows)` = TPR − FPR, and
   is `None` without real cases or without trap cases.
@@ -190,14 +209,11 @@ stripped. They do not change behaviour, but every arm reads them.
 **CONCERN: CandidateFlow cap.**
 - `graph/pathfind._MAX_FLOWS = 300` caps the CandidateFlows a build persists for the whole app. The
   cap is applied after ranking by severity, centrality and path length.
-- `case_flows` can only pick from those 300. On Java (2740 cases in one app) most cases will
-  probably have no flow in the top 300, so orion-lm's OWASP TPR is limited by the cap, not by the
-  model.
-- The measured number appears after the first OWASP build: the scan record's
-  `counts.precompute.pathfind.sinks` vs `flows`, and the `orion-lm: case ...: N CandidateFlow(s)`
-  line per run.
-- Fixing this needs a change in `orion/` (a per-file pathfind, or a higher cap with
-  `orion reanalyze`). That is out of scope here.
+- On Java (2740 cases in one app) many sampled cases will probably have no flow in the top 300.
+  Those cases now run as `entry_only`: judged, but without a graph path.
+- The split is measured per run in `case_meta.json`, and per build in the scan record's
+  `counts.precompute.pathfind.sinks` vs `flows`.
+- A per-file pathfind (a change in `orion/`) would give those cases a path. That is out of scope.
 
 ## Scale-tier pre-check (`eval/precheck.py`)
 
@@ -208,8 +224,19 @@ stripped. They do not change behaviour, but every arm reads them.
 - It runs and times `builder(tree)`. `seconds` is the build only; on a failure it is the time
   until the failure.
 - It always deletes the tree.
-- Only `stage == "build"` with `ok == False` is a build failure. A mirror, export or setup failure
-  means the commit was not checked.
+
+**What counts as a build failure (fix round 1).**
+- Only the commit failing: Joern or the normalizer raising, persist failing on the data, or the
+  build's pathfind step failing.
+  - The pathfind check is `eval.arms.lm._pathfind_error(scan_id)`, the check the arm itself makes.
+  - A commit whose pathfind failed is `stage "build"`, not ok, with the error recorded. Its node
+    count is still kept, because the graph exists.
+- The machine failing is never a build failure. These are stage `"setup"`, so the result is
+  `not_checked` and the row is never moved:
+  - neo4j `ServiceUnavailable`, `SessionExpired` or `AuthError` anywhere in the exception chain
+    (Neo4j unreachable, a dropped bolt connection, bad credentials);
+  - a missing Joern binary (`joern-parse` / `joern` under `JOERN_HOME`).
+- A mirror or export failure is also `not_checked`.
 
 The default builder `lm_graph_build`:
 - runs the orion-lm arm's own build (`eval.arms.lm._build_graph`: lm sink profile, streaming,
@@ -221,18 +248,30 @@ The default builder `lm_graph_build`:
 CLI (run from the repo root):
 
 ```
-./.venv/bin/python -m eval.precheck --manifest eval/dataset/manifest.json [--write] [--id CVE-...]
+./.venv/bin/python -m eval.precheck --manifest eval/dataset/manifest.json [--write] [--id CVE-...] [--report PATH]
 ```
 
-- It checks both commits of every row (or only the `--id` rows). It writes
-  `row["precheck"] = {result, joern_heap_gb, orion_commit, checked_at, vulnerable: {sha, ok,
-  seconds, nodes, error, stage}, patched: {...}}` and saves the manifest after each row.
+- **Preflight.** Before the first row it checks that Neo4j answers `RETURN 1` with Orion's
+  credentials and that the Joern binaries exist. If either fails, it exits 1 and writes nothing
+  (no report, no manifest).
+- It checks both commits of every row (or only the `--id` rows). Each record is
+  `{result, joern_heap_gb, orion_commit, checked_at, vulnerable: {sha, ok, seconds, nodes, error,
+  stage}, patched: {...}}`.
 - `result` is one of:
   - `ok`;
   - `build_failed`: the build failed on either commit;
-  - `not_checked`: a mirror or export failed.
-- With `--write`, every `build_failed` row moves to tier `scale` (old tier kept in
-  `precheck.tier_before`). A `not_checked` row is never moved, and neither is a row outside `--id`.
+  - `not_checked`: a machine, mirror or export failure.
+- **Records always go to the report file.** The default is `precheck_report.json` next to the
+  manifest, overridable with `--report`. It is merged by row id and saved after each row.
+- **The manifest is only written with `--write`** (a run without it is a true dry run). With
+  `--write`:
+  - each checked row's `precheck` is updated;
+  - every `build_failed` row moves to tier `scale`, with the old tier kept in
+    `precheck.tier_before`;
+  - a `not_checked` row is never moved, and neither is a row outside `--id`.
+- **Re-runs keep the past.** A new record carries the earlier ones in `history` (oldest first), and
+  keeps the original `tier_before`. A later `ok` build never hides or undoes a move: the row stays
+  `scale`, with the failing record visible in `history`. Moving a row back is a human decision.
 - It is not `python -I -m eval.precheck` as the task said. Isolated mode drops the working directory
   from `sys.path`, and the venv's editable install points at `../orion`, so `eval` does not import
   and `orion` would resolve to the other checkout. The untrusted trees are never the working
@@ -245,6 +284,13 @@ CLI (run from the repo root):
 - The default builder persists to Neo4j, so it cannot run without it. Per the ruling, the container
   was not started.
 - No build seconds or node counts exist yet.
+- The fix-round preflight was checked on this machine, against a scratch copy of the manifest with
+  `--write`:
+  - It printed `Neo4j at bolt://localhost:7688 is not usable: ServiceUnavailable ... Connection
+    refused` and exited 1.
+  - The manifest copy was byte-identical afterwards (sha256 check OK), and no report file was
+    created.
+  - No Joern problem was reported: the binaries under `~/joern/joern-cli` are present.
 - The full pre-check (2 × 258 = 516 Joern builds) is Krish's next step. Run one `--id` first as the
   smoke.
 

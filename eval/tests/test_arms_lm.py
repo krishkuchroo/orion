@@ -463,24 +463,70 @@ def test_case_mode_passes_the_cases_flows_to_discover(tmp_path, monkeypatch):
     assert seen["flows"] == [flow] and seen["asked"] == ("s1", OWASP_CASE)
     assert rec["order"] == ["build", "case_flows", "load", "discover", "release"]
     assert any("1 CandidateFlow(s) touch app.py" in l for l in lines)
+    meta = json.loads((tmp_path / "run" / "case_meta.json").read_text())
+    assert meta == {"case_id": "BenchmarkTest00001", "n_flows": 1, "mode": "flows"}
 
 
-def test_case_with_zero_flows_is_a_genuine_nothing_flagged(tmp_path, monkeypatch):
-    """The real discover_lm with flows=[]: no batch runs, status ok, findings [] (not a crash)."""
-    monkeypatch.setattr(lm, "_case_flows", lambda scan_id, case: [])
-    model = _Model(fail_calls=())
+def test_case_with_zero_flows_is_judged_code_only_at_its_entry(tmp_path, monkeypatch):
+    """Fix round 1: no CandidateFlow touches the case -> ONE entry-only case through the REAL
+    discover_lm (enrichment by cases.case_from_flow, stub model): its target snippet is the handler,
+    the model judges it, and case_meta.json says mode entry_only."""
     import orion.graphdb
+    monkeypatch.setattr(lm, "_case_flows", lambda scan_id, case: [])
     tree = tmp_path / "tree"
     tree.mkdir()
+    (tree / "app.py").write_text("import db\n\n\ndef handler(q):\n    x = q\n    db.execute(x)\n")
+    model = _Model(fail_calls=())
+    seen = []
+    real_generate = model.generate
+
+    def generate(messages):
+        seen.append(messages[-1]["content"])
+        return real_generate(messages)
+    model.generate = generate
     monkeypatch.setattr(lm, "_build_graph", lambda repo_dir, on_event: "s1")
     monkeypatch.setattr(lm, "_load_model", lambda path, **kw: model)
     monkeypatch.setattr(orion.graphdb, "GraphDB", lambda: _GraphStub(n=2))
     monkeypatch.setattr(lm, "_pathfind_error", lambda sid: None)
     lines = []
     res = _arm(tmp_path, repo_dir=str(tree), on_line=lines.append, case=OWASP_CASE)
-    assert res.status == "ok" and json.loads(open(res.findings_path).read()) == []
-    assert model.calls == 0 and res.steps == []          # the scan's 2 other flows were never judged
-    assert not any("crashed" in l for l in lines)
+    assert res.status == "ok" and model.calls == 1                  # one case, judged
+    (task,) = seen
+    assert "FLOW F0" in task and "[target] app.py:4-6 in handler" in task and "db.execute(x)" in task
+    assert "sink_category=None source_uid=None sink_uid=None" in task   # no graph flow behind it
+    assert "FLOW F1" not in task                                    # the scan's other flows never shown
+    (f,) = normalize.load_arm(res.findings_path, arm="orion-lm")
+    assert (f["file"], f["cwe"]) == ("app.py", "CWE-89")
+    meta = json.loads((tmp_path / "run" / "case_meta.json").read_text())
+    assert meta == {"case_id": "BenchmarkTest00001", "n_flows": 0, "mode": "entry_only"}
+    assert any("mode entry_only" in l for l in lines)
+
+
+def test_entry_only_case_whose_batch_fails_is_crashed(tmp_path, monkeypatch):
+    """The F3 health checks still apply: the single entry-only batch failing is "crashed"."""
+    import orion.graphdb
+    monkeypatch.setattr(lm, "_case_flows", lambda scan_id, case: [])
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    (tree / "app.py").write_text("def handler(q):\n    return q\n")
+    monkeypatch.setattr(lm, "_build_graph", lambda repo_dir, on_event: "s1")
+    monkeypatch.setattr(lm, "_load_model", lambda path, **kw: _Model(fail_calls="all"))
+    monkeypatch.setattr(orion.graphdb, "GraphDB", lambda: _GraphStub(n=0))
+    monkeypatch.setattr(lm, "_pathfind_error", lambda sid: None)
+    res = _arm(tmp_path, repo_dir=str(tree), case=OWASP_CASE)
+    assert res.status == "crashed" and res.findings_path is None
+
+
+def test_case_whose_handler_is_missing_is_crashed(tmp_path, monkeypatch):
+    rec = _seams(monkeypatch)
+    monkeypatch.setattr(lm, "_case_flows", lambda scan_id, case: [])
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    (tree / "app.py").write_text("x = 1\n")
+    lines = []
+    res = _arm(tmp_path, repo_dir=str(tree), case=OWASP_CASE, on_line=lines.append)
+    assert res.status == "crashed" and "load" not in rec["order"]
+    assert any("crashed" in l and "handler" in l for l in lines)
 
 
 def test_case_flow_load_failure_is_crashed_before_the_model_loads(tmp_path, monkeypatch):

@@ -360,3 +360,31 @@ def test_load_sample_reads_the_committed_file():
         for c in b["cases"]:
             per.setdefault(c["category"], []).append(c["real"])
         assert all(abs(sum(v) - (len(v) - sum(v))) <= 1 for v in per.values())
+
+
+# ---- entry_slice (fix round 1: a case no flow touches is judged code-only) ---------------------
+
+def test_entry_slice_is_a_one_node_flow_slice_at_the_java_handler(tmp_path):
+    _java_case(tmp_path, "BenchmarkTest00001")
+    case = {"case_id": "BenchmarkTest00001", "file": f"{JAVA_DIR}/BenchmarkTest00001.java",
+            "entry": "POST /pathtraver-00/BenchmarkTest00001 -> BenchmarkTest00001.doPost"}
+    s = owasp.entry_slice(str(tmp_path), case)
+    assert s == {"flow_id": "F0", "rank": 0, "sink_category": None, "source_uid": None, "sink_uid": None,
+                 "nodes": [{"file": case["file"], "function": "BenchmarkTest00001.doPost", "line": 10,
+                            "code": "public void doPost(HttpServletRequest request, HttpServletResponse response)"}]}
+
+
+def test_entry_slice_finds_the_python_post_handler_not_the_get(tmp_path):
+    _python_case(tmp_path, "BenchmarkTest00007")
+    case = {"case_id": "BenchmarkTest00007", "file": "testcode/BenchmarkTest00007.py",
+            "entry": "POST /benchmark/sqli-00/BenchmarkTest00007 -> BenchmarkTest00007_post"}
+    (node,) = owasp.entry_slice(str(tmp_path), case)["nodes"]
+    assert (node["line"], node["code"]) == (8, "def BenchmarkTest00007_post():")
+
+
+def test_entry_slice_refuses_a_handler_the_file_does_not_declare(tmp_path):
+    _python_case(tmp_path, "BenchmarkTest00007")
+    case = {"case_id": "BenchmarkTest00007", "file": "testcode/BenchmarkTest00007.py",
+            "entry": "POST /x -> nosuch_post"}
+    with pytest.raises(ValueError, match="nosuch_post"):
+        owasp.entry_slice(str(tmp_path), case)
