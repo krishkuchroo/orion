@@ -1,4 +1,5 @@
 import json
+import os
 
 import pytest
 
@@ -211,3 +212,131 @@ def test_a_patched_only_read_error_is_query_error():
             return super().run_cypher(scan_id, query, limit)
     cp = pathgt.candidate_paths(PatchedDown({V: [FLOW]}, {V: V_CALLS, P: P_CALLS}, [ENTRY]), V, P, [HUNK])
     assert cp["reason"] == "query_error" and cp["fix_sites_patched"] == []
+
+
+# ---- I10: the driver (python -m eval.pathgt); builders, graph, mirror and hunks injected -----------
+
+ROW = {"id": "CVE-1", "repo_url": "https://github.com/acme/app", "tier": "headline", "kind": "dataflow",
+       "vulnerable_commit": "v" * 40, "patched_commit": "p" * 40, "cwe": "CWE-78", "fix_sites": [],
+       "sink_or_protected_operation": None, "accepted_entry_points": [], "entry_evidence": None,
+       "labelers": [], "graph_missed": None}
+
+
+def _injected(tmp_path, *, build=None, graph=None, hunks=None, mirror=None, export=None):
+    seen = {"trees": [], "exports": [], "mirrors": []}
+
+    def default_build(tree):
+        seen["trees"].append(tree)
+        assert os.path.isfile(os.path.join(tree, "a.js"))
+        return V if len(seen["trees"]) == 1 else P
+
+    def default_export(mdir, sha, dest, **kw):
+        seen["exports"].append((mdir, sha))
+        os.makedirs(dest)
+        open(os.path.join(dest, "a.js"), "w").write("x")
+    kw = dict(mirror_root=str(tmp_path / "mirrors"), tmp_root=str(tmp_path / "tmp"),
+              builder=build or default_build, open_db=graph or (lambda: _db()),
+              hunks=hunks or (lambda mdir, v, p: [HUNK]),
+              _mirror=mirror or (lambda url, d: seen["mirrors"].append((url, d))),
+              _export=export or default_export)
+    (tmp_path / "tmp").mkdir(exist_ok=True)
+    return kw, seen
+
+
+def test_propose_row_builds_both_commits_keeps_the_scans_and_proposes_fields(tmp_path):
+    kw, seen = _injected(tmp_path)
+    rec = pathgt.propose_row(dict(ROW), **kw)
+    assert rec["result"] == "proposed" and rec["error"] is None
+    assert seen["mirrors"] == [("https://github.com/acme/app", str(tmp_path / "mirrors" / "acme__app"))]
+    assert [sha for _, sha in seen["exports"]] == ["v" * 40, "p" * 40]
+    assert (rec["vulnerable"]["scan_id"], rec["patched"]["scan_id"]) == (V, P)
+    assert rec["n_hunks"] == 1 and rec["n_flows_gone_on_patched"] == 1
+    assert rec["fields"]["fix_sites"][0]["function"] == "sinkfn" and rec["fields"]["fix_sites_patched"]
+    assert rec["fields"]["labelers"] == []
+    assert os.listdir(tmp_path / "tmp") == []                     # the trees are gone, the scans kept
+    json.dumps(rec)
+
+
+@pytest.mark.parametrize("where,expect", [("mirror", "not_checked"), ("hunks", "not_checked"),
+                                          ("export", "not_checked"), ("neo4j", "not_checked"),
+                                          ("joern", "not_checked"), ("build", "build_failed")])
+def test_propose_row_classifies_failures_like_the_precheck(tmp_path, where, expect):
+    from neo4j.exceptions import ServiceUnavailable
+    from eval import infra
+
+    def boom(*a, **k):
+        raise {"neo4j": ServiceUnavailable("down"), "joern": infra.InfraError("Joern binaries not found"),
+               "build": RuntimeError("joern-parse failed (rc=1)")}.get(where, OSError("git failed"))
+    over = {"mirror": dict(mirror=boom), "hunks": dict(hunks=boom), "export": dict(export=boom),
+            "neo4j": dict(build=boom), "joern": dict(build=boom), "build": dict(build=boom)}[where]
+    kw, _ = _injected(tmp_path, **over)
+    rec = pathgt.propose_row(dict(ROW), **kw)
+    assert rec["result"] == expect and rec["fields"] is None and rec["error"]
+
+
+@pytest.mark.parametrize("error,expect", [("ServiceUnavailable: down", "not_checked"),
+                                          ("CypherSyntaxError: bad", "query_error")])
+def test_propose_row_graph_read_errors(tmp_path, error, expect):
+    kw, _ = _injected(tmp_path, graph=lambda: _db(error=error))
+    rec = pathgt.propose_row(dict(ROW), **kw)
+    assert rec["result"] == expect and rec["fields"] is None and error.split(":")[0] in rec["error"]
+
+
+def _cli(tmp_path, monkeypatch, *args, rows=None, outcome=None, preflight=()):
+    man = tmp_path / "manifest.json"
+    man.write_text(json.dumps({"repos": rows if rows is not None else [dict(ROW)]}, indent=1) + "\n")
+    calls = []
+    real = pathgt.propose_row
+
+    def fake(row, **kw):
+        calls.append(row["id"])
+        kw2, _ = _injected(tmp_path)
+        return outcome(row) if outcome else real(row, **kw2)
+    monkeypatch.setattr(pathgt, "propose_row", fake)
+    monkeypatch.setattr(pathgt, "_preflight", lambda: list(preflight))
+    monkeypatch.setattr(pathgt, "_orion_commit", lambda: "deadbeef")
+    rc = pathgt.main(["--manifest", str(man), *args])
+    report = tmp_path / "pathgt_report.json"
+    return rc, man, calls, (json.loads(report.read_text()) if report.exists() else None)
+
+
+def test_cli_dry_run_writes_only_the_report(tmp_path, monkeypatch):
+    rc, man, calls, report = _cli(tmp_path, monkeypatch)
+    before = json.dumps({"repos": [dict(ROW)]}, indent=1) + "\n"
+    assert rc == 0 and calls == ["CVE-1"] and man.read_text() == before          # manifest byte-identical
+    rec = report["rows"]["CVE-1"]
+    assert rec["result"] == "proposed" and rec["orion_commit"] == "deadbeef" and rec["fields"]["fix_sites"]
+
+
+def test_cli_write_merges_fields_and_never_touches_a_labeled_row(tmp_path, monkeypatch):
+    signed = dict(ROW, id="CVE-2", labelers=["krish"], fix_sites=[{"file": "human.js", "line": 1}])
+    rc, man, calls, report = _cli(tmp_path, monkeypatch, "--write", rows=[dict(ROW), signed])
+    assert rc == 0 and calls == ["CVE-1"]                                       # CVE-2 never even built
+    rows = {r["id"]: r for r in json.loads(man.read_text())["repos"]}
+    assert rows["CVE-1"]["fix_sites"][0]["function"] == "sinkfn" and rows["CVE-1"]["fix_sites_patched"]
+    assert rows["CVE-1"]["labelers"] == [] and rows["CVE-1"]["pathgt"]["vulnerable_scan_id"] == V
+    assert rows["CVE-2"] == signed                                              # untouched
+    assert report["rows"]["CVE-2"]["result"] == "skipped_labeled"
+
+
+def test_cli_write_leaves_a_not_checked_row_alone(tmp_path, monkeypatch):
+    down = {"result": "not_checked", "error": "mirror: OSError: git failed", "fields": None,
+            "vulnerable": {"scan_id": None}, "patched": {"scan_id": None}}
+    rc, man, _, report = _cli(tmp_path, monkeypatch, "--write", outcome=lambda row: dict(down))
+    assert rc == 0 and json.loads(man.read_text())["repos"] == [ROW]
+    assert report["rows"]["CVE-1"]["result"] == "not_checked"
+
+
+def test_cli_preflight_failure_touches_nothing(tmp_path, monkeypatch, capsys):
+    rc, man, calls, report = _cli(tmp_path, monkeypatch, "--write", preflight=["Neo4j at bolt://x is not usable"])
+    assert rc == 1 and calls == [] and report is None
+    assert json.loads(man.read_text())["repos"] == [ROW]
+    assert "not ready" in capsys.readouterr().out
+
+
+def test_cli_unknown_id_and_rerun_history(tmp_path, monkeypatch):
+    rc, _, calls, _ = _cli(tmp_path, monkeypatch, "--id", "CVE-9")
+    assert rc == 2 and calls == []
+    _cli(tmp_path, monkeypatch)
+    rc, _, _, report = _cli(tmp_path, monkeypatch)
+    assert rc == 0 and len(report["rows"]["CVE-1"]["history"]) == 1           # the earlier record kept
