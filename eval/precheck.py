@@ -51,8 +51,7 @@ from eval import repo
 from eval.infra import InfraError  # noqa: F401  -- re-exported: the machine failed, never a build failure
 from eval.infra import is_infra as _is_infra
 from eval.infra import joern_missing as _joern_missing
-
-JOERN_HEAP_GB = 8   # spec 5.4
+from eval.lmbuild import JOERN_HEAP_GB  # noqa: F401  -- spec 5.4; recorded in every record
 
 
 class BuildFailed(RuntimeError):
@@ -102,33 +101,27 @@ def _nodes_written(scan_id: str):
 
 
 def lm_graph_build(tree: str):
-    """Build `tree` exactly as the orion-lm arm does (eval.arms.lm._build_graph: lm sink profile,
-    streaming build, OrionScan record) with Joern's heap pinned to JOERN_HEAP_GB, and return the number
-    of nodes Neo4j wrote (sum of the record's counts.nodes) or None when the record does not say.
+    """Build `tree` through eval.lmbuild.lm_build -- the ONE build the orion-lm arm also runs (lm sink
+    profile, streaming build, OrionScan record, Joern heap pinned to JOERN_HEAP_GB) -- and return the
+    number of nodes Neo4j wrote (sum of the record's counts.nodes) or None when the record does not say.
 
-    Raises InfraError when a Joern binary is missing, BuildFailed when the build's pathfind step failed
-    (eval.arms.lm._pathfind_error: the same check the arm makes before it runs), and whatever the build
-    raises otherwise. Joern's temp files (cpg.bin, the stream work dir) are kept in a `tmp` dir next to
-    the tree, so the caller's cleanup removes them too; the scan's Neo4j partition is deleted afterwards."""
-    from orion import config
+    Raises InfraError when a Joern binary is missing (lm_build), BuildFailed when the build's pathfind
+    step failed (eval.arms.lm._pathfind_error: the same check the arm makes before it runs), and
+    whatever the build raises otherwise. Joern's temp files (cpg.bin, the stream work dir) are kept in a
+    `tmp` dir next to the tree, so buildable's cleanup removes them too; the scan's Neo4j partition is
+    deleted afterwards."""
+    from eval import lmbuild
     from eval.arms import lm
-    missing = _joern_missing()
-    if missing:
-        raise InfraError(f"Joern binaries not found: {', '.join(missing)} (JOERN_HOME={config.JOERN_HOME})")
     scratch = os.path.join(os.path.dirname(os.path.abspath(tree)), "tmp")
-    os.makedirs(scratch, exist_ok=True)
-    old_heap, old_tmp = config.JOERN_HEAP_GB, tempfile.tempdir
-    config.JOERN_HEAP_GB, tempfile.tempdir = str(JOERN_HEAP_GB), scratch
     scan_id = None
     try:
-        scan_id = lm._build_graph(tree, _print_event)
+        scan_id = lmbuild.lm_build(tree, _print_event, scratch_dir=scratch)
         nodes = _nodes_written(scan_id)
         flow_error = lm._pathfind_error(scan_id)
         if flow_error:
             raise BuildFailed(f"pathfind failed: {flow_error}", nodes=nodes)
         return nodes
     finally:
-        config.JOERN_HEAP_GB, tempfile.tempdir = old_heap, old_tmp
         if scan_id is not None:
             try:
                 _drop_scan(scan_id)

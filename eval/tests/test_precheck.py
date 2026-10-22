@@ -122,14 +122,17 @@ def test_a_wrapped_neo4j_failure_is_still_setup(tmp_path):
 # ---- the default builder -------------------------------------------------------------------------
 
 def _default_builder_seams(monkeypatch, *, record, pathfind_error=None, build=None):
+    """The default builder over eval.lmbuild.lm_build with Orion's own build (lmbuild._orion_build)
+    and the Joern check stubbed: lm_build's heap/temp pinning runs for real."""
     from orion.graph import scans
+    from eval import infra, lmbuild
     from eval.arms import lm
     seen = {}
-    monkeypatch.setattr(lm, "_build_graph", build or (lambda repo_dir, on_event: "sid1"))
+    monkeypatch.setattr(lmbuild, "_orion_build", build or (lambda tree, on_event: "sid1"))
     monkeypatch.setattr(scans, "get_record", lambda sid: record)
     monkeypatch.setattr(lm, "_pathfind_error", lambda sid: pathfind_error)
     monkeypatch.setattr(precheck, "_drop_scan", lambda sid: seen.setdefault("dropped", sid))
-    monkeypatch.setattr(precheck, "_joern_missing", lambda: [])
+    monkeypatch.setattr(infra, "joern_missing", lambda: [])
     return seen
 
 
@@ -174,9 +177,10 @@ def test_a_commit_whose_pathfind_failed_is_a_build_failure(tmp_path, monkeypatch
 
 
 def test_default_builder_with_joern_missing_is_a_machine_failure(tmp_path, monkeypatch):
+    from eval import infra
     (tmp_path / "tmp").mkdir()
     _default_builder_seams(monkeypatch, record=None)
-    monkeypatch.setattr(precheck, "_joern_missing", lambda: ["/j/joern-parse"])
+    monkeypatch.setattr(infra, "joern_missing", lambda: ["/j/joern-parse"])
     res, _, _ = _buildable(tmp_path, None)
     assert res["stage"] == "setup" and "joern-parse" in res["error"]
 

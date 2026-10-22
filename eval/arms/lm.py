@@ -49,7 +49,9 @@ Seams (tests replace them; nothing in the tests touches Neo4j, Joern, MLX or a m
 import gc
 import json
 import os
+import shutil
 import sys
+import tempfile
 import threading
 import time
 import traceback
@@ -68,17 +70,16 @@ DEFAULT_HUNG_SECONDS = 3600   # 60 min with no step or event (protocol: a run is
 # ---- seams --------------------------------------------------------------------------------------
 
 def _build_graph(repo_dir: str, on_event) -> str:
-    """Build `repo_dir` with the lm sink profile through Orion's own build path, exactly as
-    `orion scan --engine lm` does (streaming build, the OrionScan record written by graph_build), and
-    return its scan_id (`scan_id_for(..., profile=...)`). No semantic index: the lm engine's tools
-    are run_cypher / read_code only, and the embedding model would only add memory."""
-    from orion import graph_build
-    from orion.graph import profiles
-    profile = profiles.with_lm_sinks(profiles.select_profile(repo_dir))
-    scan_id = graph_build.scan_id_for(repo_dir, profile=profile)
-    graph_build.build(repo_dir, None, on_event, stream=True, queue_size=64, scan_id=scan_id,
-                      profile=profile)
-    return scan_id
+    """Build `repo_dir` through eval.lmbuild.lm_build -- the build the scale-tier pre-check validated
+    (lm sink profile, streaming build, OrionScan record; Joern heap pinned to 8 GB, reported in the
+    events) -- and return its scan_id. Joern's temp files (cpg.bin, the stream work dir) go to a scratch
+    dir NEXT TO the tree (inside the run's work dir, never in the tree Joern parses), deleted here."""
+    from eval import lmbuild
+    scratch = tempfile.mkdtemp(prefix="build-", dir=os.path.dirname(os.path.abspath(repo_dir)))
+    try:
+        return lmbuild.lm_build(repo_dir, on_event, scratch_dir=scratch)
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
 
 
 def _scan_problem(scan_id: str, repo_dir: str):
