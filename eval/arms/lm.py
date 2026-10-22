@@ -18,6 +18,11 @@ Rules this module is built around:
   * The same holds one step earlier: a pathfind failure at build time is kept in the scan's OrionScan
     record and leaves the graph with no CandidateFlows. The arm reads the record for a fresh build
     and for a cached reuse alike (`_pathfind_error`); such a run is "crashed" before the model loads.
+  * A MACHINE failure is never the model's miss (eval.infra): Neo4j unreachable or dropped during the
+    build, the scan-record read, the case-flow read or discovery (the flow read, a batch, or a
+    run_cypher step answering ServiceUnavailable / SessionExpired / AuthError), or a missing Joern.
+    Such a run is "aborted": not scored, and eval.run re-attempts it after --resume-wait. A genuine
+    build or model-load failure still propagates to run_one ("error"), as before.
 
 Resources: the arm is in-process, so `on_start` gets THIS process (pid = os.getpid()). PhaseSampler
 sums the process and its children, so Joern (joern-parse, a child process) is counted, but the peak RSS
@@ -52,6 +57,8 @@ import types
 
 from orion.cli import lm_verdicts, write_verdicts_json   # stdlib-only module; heavy deps are lazy
 from orion.monitor import _format_event as _event_line   # the line `orion scan` prints per event
+
+from eval import infra
 
 from . import ArmResult
 
@@ -220,18 +227,32 @@ class _DiscoveryHealth:
         self.run_errors: list = []        # details of turn-less discover errors
         self.failed_batches: set = set()  # turns of failed batches
         self.finished_batches = 0         # sessions that returned normally
+        self.machine_errors: list = []    # eval.infra machine-failure texts seen (-> "aborted")
 
     def see_event(self, ev) -> None:
         if not isinstance(ev, dict) or ev.get("phase") != "discover" or ev.get("event") != "error":
             return
+        detail = ev.get("detail") or ""
         if ev.get("turn") is None:
-            self.run_errors.append(ev.get("detail") or "")
+            self.run_errors.append(detail)
         else:
             self.failed_batches.add(ev["turn"])
+        # "loading CandidateFlows failed: <Class>: ..." / "batch N (...) failed: <Class>: ..."
+        if infra.is_infra_text(detail.partition("failed: ")[2]):
+            self.machine_errors.append(detail)
 
     def see_step(self, step) -> None:
-        if isinstance(step, dict) and step.get("kind") in _SESSION_END_KINDS:
+        if not isinstance(step, dict):
+            return
+        if step.get("kind") in _SESSION_END_KINDS:
             self.finished_batches += 1
+        # a run_cypher step's error is GraphDB's own "<Class>: <msg>" (never the model's text first)
+        if step.get("kind") == "run_cypher" and infra.is_infra_text(step.get("error")):
+            self.machine_errors.append(f"run_cypher step: {step.get('error')}")
+
+    def machine_failure(self):
+        """The first machine failure seen in discovery (Neo4j down or dropped), or None."""
+        return self.machine_errors[0] if self.machine_errors else None
 
     def crash_reason(self):
         """Why discovery must be recorded "crashed", or None."""
@@ -304,8 +325,9 @@ def orion_lm_arm(*, arm, repo_dir, model_tag, json_out, on_line, on_start, graph
     fired; the forced final's leads are still written); "crashed" (discovery raised -- traceback head
     to on_line -- or, read from its events, the flow read failed or every batch failed -- or the scan
     record says pathfind failed at build -- or the case's flows could not be read; no findings file in
-    any of these). A missing model path
-    raises ValueError before anything runs; a build or model-load failure propagates to run_one.
+    any of these); "aborted" (a machine failure, eval.infra: Neo4j down or dropped, Joern missing --
+    not scored, re-attempted by eval.run; no findings file). A missing model path raises ValueError
+    before anything runs; a genuine build or model-load failure propagates to run_one ("error").
     """
     if not model_tag or not os.path.exists(model_tag):
         raise ValueError(f"{arm}: model path {model_tag!r} does not exist "
@@ -315,6 +337,7 @@ def orion_lm_arm(*, arm, repo_dir, model_tag, json_out, on_line, on_start, graph
 
     watchdog = None
     health = _DiscoveryHealth()
+    steps: list = []
 
     def on_event(ev) -> None:
         if watchdog is not None:
@@ -322,24 +345,43 @@ def orion_lm_arm(*, arm, repo_dir, model_tag, json_out, on_line, on_start, graph
         health.see_event(ev)
         on_line(_format_event(ev))
 
+    def aborted(why: str) -> ArmResult:
+        on_line(f"orion-lm: aborted, machine failure (not the model's miss; not scored, re-attempted "
+                f"after --resume-wait): {why}"[:2000])
+        return ArmResult(status="aborted", findings_path=None,
+                         usage=[_usage_block(s) for s in steps], steps=steps)
+
+    def what(exc) -> str:
+        return f"{exc.__class__.__name__}: {exc}"
+
     # 1. graph: reuse this commit's scan when its record still says it is usable, else build it.
     key = (repo_id, commit_sha)
-    scan_id = graph_cache.get(key)
-    if scan_id is not None:
-        problem = _scan_problem(scan_id, repo_dir)
-        if problem:
-            on_line(f"orion-lm: cached graph not reusable ({problem}); rebuilding")
-            scan_id = None
-        else:
-            on_line(f"orion-lm: reusing graph scan_id {scan_id} for {repo_id}@{commit_sha}")
-    if scan_id is None:
-        on_line(f"orion-lm: building graph for {repo_id}@{commit_sha} (lm sink profile)")
-        scan_id = _build_graph(repo_dir, on_event)
-        graph_cache[key] = scan_id
-        on_line(f"orion-lm: graph built, scan_id {scan_id}")
+    try:
+        scan_id = graph_cache.get(key)
+        if scan_id is not None:
+            problem = _scan_problem(scan_id, repo_dir)
+            if problem:
+                on_line(f"orion-lm: cached graph not reusable ({problem}); rebuilding")
+                scan_id = None
+            else:
+                on_line(f"orion-lm: reusing graph scan_id {scan_id} for {repo_id}@{commit_sha}")
+        if scan_id is None:
+            on_line(f"orion-lm: building graph for {repo_id}@{commit_sha} (lm sink profile)")
+            scan_id = _build_graph(repo_dir, on_event)
+            graph_cache[key] = scan_id
+            on_line(f"orion-lm: graph built, scan_id {scan_id}")
+    except Exception as exc:
+        if infra.is_infra(exc):
+            return aborted(f"graph build: {what(exc)}")
+        raise   # a genuine build failure: run_one records "error"
     # A graph whose pathfind failed holds no CandidateFlows: discovery would report a clean "found
     # nothing". Crashed instead, before the model is loaded (fresh build and cached reuse alike).
-    flow_error = _pathfind_error(scan_id)
+    try:
+        flow_error = _pathfind_error(scan_id)
+    except Exception as exc:
+        if infra.is_infra(exc):
+            return aborted(f"reading the scan record of {scan_id}: {what(exc)}")
+        raise
     if flow_error:
         on_line(f"orion-lm: discovery crashed: scan {scan_id} has no usable CandidateFlows "
                 f"({flow_error}); rebuild it or run "
@@ -353,8 +395,10 @@ def orion_lm_arm(*, arm, repo_dir, model_tag, json_out, on_line, on_start, graph
             if not flows:
                 flows = [_entry_slice(repo_dir, case)]
         except Exception as exc:
+            if infra.is_infra(exc):
+                return aborted(f"loading the flows of case {case.get('case_id')}: {what(exc)}")
             on_line(f"orion-lm: discovery crashed: loading the flows of case {case.get('case_id')} "
-                    f"failed ({exc.__class__.__name__}: {exc})"[:2000])
+                    f"failed ({what(exc)})"[:2000])
             return ArmResult(status="crashed", findings_path=None, usage=[], steps=[])
         on_line(f"orion-lm: case {case.get('case_id')}: {n_flows} CandidateFlow(s) touch {case['file']}; "
                 f"mode {mode}" + (f" (judged code-only at {flows[0]['nodes'][0]['function']})"
@@ -372,8 +416,6 @@ def orion_lm_arm(*, arm, repo_dir, model_tag, json_out, on_line, on_start, graph
     on_line(f"orion-lm: model loaded (backend {backend or 'unknown'})")
 
     # 3. discovery, in-process, under the watchdog.
-    steps: list = []
-
     def on_step(step) -> None:
         if watchdog is not None:
             watchdog.touch()
@@ -381,27 +423,33 @@ def orion_lm_arm(*, arm, repo_dir, model_tag, json_out, on_line, on_start, graph
         steps.append(dict(step))
 
     stop = threading.Event()
-    status, leads = "ok", None
+    status, leads, machine = "ok", None, None
     try:
         with _Watchdog(hung_seconds, stop) as watchdog:
             try:
                 leads = _discover(scan_id, repo_dir, on_event, model=model, on_step=on_step,
                                   stop=stop, flows=flows)
             except Exception as exc:
-                status = "crashed"
-                on_line(f"orion-lm: discovery crashed ({exc.__class__.__name__}: {exc}); "
-                        f"{traceback.format_exc()}"[:2000])
-        reason = health.crash_reason() if status == "ok" else None
+                if infra.is_infra(exc):
+                    machine = f"discovery: {what(exc)}"
+                else:
+                    status = "crashed"
+                    on_line(f"orion-lm: discovery crashed ({what(exc)}); "
+                            f"{traceback.format_exc()}"[:2000])
+        machine = machine or health.machine_failure()
+        reason = health.crash_reason() if status == "ok" and not machine else None
         if reason:
             status = "crashed"
             on_line(f"orion-lm: discovery crashed: {reason}")
-        if status == "ok" and watchdog.fired:
+        if status == "ok" and not machine and watchdog.fired:
             status = "hung"
             on_line(f"orion-lm: hung: no step or event for {hung_seconds}s; stop was set and the "
                     "prompter forced a final answer")
     finally:
         model = None
         _free_model_memory()
+    if machine:   # Neo4j went away under discovery: whatever it returned is not the model's result
+        return aborted(machine)
     partial = health.partial_summary() if status != "crashed" else None
     if partial:
         on_line(f"orion-lm: {partial}")

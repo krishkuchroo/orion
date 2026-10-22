@@ -7,7 +7,7 @@ import weakref
 
 import pytest
 
-from eval import normalize, usage
+from eval import infra, normalize, usage
 from eval.arms import ArmResult, lm
 from orion.contracts import Lead
 
@@ -353,11 +353,23 @@ def test_real_engine_every_batch_failing_is_crashed_with_no_findings(tmp_path, m
 def test_real_engine_failed_flow_read_is_crashed_with_no_findings(tmp_path, monkeypatch):
     model = _Model(fail_calls=())
     res, lines = _real_engine(monkeypatch, tmp_path, model=model,
-                              db=_GraphStub(fail="ServiceUnavailable: Neo4j is down"))
+                              db=_GraphStub(fail="CypherSyntaxError: Invalid input 'X'"))
     assert model.calls == 0                                   # no batch could run
     assert res.status == "crashed" and res.findings_path is None
     assert not os.path.exists(tmp_path / "run" / "findings.json")
     assert any("crashed" in l and "loading CandidateFlows failed" in l for l in lines)
+
+
+def test_real_engine_neo4j_down_at_the_flow_read_is_aborted_not_a_miss(tmp_path, monkeypatch):
+    """I7: GraphDB turns ServiceUnavailable into {"error": "ServiceUnavailable: ..."}, slice re-raises it
+    as RuntimeError, discover_lm reports it as an error event: the arm reads that as a machine failure."""
+    model = _Model(fail_calls=())
+    res, lines = _real_engine(monkeypatch, tmp_path, model=model,
+                              db=_GraphStub(fail="ServiceUnavailable: Neo4j is down"))
+    assert model.calls == 0
+    assert res.status == "aborted" and res.findings_path is None
+    assert not os.path.exists(tmp_path / "run" / "findings.json")
+    assert any("aborted, machine failure" in l and "ServiceUnavailable" in l for l in lines)
 
 
 def test_real_engine_some_batches_failing_stays_ok_with_a_summary(tmp_path, monkeypatch):
@@ -533,13 +545,25 @@ def test_case_flow_load_failure_is_crashed_before_the_model_loads(tmp_path, monk
     rec = _seams(monkeypatch)
 
     def boom(scan_id, case):
-        raise RuntimeError("ServiceUnavailable: Neo4j is down")
+        raise RuntimeError("CypherSyntaxError: bad query")
     monkeypatch.setattr(lm, "_case_flows", boom)
     lines = []
     res = _arm(tmp_path, case=OWASP_CASE, on_line=lines.append)
     assert res.status == "crashed" and res.findings_path is None
     assert "load" not in rec["order"]
-    assert any("crashed" in l and "Neo4j is down" in l for l in lines)
+    assert any("crashed" in l and "bad query" in l for l in lines)
+
+
+def test_case_flow_read_with_neo4j_down_is_aborted_before_the_model_loads(tmp_path, monkeypatch):
+    rec = _seams(monkeypatch)
+
+    def boom(scan_id, case):
+        raise RuntimeError("ServiceUnavailable: Neo4j is down")
+    monkeypatch.setattr(lm, "_case_flows", boom)
+    lines = []
+    res = _arm(tmp_path, case=OWASP_CASE, on_line=lines.append)
+    assert res.status == "aborted" and res.findings_path is None and "load" not in rec["order"]
+    assert any("aborted" in l and "Neo4j is down" in l for l in lines)
 
 
 def test_default_case_flows_filters_the_scans_flows_by_the_case_file(monkeypatch):
@@ -560,3 +584,110 @@ def test_default_case_flows_filters_the_scans_flows_by_the_case_file(monkeypatch
     monkeypatch.setattr(orion.graphdb, "GraphDB", lambda: Stub(n=2))
     flows = _REAL_CASE_FLOWS("s1", OWASP_CASE)
     assert [f["flow_id"] for f in flows] == ["F1"] and Stub.closed
+
+
+# ---- I7: machine failures are "aborted" (not scored, re-attempted), never a terminal miss ---------
+
+def test_neo4j_unavailable_during_the_build_is_aborted(tmp_path, monkeypatch):
+    from neo4j.exceptions import ServiceUnavailable
+    rec = _seams(monkeypatch)
+
+    def build(repo_dir, on_event):
+        rec["order"].append("build")
+        try:
+            raise ServiceUnavailable("Couldn't connect to localhost:7688")
+        except ServiceUnavailable as e:
+            raise RuntimeError("persist failed") from e         # wrapped: still a machine failure
+    monkeypatch.setattr(lm, "_build_graph", build)
+    cache, lines = {}, []
+    res = _arm(tmp_path, graph_cache=cache, on_line=lines.append)
+    assert res.status == "aborted" and res.findings_path is None
+    assert rec["order"] == ["build"] and cache == {}               # no model, nothing cached
+    assert any("aborted, machine failure" in l and "graph build" in l for l in lines)
+
+
+def test_joern_missing_is_aborted(tmp_path, monkeypatch):
+    rec = _seams(monkeypatch)
+
+    def build(repo_dir, on_event):
+        raise infra.InfraError("Joern binaries not found: /j/joern-parse")
+    monkeypatch.setattr(lm, "_build_graph", build)
+    assert _arm(tmp_path).status == "aborted" and "load" not in rec["order"]
+
+
+def test_get_record_raising_is_aborted(tmp_path, monkeypatch):
+    from neo4j.exceptions import SessionExpired
+    from orion.graph import scans
+    rec = _seams(monkeypatch)
+    monkeypatch.setattr(lm, "_pathfind_error", _REAL_PATHFIND_ERROR)
+
+    def get_record(sid):
+        raise SessionExpired("bolt connection dropped")
+    monkeypatch.setattr(scans, "get_record", get_record)
+    lines = []
+    res = _arm(tmp_path, on_line=lines.append)
+    assert res.status == "aborted" and rec["order"] == ["build"]
+    assert any("scan record" in l and "SessionExpired" in l for l in lines)
+
+
+def test_a_genuine_build_failure_still_propagates(tmp_path, monkeypatch):
+    _seams(monkeypatch)
+
+    def build(repo_dir, on_event):
+        raise RuntimeError("joern-parse failed (rc=1): unsupported syntax")
+    monkeypatch.setattr(lm, "_build_graph", build)
+    with pytest.raises(RuntimeError, match="joern-parse failed"):
+        _arm(tmp_path)
+
+
+def test_a_model_load_failure_still_propagates(tmp_path, monkeypatch):
+    _seams(monkeypatch)
+
+    def load(path, **kw):
+        raise RuntimeError("[metal::malloc] Resource limit exceeded")
+    monkeypatch.setattr(lm, "_load_model", load)
+    with pytest.raises(RuntimeError, match="metal"):
+        _arm(tmp_path)
+
+
+def test_a_run_cypher_step_answering_neo4j_down_aborts_the_run(tmp_path, monkeypatch):
+    def fake_discover(scan_id, repo, on_event, **kw):
+        kw["on_step"](dict(STEP, kind="run_cypher", error="ServiceUnavailable: connection refused"))
+        kw["on_step"](dict(STEP))                                 # the session still "finished"
+        return [Lead(index=0, shape="LM", text="t", evidence="e", confidence="LOW", file="a.py", line=1)]
+    _seams(monkeypatch, discover=fake_discover)
+    res = _arm(tmp_path)
+    assert res.status == "aborted" and res.findings_path is None
+    assert len(res.steps) == 2 and len(res.usage) == 2          # the tokens it spent are still handed back
+
+
+def test_a_query_error_that_merely_mentions_the_word_is_not_a_machine_failure(tmp_path, monkeypatch):
+    def fake_discover(scan_id, repo, on_event, **kw):
+        kw["on_step"](dict(STEP, kind="run_cypher",
+                           error="CypherSyntaxError: Invalid input 'ServiceUnavailable: x'"))
+        kw["on_step"](dict(STEP))
+        return []
+    _seams(monkeypatch, discover=fake_discover)
+    assert _arm(tmp_path).status == "ok"
+
+
+def test_discovery_raising_a_neo4j_error_is_aborted(tmp_path, monkeypatch):
+    from neo4j.exceptions import ServiceUnavailable
+
+    def fake_discover(scan_id, repo, on_event, **kw):
+        raise ServiceUnavailable("gone")
+    rec = _seams(monkeypatch, discover=fake_discover)
+    assert _arm(tmp_path).status == "aborted" and rec["order"][-1] == "release"
+
+
+def test_real_engine_batches_failing_on_neo4j_are_aborted(tmp_path, monkeypatch):
+    """A session that raises SessionExpired (the bolt connection dropped mid-batch) becomes discover_lm's
+    "batch N (...) failed: SessionExpired: ..." event; every batch failing that way is aborted, not crashed."""
+    class NeoModel(_Model):
+        def generate(self, messages):
+            from neo4j.exceptions import SessionExpired
+            self.calls += 1
+            raise SessionExpired("dropped")
+    res, lines = _real_engine(monkeypatch, tmp_path, db=_GraphStub(n=2), model=NeoModel())
+    assert res.status == "aborted" and res.findings_path is None
+    assert sum("[discover/error]" in l for l in lines) == 2

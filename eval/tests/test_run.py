@@ -457,3 +457,50 @@ def test_a_skipped_benchmark_exits_nonzero(tmp_path, monkeypatch, capsys):
     assert run.main(argv) == 1
     assert {meta["id"] for _, meta, _ in seen} == {"owasp-python"}
     assert "OWASP benchmark (2 cases) owasp-java: network down" in capsys.readouterr().out
+
+
+# ---- I7: a machine failure is aborted (not scored) and gets a fresh attempt -------------------------
+
+def test_run_one_maps_a_raised_neo4j_failure_to_aborted_and_retries(tmp_path):
+    from neo4j.exceptions import ServiceUnavailable
+    conn = db.connect(str(tmp_path / "t.db"))
+
+    def down(arm, repo_meta, model_tag, on_line, *, effort, on_start):
+        raise ServiceUnavailable("Couldn't connect to localhost:7688")
+    assert _run_one(conn, down, arm="orion-lm") == "aborted"
+    msg = conn.execute("select level, message from events").fetchone()
+    assert msg[0] == "warn" and "machine failure" in msg[1]
+    assert conn.execute("select count(*) from events where level='error'").fetchone()[0] == 0
+
+    def ok(arm, repo_meta, model_tag, on_line, *, effort, on_start):
+        return ArmResult(status="ok", findings_path=None, usage=[])
+    assert _run_one(conn, ok, arm="orion-lm") == "ok"
+    assert conn.execute("select attempt_no, status from runs order by id").fetchall() == [(1, "aborted"), (2, "ok")]
+
+
+def test_run_one_keeps_an_arm_returned_abort_and_notes_it(tmp_path):
+    conn = db.connect(str(tmp_path / "t.db"))
+
+    def lm_abort(arm, repo_meta, model_tag, on_line, *, effort, on_start):
+        on_line("orion-lm: aborted, machine failure ...: graph build: ServiceUnavailable: down")
+        return ArmResult(status="aborted", findings_path=None, usage=[], steps=[])
+    assert _run_one(conn, lm_abort, arm="orion-lm") == "aborted"
+    assert conn.execute("select status from runs").fetchone() == ("aborted",)
+    assert any("arm aborted the run" in m for m, in conn.execute("select message from events where level='warn'"))
+
+
+def test_a_genuine_launcher_failure_is_still_error(tmp_path):
+    conn = db.connect(str(tmp_path / "t.db"))
+
+    def boom(arm, repo_meta, model_tag, on_line, *, effort, on_start):
+        raise RuntimeError("joern-parse failed (rc=1)")
+    assert _run_one(conn, boom, arm="orion-lm") == "error"
+
+
+def test_main_resumes_after_a_machine_failure_abort(tmp_path, monkeypatch):
+    calls, sleeps = [], []
+    argv = _patch_main(monkeypatch, tmp_path, ["aborted", "ok", "ok"], calls)
+    (tmp_path / "mdl").mkdir()
+    argv[argv.index("plain-opus5")] = "orion-lm"
+    assert run.main(argv + ["--lm-model", str(tmp_path / "mdl")], sleep=sleeps.append) == 0
+    assert sleeps == [7] and [c[4] for c in calls] == ["aborted", "ok", "ok"]

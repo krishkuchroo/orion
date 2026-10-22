@@ -18,7 +18,8 @@ failing on the data, or the build's pathfind step failing (graph_build keeps tha
 OrionScan record and persists no CandidateFlows; every orion-lm run on that commit would crash). The
 MACHINE failing is not: Neo4j unreachable, a dropped bolt connection, an auth error
 (neo4j ServiceUnavailable / SessionExpired / AuthError, anywhere in the exception chain) or a missing
-Joern binary is stage "setup" -> "not_checked", never moved. So is a mirror or export failure. The CLI
+Joern binary is stage "setup" -> "not_checked", never moved (eval.infra.is_infra, the rule the
+orion-lm arm shares). So is a mirror or export failure. The CLI
 also refuses to start (exit 1, nothing written) unless Neo4j answers and the Joern binaries exist.
 
 Where records go. Every checked row gets a record {result, joern_heap_gb, orion_commit, checked_at,
@@ -47,12 +48,11 @@ import time
 from datetime import datetime, timezone
 
 from eval import repo
+from eval.infra import InfraError  # noqa: F401  -- re-exported: the machine failed, never a build failure
+from eval.infra import is_infra as _is_infra
+from eval.infra import joern_missing as _joern_missing
 
 JOERN_HEAP_GB = 8   # spec 5.4
-
-
-class InfraError(RuntimeError):
-    """The machine failed, not the commit (e.g. a Joern binary is missing). Never a build failure."""
 
 
 class BuildFailed(RuntimeError):
@@ -61,20 +61,6 @@ class BuildFailed(RuntimeError):
     def __init__(self, msg: str, *, nodes=None):
         super().__init__(msg)
         self.nodes = nodes
-
-
-def _is_infra(exc) -> bool:
-    """True when `exc` (or anything in its __cause__/__context__ chain) is a machine failure."""
-    from neo4j.exceptions import AuthError, ServiceUnavailable, SessionExpired
-    seen = set()
-    while exc is not None and id(exc) not in seen:
-        seen.add(id(exc))
-        if isinstance(exc, (InfraError, ServiceUnavailable, SessionExpired, AuthError)):
-            return True
-        if isinstance(exc, FileNotFoundError) and "joern" in os.path.basename(str(exc.filename or "")):
-            return True
-        exc = exc.__cause__ or exc.__context__
-    return False
 
 
 def mirror_dir_for(repo_url: str, mirror_root: str) -> str:
@@ -90,13 +76,6 @@ def mirror_dir_for(repo_url: str, mirror_root: str) -> str:
 def _print_event(ev) -> None:
     from orion.monitor import _format_event
     print("    " + (_format_event(ev) if isinstance(ev, dict) else str(ev)), flush=True)
-
-
-def _joern_missing() -> list:
-    """The Joern executables the streaming build runs (joern-parse, joern) that are not there."""
-    from orion.graph import joern_adapter
-    paths = (joern_adapter._joern_bin("joern-parse"), joern_adapter._joern_bin("joern"))
-    return [str(p) for p in paths if not (p.is_file() and os.access(p, os.X_OK))]
 
 
 def _drop_scan(scan_id: str) -> None:

@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 import time
 
-from . import db, owasp, queue, repo
+from . import db, infra, owasp, queue, repo
 from .resources import PhaseSampler
 
 # The five study arms (design 2026-10-18 §5.4). orion-lm* run in-process (eval/arms/lm.py);
@@ -136,6 +136,12 @@ def run_one(conn, *, arm, repo_meta, run_no, model_tags, base_env,
         raise
     except Exception as e:
         _log_resource(conn, rid, sampler["s"], t0)
+        if infra.is_infra(e):   # the machine failed (Neo4j, Joern), not the arm: not scored, resumed
+            db.log_event(conn, rid, stage="run", level="warn",
+                         message=f"machine failure ({e.__class__.__name__}: {e}); not scored, "
+                                 "re-attempted after --resume-wait"[:2000])
+            db.finish_run(conn, rid, "aborted")
+            return "aborted"
         db.log_event(conn, rid, stage="run", level="error", message=str(e)[:2000])
         db.finish_run(conn, rid, "error")
         return "error"
@@ -164,6 +170,10 @@ def run_one(conn, *, arm, repo_meta, run_no, model_tags, base_env,
         db.log_event(conn, rid, stage="run", level="warn",
                      message=f"usage limit hit ({res.status} -> {final}); not scored, will resume;"
                              f" matched: {matched[:500]}")
+    elif final == "aborted":   # the arm itself saw a machine failure (eval/arms/lm.py; reason in its lines)
+        db.log_event(conn, rid, stage="run", level="warn",
+                     message="the arm aborted the run (machine failure, not the model's miss); "
+                             "not scored, re-attempted after --resume-wait")
     db.finish_run(conn, rid, final)
     return final
 
@@ -402,8 +412,9 @@ def main(argv=None, sleep=time.sleep):
             status = run_one(conn, arm=arm, repo_meta=meta_by_key[(repo_id, sha, case)], run_no=n,
                              model_tags=model_tags, base_env=dict(os.environ),
                              orion_commit=orion_commit, cli_versions=versions, launcher=launcher)
-            if status == "aborted":
-                print(f"usage limit hit; resuming in {args.resume_wait}s", flush=True)
+            if status == "aborted":   # a usage limit, or a machine failure inside an orion-lm run
+                print(f"run aborted (usage limit or machine failure; see its events); resuming in "
+                      f"{args.resume_wait}s", flush=True)
                 sleep(args.resume_wait)
                 break
     if skipped:   # what could run has run; the study is still short these items (a re-run requeues them)
