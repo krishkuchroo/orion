@@ -80,12 +80,12 @@ Rules for working on it:
   `eval/open-weight-study`, cut from local `Dante`). `origin` (lutherleo/orion) was unreachable on
   2026-09-17; work and push to `krish`, not `origin`.
 
-## Orion-LM track (branch `eval/orion-lm`, started 2026-10-18)
+## Orion-LM track (started 2026-10-18; on `main` since 2026-10-20, PR #4)
 
 Design: `docs/superpowers/specs/2026-10-18-orion-lm-design.md` — **APPROVED 2026-10-18.** Plan:
-`docs/superpowers/plans/2026-10-18-orion-lm.md` (rev 2). **Hybrid plan code built** (branch
-`train/d2-d3`: D2/D3 + H1–H11, each task reviewed; whole-branch review fixes landed and re-checked
-clean); earlier A1–A6, B1–B6, C1, E1–E3 done and reviewed. Status, rulings and Krish-check items: `docs/superpowers/plans/2026-10-18-orion-lm-progress.md`.
+`docs/superpowers/plans/2026-10-18-orion-lm.md` (rev 2). **Hybrid plan code built** (D2/D3 +
+H1–H11, each task reviewed; whole-branch review fixes landed and re-checked clean; built on
+`eval/orion-lm` → `train/d2-d3`, both merged to `main` in PR #4); earlier A1–A6, B1–B6, C1, E1–E3 done and reviewed. Status, rulings and Krish-check items: `docs/superpowers/plans/2026-10-18-orion-lm-progress.md`.
 Goal: fine-tune an open-weight model (Unsloth, cloud GPU) that runs
 **in-process inside Orion** (MLX-LM, no Claude, no Ollama) via a **hand-written prompter** that
 writes Cypher over the Joern→Neo4j graph and judges code vulnerable/safe; then benchmark
@@ -94,20 +94,27 @@ CVEs (vulnerable AND patched commits) + OWASP Benchmark as the false-alarm set.
 
 - **Design change (2026-10-18):** training is now hybrid (Stage 1 code+context on all pairs, Stage 2
   graph pairs); see `docs/superpowers/plans/2026-10-18-orion-lm-hybrid.md`.
-- **Hybrid status (2026-10-18):** code only — nothing trained, no model runs, no full data builds.
+- **Hybrid status (2026-10-20):** code only — nothing trained, no model runs, no Stage 1/2 data
+  builds (the pair set and splits ARE built, below).
   - One lead convention everywhere: the **fix site** (Stage 1 target, Stage 2 lead, rounds key, test
     L1). Splits group by lowercased `repo_canonical`. `export` refuses the PLACEHOLDER system prompt
     unless `allow_placeholder=True`. Live-Neo4j tests skip unless `ORION_LIVE_NEO4J=1` (DB-writing)
     / `ORION_SPEND_TOKENS=1` (claude).
-  - Gated on Krish: freeze splits (H6 Step 6, once the source list is final — `splits.json` can never
-    be re-split), Stage 1 pilot + full run, Stage 2 builds (need graph-hardening merged), real
-    bake-off, running `train/unsloth_lora.ipynb`, and Krish's system prompt (must say "flag the fix
-    site" and cover code-only cases with no path) + `train/templates/queries.json`.
+  - Gated on Krish: Stage 1 pilot + full run, Stage 2 builds (graph hardening is now merged, so
+    no longer blocked on it), real bake-off, running `train/unsloth_lora.ipynb`, and Krish's system
+    prompt (must say "flag the fix site" and cover code-only cases with no path) +
+    `train/templates/queries.json`. Splits were frozen 2026-10-19 (seed 0).
   - **Pairs/splits (2026-10-20):** MoreFixes added (advisory-linked fixes only; Prospector links
     tagged `heuristic_fix_link`, dropped by default) and every repo name canonicalised via GitHub
     (leak set too; gone repos dropped as `repo_missing`). 4,850 pairs; the frozen split was
     EXTENDED with `splits.extend` (no frozen pair moved; 43 left): train 4,120 · dev 702 · oldcve
     28. Details: `docs/notes/orion-lm-pairs.md` "Current build (2026-10-20)".
+  - **Never re-split** `train/data/splits.json`: `splits.write` refuses to overwrite and
+    `splits.load` refuses a changed pair set. To add or drop pairs, rebuild with `train/mine.py`
+    and run `splits.extend(path, old_pairs, new_pairs, note=...)` against the frozen pair set
+    (back it up first). `pairs.json` / `dropped.json` are gitignored (>5 MB) and live only in a
+    checkout's `train/data/`; the 2026-10-19 frozen copies are in
+    `orion-lm-research/raw/mined/pre-morefixes-2026-10-19/`.
   - Open decision: `read_code` is offered at runtime but no training row uses it — keep it in the
     templates or drop it from the tool set. Rounds skipped until templates exist.
 - **Status (2026-10-18):** design approved; research + codebase exploration folded in (Appendix A has
@@ -127,13 +134,39 @@ CVEs (vulnerable AND patched commits) + OWASP Benchmark as the false-alarm set.
   visible via `.git` in checkouts (answer leak); runs 1–3 overwrite each other; plain-arm
   `findings.json` leaks between arms; failed runs silently requeued; nothing writes
   `agent_calls`/`resources`; Codex usage parsed from the wrong level; `MODEL_TAGS` says
-  `gemma3:12b`; plain Claude arms pass no `--model`; frontier agents have web access (answer lookup). No scoring code exists in `eval/` yet; `eval-prereg-v1` tag never created.
+  `gemma3:12b`; plain Claude arms pass no `--model`; frontier agents have web access (answer lookup).
+  Fixed by plan Part A (A1–A6, done and reviewed). Scoring code exists (`eval/normalize.py`,
+  `eval/match.py`, `eval/report.py`; E1–E3); `eval/judge.py` (E4) is not built. Neither
+  `eval-prereg-v1` nor `orion-lm-prereg-v1` has been tagged.
 - **Research artifacts** (OSV counting scripts, OWASP CSVs, paper extracts):
   `~/Documents/OrionLutherLeo/orion-lm-research/` (outside the repo).
+- **Git (2026-10-20):** `main` on `krish` now holds the open-weight study (PRs #2/#3), Orion-LM
+  (#4) and graph hardening (#5). Merge PRs with a merge commit, never squash: docs cite commit
+  SHAs. Merging into `main` needs Krish (Claude Code's auto mode blocks merges without review).
 - Facts to remember: Unsloth pip can't train on Apple Silicon; Gemma 4 12B peaks ≈9.4 GB at 4k on
   M4 16 GB (too tight with Neo4j) → E4B / Granite 4.1 8B bake-off; base model must publish a
   training cutoff before 2026-05-31; ≈40% of repos with post-cutoff advisories also have pre-cutoff
   ones — drop them from training.
+
+## Graph hardening (on `main` since 2026-10-20, PR #5)
+
+Plan + measured outcome: `docs/superpowers/plans/2026-10-18-graph-hardening.md`. Invariants held:
+FLOWS_TO 217 (NodeGoat) and 1075 (PyGoat), default `orion scan` output unchanged.
+
+- Precompute (pathfind / centrality / CandidateFlow ranks) is deterministic: no dependence on the
+  hash seed or edge order; ties break by source location (file, line, column, code), not by uid.
+- `persist` counts what Neo4j actually wrote and compares it with the batch: a mismatch (e.g. an
+  edge whose endpoint is missing, which MATCH…CREATE skips silently) warns in a normal run and
+  RAISES in tests (`ORION_PERSIST_STRICT=1`, set for every test by `tests/conftest.py`).
+- `CpgParameter` uid includes its owning method (NodeGoat params 290 → 831, PyGoat 334 → 1523;
+  that is the fix, not a regression). An lm-profile build gets its own scan_id.
+- Scans are recorded (`OrionScan`): `--scan-id` refuses a scan with no record; `orion gc`
+  (`--prefix`, `--dry-run`) deletes old recorded scans; `orion reanalyze` recomputes
+  CandidateFlows from Neo4j without Joern (`--engine` must match the recorded profile).
+- MCP `run_cypher` (the Claude path) also refuses LOAD CSV, SHOW, TERMINATE, USE and CALL.
+- PyGoat fixture pinned: `fixtures/pygoat` at `19d17cc8874861142b330636d068bbde54e86b85`
+  (`tests/test_stream_build.py::test_stream_flows_parity_pygoat`, slow; fails on another commit).
+  Golden outputs live in `tests/golden/`.
 
 ## Working agreement (how Love Kush wants to build)
 
@@ -247,7 +280,10 @@ CVEs (vulnerable AND patched commits) + OWASP Benchmark as the false-alarm set.
   cross-edge family (cross-method REACHING_DEF closure captures). Keep the seam threaded into
   `build_summary` in pass 2 (pass 1 accumulates the cross-method tables `stitch` needs), and run
   `tests/test_stream_build.py::test_stream_flows_parity` (217) as the tripwire.
-- The token-free suite is Orion's own `tests/` (`pytest -m "not slow"`, 75 passing). `pyproject.toml`
+- The token-free suite is Orion's own `tests/` (`pytest -m "not slow"`; on `main` 2026-10-20:
+  385 passed / 44 skipped with Neo4j down — live tests skip without Neo4j or their opt-in, see
+  `tests/conftest.py`; `train/tests` + `eval/tests`: 441 passed). Tests that read
+  `fixtures/NodeGoat` fail in a fresh worktree, because `fixtures/` is gitignored. `pyproject.toml`
   sets `testpaths = ["tests"]` so bare pytest does NOT recurse into the gitignored `fixtures/` scan
   targets (e.g. a Django authentik checkout with hundreds of `django`-importing test files whose own
   `tests/` package would otherwise shadow Orion's top-level `tests` and break collection). Passing an
