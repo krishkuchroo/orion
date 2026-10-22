@@ -101,3 +101,11 @@ def test_earlier_public_record_makes_control():
 
 def test_loc_missing_is_not_scale_and_does_not_crash():
     assert _tier(loc_first_party=None)[0] == "headline"
+
+
+def test_short_and_full_sha_of_one_commit_are_one_fix_commit():
+    full = "6fb2a41ea47da37eafe5ea744050ef90be6820c0"
+    assert _tier(fix_shas=[full[:28], full])[0] == "headline"
+    assert check.distinct_commits([full[:28], full, full.upper()]) == [full]
+    tier, reasons = _tier(fix_shas=["abc1234", "abd1234", "abc1234" + "0" * 33])
+    assert tier == "excluded" and reasons == ["multi_commit_fix: 2 fix commits"]

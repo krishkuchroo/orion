@@ -46,6 +46,13 @@
     "other_cwe": 1077,
     "duplicate_id_merged": 0
    },
+   "merge_fix_check": {
+    "merge_fixes": 17,
+    "date_moved_earlier": 9,
+    "errors": 0,
+    "truncated": 0,
+    "files_match": 17
+   },
    "submodule_check": {
     "checked": 350,
     "with_gitmodules": 33,
@@ -109,62 +116,29 @@
      "manifest_repos": 165,
      "manifest_by_cwe": {
       "CWE-22": 54,
-      "CWE-79": 41,
-      "CWE-918": 33,
+      "CWE-79": 39,
+      "CWE-918": 30,
       "CWE-1321": 24,
-      "CWE-94": 19,
       "CWE-78": 15,
-      "CWE-73": 8,
+      "CWE-94": 14,
       "CWE-89": 8,
-      "CWE-20": 7,
-      "CWE-116": 6,
-      "CWE-184": 6,
-      "CWE-200": 6,
       "CWE-502": 6,
-      "CWE-59": 6,
-      "CWE-915": 4,
+      "CWE-73": 4,
       "CWE-1336": 3,
-      "CWE-23": 3,
-      "CWE-1188": 2,
-      "CWE-209": 2,
-      "CWE-306": 2,
-      "CWE-367": 2,
-      "CWE-471": 2,
-      "CWE-61": 2,
       "CWE-611": 2,
-      "CWE-639": 2,
-      "CWE-74": 2,
       "CWE-77": 2,
-      "CWE-83": 2,
-      "CWE-88": 2,
       "CWE-943": 2,
-      "CWE-1021": 1,
       "CWE-113": 1,
-      "CWE-208": 1,
-      "CWE-235": 1,
-      "CWE-248": 1,
-      "CWE-266": 1,
-      "CWE-269": 1,
-      "CWE-330": 1,
-      "CWE-345": 1,
-      "CWE-352": 1,
+      "CWE-23": 1,
       "CWE-36": 1,
-      "CWE-400": 1,
-      "CWE-441": 1,
-      "CWE-470": 1,
-      "CWE-552": 1,
-      "CWE-601": 1,
-      "CWE-665": 1,
-      "CWE-693": 1,
-      "CWE-749": 1,
-      "CWE-80": 1,
-      "CWE-862": 1,
       "CWE-90": 1,
-      "CWE-913": 1,
-      "CWE-917": 1,
-      "CWE-93": 1,
-      "CWE-95": 1
+      "CWE-917": 1
      },
+     "manifest_by_cwe_basis": {
+      "only_qualifying": 192,
+      "first_of_2_qualifying": 16
+     },
+     "manifest_listing_several_cwes": 75,
      "manifest_by_language": {
       "js": 118,
       "py": 70,
@@ -193,7 +167,7 @@
       [
        "excluded",
        "multi_commit_fix",
-       35
+       34
       ],
       [
        "excluded",
@@ -203,7 +177,7 @@
       [
        "excluded",
        "n_files",
-       9
+       10
       ],
       [
        "excluded",
@@ -222,24 +196,15 @@
      "manifest_repos": 38,
      "manifest_by_cwe": {
       "CWE-862": 25,
-      "CWE-863": 16,
-      "CWE-639": 10,
+      "CWE-863": 15,
       "CWE-284": 5,
-      "CWE-285": 5,
-      "CWE-269": 3,
-      "CWE-345": 2,
-      "CWE-636": 2,
-      "CWE-184": 1,
-      "CWE-20": 1,
-      "CWE-200": 1,
-      "CWE-306": 1,
-      "CWE-346": 1,
-      "CWE-352": 1,
-      "CWE-524": 1,
-      "CWE-552": 1,
-      "CWE-749": 1,
-      "CWE-770": 1
+      "CWE-285": 5
      },
+     "manifest_by_cwe_basis": {
+      "only_qualifying": 49,
+      "first_of_2_qualifying": 1
+     },
+     "manifest_listing_several_cwes": 24,
      "manifest_by_language": {
       "js": 24,
       "py": 19,
@@ -273,12 +238,17 @@
    "repo_url": "https://github.com/apache/airflow",
    "language": "py",
    "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "e61c9bac30a7b1a7f68589629f10c4cb247c683e",
    "patched_commit": "bc1df029af15cb1d35d5ca0d33bf9235500137cc",
    "advisory_published": "2026-06-09",
    "fix_commit_date": "2026-06-02",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "providers/samba/src/airflow/providers/samba/transfers/gcs_to_samba.py"
    ],
@@ -301,12 +271,17 @@
    "repo_url": "https://github.com/jenkinsci/jenkins",
    "language": "java",
    "cwe": "CWE-79",
+   "cwes": [
+    "CWE-79"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "345a3190a49d1ac96c4ff1c2e9eef4102c8d63f6",
    "patched_commit": "20041e8090d3b228d586169141ea7f12ffe4444d",
    "advisory_published": "2026-06-10",
    "fix_commit_date": "2026-06-02",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "core/src/main/java/hudson/slaves/OfflineCause.java",
     "core/src/main/resources/hudson/slaves/OfflineCause/cause.jelly"
@@ -330,12 +305,17 @@
    "repo_url": "https://github.com/angular/angular",
    "language": "js",
    "cwe": "CWE-79",
+   "cwes": [
+    "CWE-79"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "422e6893e489c8b34ccfae88c7b4333fa359c698",
    "patched_commit": "3c70270c96677c0dd33585f2afe8e187113e5fb4",
    "advisory_published": "2026-06-15",
    "fix_commit_date": "2026-06-03",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "packages/compiler/src/template/pipeline/src/phases/resolve_sanitizers.ts"
    ],
@@ -357,13 +337,19 @@
    "repo": "angular/angular",
    "repo_url": "https://github.com/angular/angular",
    "language": "js",
-   "cwe": "CWE-79,CWE-471",
+   "cwe": "CWE-79",
+   "cwes": [
+    "CWE-471",
+    "CWE-79"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "7896e742227aa462ef6cede2ce0e100e4321567f",
    "patched_commit": "6bde84fa8e6a5770b54040fbbc9bf10d5d0386fa",
    "advisory_published": "2026-06-15",
    "fix_commit_date": "2026-06-01",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "packages/core/src/transfer_state.ts"
    ],
@@ -386,12 +372,17 @@
    "repo_url": "https://github.com/earendil-works/pi",
    "language": "js",
    "cwe": "CWE-79",
+   "cwes": [
+    "CWE-79"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "7e72ca47c8bff19bcec96a98745ca4a3a7624051",
    "patched_commit": "6cb23f9b5d5b6d1747672f535b167d0d809ac010",
    "advisory_published": "2026-06-16",
    "fix_commit_date": "2026-06-02",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "packages/coding-agent/CHANGELOG.md",
     "packages/coding-agent/src/core/export-html/template.js"
@@ -414,13 +405,19 @@
    "repo": "langchain-ai/langchain",
    "repo_url": "https://github.com/langchain-ai/langchain",
    "language": "py",
-   "cwe": "CWE-22,CWE-59",
+   "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22",
+    "CWE-59"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "0392b6bae4bdfc0b7ed5aeb2e9e414bbb7ea643b",
    "patched_commit": "dcaf7795a3e6590af55c3ff7bda6add6355e9ea6",
    "advisory_published": "2026-06-16",
    "fix_commit_date": "2026-06-12",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "libs/langchain_v1/langchain/agents/middleware/file_search.py",
     "libs/partners/anthropic/langchain_anthropic/middleware/anthropic_tools.py"
@@ -444,12 +441,17 @@
    "repo_url": "https://github.com/yt-dlp/yt-dlp",
    "language": "py",
    "cwe": "CWE-78",
+   "cwes": [
+    "CWE-78"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "7aac95eae663be82cffeaf2a8c1193a5e349e401",
    "patched_commit": "5faffa999fd33b373d47773e8ee639d072accec2",
    "advisory_published": "2026-06-16",
    "fix_commit_date": "2026-06-06",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "README.md",
     "yt_dlp/YoutubeDL.py",
@@ -476,13 +478,19 @@
    "repo": "blacklanternsecurity/bbot",
    "repo_url": "https://github.com/blacklanternsecurity/bbot",
    "language": "py",
-   "cwe": "CWE-22,CWE-61",
+   "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22",
+    "CWE-61"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "3c6d881b090bd6b4817fe8bea1835187d8ca27bc",
    "patched_commit": "4fb38fd6e77cbf43b198ee8ddbaf380a9eb69d09",
    "advisory_published": "2026-06-18",
    "fix_commit_date": "2026-06-17",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "bbot/core/modules.py",
     "bbot/modules/internal/unarchive.py"
@@ -505,13 +513,19 @@
    "repo": "blacklanternsecurity/bbot",
    "repo_url": "https://github.com/blacklanternsecurity/bbot",
    "language": "py",
-   "cwe": "CWE-20,CWE-918",
+   "cwe": "CWE-918",
+   "cwes": [
+    "CWE-20",
+    "CWE-918"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "b34d49b51a6acd18117485694186d0eef623aca8",
    "patched_commit": "c2f4bc0f4e4bb4d00f06750dcabf1d9c74c0d3b4",
    "advisory_published": "2026-06-18",
    "fix_commit_date": "2026-06-15",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "bbot/modules/docker_pull.py"
    ],
@@ -533,13 +547,19 @@
    "repo": "jupyter-server/jupyter_server",
    "repo_url": "https://github.com/jupyter-server/jupyter_server",
    "language": "py",
-   "cwe": "CWE-79,CWE-1021",
+   "cwe": "CWE-79",
+   "cwes": [
+    "CWE-1021",
+    "CWE-79"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "333e700119ee0bcc0b5fcd4c158213d7c275c778",
    "patched_commit": "6cbee8d65e71abac851c4492fea987ad080580bd",
    "advisory_published": "2026-06-18",
    "fix_commit_date": "2026-06-17",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "docs/source/operators/security.rst",
     "jupyter_server/nbconvert/handlers.py",
@@ -564,12 +584,17 @@
    "repo_url": "https://github.com/marimo-team/marimo",
    "language": "py",
    "cwe": "CWE-79",
+   "cwes": [
+    "CWE-79"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "dc35cdfecf4f9b918d9c40faa92e2ad0d71501c4",
    "patched_commit": "fdd55c8cf6260ae23bb411dc9d9269def5cf75d6",
    "advisory_published": "2026-06-18",
    "fix_commit_date": "2026-06-04",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "marimo/_server/api/endpoints/assets.py"
    ],
@@ -592,12 +617,17 @@
    "repo_url": "https://github.com/labs64/netlicensing-mcp",
    "language": "py",
    "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "8f01239a8016befa31a4e4a90ecb6599763371b8",
    "patched_commit": "b8fd0ea76d533202573eb24add9fb2fbd9331496",
    "advisory_published": "2026-06-18",
    "fix_commit_date": "2026-06-18",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/netlicensing_mcp/client.py"
    ],
@@ -619,13 +649,20 @@
    "repo": "cure53/dompurify",
    "repo_url": "https://github.com/cure53/dompurify",
    "language": "js",
-   "cwe": "CWE-79,CWE-471,CWE-665",
+   "cwe": "CWE-79",
+   "cwes": [
+    "CWE-471",
+    "CWE-665",
+    "CWE-79"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "3d647c4573b1953a8071f7984f9fb3adfc5c7f49",
    "patched_commit": "011bc3b2fcc4be17aa76f9030e8668207717acb9",
    "advisory_published": "2026-06-18",
    "fix_commit_date": "2026-06-13",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "SECURITY.md",
     "dist/purify.cjs.js",
@@ -656,13 +693,19 @@
    "repo": "nodemailer/nodemailer",
    "repo_url": "https://github.com/nodemailer/nodemailer",
    "language": "js",
-   "cwe": "CWE-73,CWE-918",
+   "cwe": "CWE-73",
+   "cwes": [
+    "CWE-73",
+    "CWE-918"
+   ],
+   "cwe_basis": "first_of_2_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "4e58450eb490e5097a74b2b2cce35a8d9e21856e",
    "patched_commit": "a82e060d978f27e5f41369a9a9807b1e3dedc2e2",
    "advisory_published": "2026-06-18",
    "fix_commit_date": "2026-06-17",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "lib/mail-composer/index.js"
    ],
@@ -685,12 +728,17 @@
    "repo_url": "https://github.com/tinacms/tinacms",
    "language": "js",
    "cwe": "CWE-94",
+   "cwes": [
+    "CWE-94"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "b9d561fcea56185f0f146d2bdb1b510caab180d3",
    "patched_commit": "77665ae73dd4f9563d339535e76fa811a8abdfbb",
    "advisory_published": "2026-06-19",
    "fix_commit_date": "2026-06-01",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     ".changeset/perky-ears-serve.md",
     "packages/@tinacms/cli/src/cmds/forestry-migrate/index.ts",
@@ -717,12 +765,17 @@
    "repo_url": "https://github.com/jupyterlab/jupyterlab-git",
    "language": "js",
    "cwe": "CWE-79",
+   "cwes": [
+    "CWE-79"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "af267598e7437993c02a14101db41c75809a7f88",
    "patched_commit": "c6d37b88f36aa59aee317930b95e427fb9d6b09b",
    "advisory_published": "2026-06-19",
    "fix_commit_date": "2026-06-17",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     ".prettierignore",
     "jest.config.js",
@@ -747,13 +800,19 @@
    "repo": "joaonuno/flat-to-nested-js",
    "repo_url": "https://github.com/joaonuno/flat-to-nested-js",
    "language": "js",
-   "cwe": "CWE-915,CWE-1321",
+   "cwe": "CWE-1321",
+   "cwes": [
+    "CWE-1321",
+    "CWE-915"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "89dbd30acf85168dca7ea2ec4d1a7ae5c71ce939",
    "patched_commit": "680a5ebe1194edda16fa93baaa56ff14fe0e3d7f",
    "advisory_published": "2026-06-19",
    "fix_commit_date": "2026-06-04",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "index.js"
    ],
@@ -776,12 +835,17 @@
    "repo_url": "https://github.com/appium/appium-mcp",
    "language": "js",
    "cwe": "CWE-79",
+   "cwes": [
+    "CWE-79"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "1655fbd41f462f43dc49fd78f15727db0e2fb6c3",
    "patched_commit": "e222bbbd6fe2b656a320efcd143563f08061a83d",
    "advisory_published": "2026-06-19",
    "fix_commit_date": "2026-06-18",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/ui/mcp-ui-utils.ts"
    ],
@@ -804,12 +868,17 @@
    "repo_url": "https://github.com/mvantellingen/python-zeep",
    "language": "py",
    "cwe": "CWE-918",
+   "cwes": [
+    "CWE-918"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "c3dc60b05f6278f406eb0ab265dc06384363e2b3",
    "patched_commit": "83eb07bc6c84d841329d4f88856fecdba86f753e",
    "advisory_published": "2026-06-19",
    "fix_commit_date": "2026-06-18",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "CHANGES",
     "src/zeep/exceptions.py",
@@ -837,12 +906,17 @@
    "repo_url": "https://github.com/keras-team/keras",
    "language": "py",
    "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "04e6f792b208c4b1f742c99b6d14c4e9d7af9897",
    "patched_commit": "d8caeb58cc9e61ea092445dc7a20908ca8d693e2",
    "advisory_published": "2026-06-22",
    "fix_commit_date": "2026-06-02",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "keras/src/saving/saving_lib.py"
    ],
@@ -864,13 +938,19 @@
    "repo": "jenkinsci/script-security-plugin",
    "repo_url": "https://github.com/jenkinsci/script-security-plugin",
    "language": "java",
-   "cwe": "CWE-93,CWE-917",
+   "cwe": "CWE-917",
+   "cwes": [
+    "CWE-917",
+    "CWE-93"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "858015c25c7bc7ab59c666307093b0e16b90048c",
    "patched_commit": "c96e7496425031182b6fc11ef1c55b9ae4fa7cc2",
    "advisory_published": "2026-06-24",
    "fix_commit_date": "2026-06-16",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/main/java/org/jenkinsci/plugins/scriptsecurity/sandbox/groovy/RejectASTTransformsCustomizer.java"
    ],
@@ -893,12 +973,17 @@
    "repo_url": "https://github.com/jenkinsci/git-client-plugin",
    "language": "java",
    "cwe": "CWE-78",
+   "cwes": [
+    "CWE-78"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "c32d47f2d0a7b1047c5c6505de1f806c7ff48061",
    "patched_commit": "a10f61003e39fd9be6fada0560b13ba718b2716f",
    "advisory_published": "2026-06-24",
    "fix_commit_date": "2026-06-10",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/main/java/org/jenkinsci/plugins/gitclient/CliGitAPIImpl.java",
     "src/main/java/org/jenkinsci/plugins/gitclient/verifier/ManuallyProvidedKeyVerifier.java"
@@ -922,12 +1007,17 @@
    "repo_url": "https://github.com/jenkinsci/github-branch-source-plugin",
    "language": "java",
    "cwe": "CWE-862",
+   "cwes": [
+    "CWE-862"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "205fd594c821faaff1a66fedfa7e10973291d70c",
    "patched_commit": "d869797365462234fe061c74fe6bf0bcae8777ea",
    "advisory_published": "2026-06-24",
    "fix_commit_date": "2026-06-15",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/main/java/org/jenkinsci/plugins/github_branch_source/GitHubAppCredentials.java",
     "src/main/java/org/jenkinsci/plugins/github_branch_source/GitHubSCMNavigator.java",
@@ -952,12 +1042,17 @@
    "repo_url": "https://github.com/jenkinsci/git-parameter-plugin",
    "language": "java",
    "cwe": "CWE-862",
+   "cwes": [
+    "CWE-862"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "dcf3df2ed2cae73acf8e5a8afad1359666dd1d65",
    "patched_commit": "496a59f698e5ada712dea1ebf980709f0040e394",
    "advisory_published": "2026-06-24",
    "fix_commit_date": "2026-06-19",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "pom.xml",
     "src/main/java/net/uaznia/lukanus/hudson/plugins/gitparameter/GitParameterDefinition.java"
@@ -981,12 +1076,17 @@
    "repo_url": "https://github.com/jenkinsci/active-directory-plugin",
    "language": "java",
    "cwe": "CWE-90",
+   "cwes": [
+    "CWE-90"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "e06d0e0d93c1406ce50d7c121b77514b334c3e7a",
    "patched_commit": "5028dea8e0acc45ff9d6be302d4e1cbc1f9da464",
    "advisory_published": "2026-06-24",
    "fix_commit_date": "2026-06-11",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "pom.xml",
     "src/main/java/hudson/plugins/active_directory/ActiveDirectoryAuthenticationProvider.java"
@@ -1010,12 +1110,17 @@
    "repo_url": "https://github.com/jenkinsci/external-workspace-manager-plugin",
    "language": "java",
    "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "265ef4f624a8fefc976b1656d83d9c1ab1a493ae",
    "patched_commit": "2fccbbd398cf209f5931b48e006659dbee86ddf2",
    "advisory_published": "2026-06-24",
-   "fix_commit_date": "2026-06-16",
+   "fix_commit_date": "2026-06-05",
+   "fix_commit_date_basis": "merge_compare",
    "fix_files": [
     "CHANGELOG.md",
     "src/main/java/org/jenkinsci/plugins/ewm/model/ExternalWorkspace.java",
@@ -1040,12 +1145,17 @@
    "repo_url": "https://github.com/jenkinsci/mcp-server-plugin",
    "language": "java",
    "cwe": "CWE-862",
+   "cwes": [
+    "CWE-862"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "629fdb2557fe7c88b0eac3259d0ff27ec653f390",
    "patched_commit": "ffe5ae770f3bd7e88c99aea3018263af0b2f9cc4",
    "advisory_published": "2026-06-24",
    "fix_commit_date": "2026-06-12",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/main/java/io/jenkins/plugins/mcp/server/extensions/DefaultMcpServer.java"
    ],
@@ -1068,12 +1178,17 @@
    "repo_url": "https://github.com/hkuds/deeptutor",
    "language": "py",
    "cwe": "CWE-862",
+   "cwes": [
+    "CWE-862"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "86ff120668c92c2d9a67d4570df636b8167b770c",
    "patched_commit": "90046374b3dcd4f8a866d2d64a64440bc08eb2ef",
    "advisory_published": "2026-06-30",
    "fix_commit_date": "2026-06-21",
+   "fix_commit_date_basis": "merge_compare",
    "fix_files": [
     "deeptutor/agents/chat/agentic_pipeline.py",
     "deeptutor/multi_user/grants.py",
@@ -1098,12 +1213,17 @@
    "repo_url": "https://github.com/apache/airflow",
    "language": "py",
    "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "f3037c173f61ecc3fbcbe53b57131738760d8a38",
    "patched_commit": "0385bae70553223677753047b3e779d8b86b15c4",
    "advisory_published": "2026-07-06",
    "fix_commit_date": "2026-06-17",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "providers/google/src/airflow/providers/google/cloud/transfers/gcs_to_sftp.py"
    ],
@@ -1127,12 +1247,17 @@
    "repo_raw": "openremote/openremote",
    "language": "java",
    "cwe": "CWE-611",
+   "cwes": [
+    "CWE-611"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "d756014f08d9c24463ebbb780e08c9fb7ed02f15",
    "patched_commit": "c28d3c60ebc2da68d9b6c4a6d7a5ad875a255ee9",
    "advisory_published": "2026-07-06",
    "fix_commit_date": "2026-06-09",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "agent/src/main/java/org/openremote/agent/protocol/knx/KNXProtocol.java"
    ],
@@ -1156,12 +1281,17 @@
    "repo_raw": "openremote/openremote",
    "language": "java",
    "cwe": "CWE-89",
+   "cwes": [
+    "CWE-89"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "a2838215eccd33ef17b0180b5dd3d4253394f490",
    "patched_commit": "02ac83074b81617add814b2a72d459abdf374147",
    "advisory_published": "2026-07-06",
    "fix_commit_date": "2026-06-30",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "manager/src/main/java/org/openremote/manager/datapoint/AssetDatapointService.java"
    ],
@@ -1184,12 +1314,17 @@
    "repo_url": "https://github.com/showdownjs/showdown",
    "language": "js",
    "cwe": "CWE-79",
+   "cwes": [
+    "CWE-79"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "35a67a44977bdb82885d38a586c3e8ac5c222353",
    "patched_commit": "e5cab1e9a5dcea2bb3cbf888863fa7e65ab37edf",
    "advisory_published": "2026-07-07",
-   "fix_commit_date": "2026-07-05",
+   "fix_commit_date": "2026-07-04",
+   "fix_commit_date_basis": "merge_compare",
    "fix_files": [
     "dist/showdown.esm.js",
     "dist/showdown.esm.min.js",
@@ -1222,12 +1357,17 @@
    "repo_raw": "jsonbored/gittensory",
    "language": "js",
    "cwe": "CWE-284",
+   "cwes": [
+    "CWE-284"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "0fb238021991ac9f1cb033f311078b9e5643f239",
    "patched_commit": "811ef5fb9d748170011f8854d88c64627ad666a0",
    "advisory_published": "2026-07-09",
    "fix_commit_date": "2026-06-02",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/api/routes.ts",
     "src/mcp/server.ts"
@@ -1250,13 +1390,19 @@
    "repo": "yzhao062/pyod",
    "repo_url": "https://github.com/yzhao062/pyod",
    "language": "py",
-   "cwe": "CWE-20,CWE-502",
+   "cwe": "CWE-502",
+   "cwes": [
+    "CWE-20",
+    "CWE-502"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "680acf3e33b00855c903320b0f32db2e6d5a0d20",
    "patched_commit": "16e6e3ad8921a4e18ccc8c2afe474db7d002c001",
    "advisory_published": "2026-07-13",
-   "fix_commit_date": "2026-07-20",
+   "fix_commit_date": "2026-06-10",
+   "fix_commit_date_basis": "merge_compare",
    "fix_files": [
     "CHANGES.txt",
     "docs/model_persistence.rst",
@@ -1282,12 +1428,17 @@
    "repo_url": "https://github.com/feathersjs/feathers",
    "language": "js",
    "cwe": "CWE-1321",
+   "cwes": [
+    "CWE-1321"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "3c3da6d688e62a1f832f549d3271c80ce3a47b01",
    "patched_commit": "28b3c03c63bdbff53115fdaa46c56980e7942acc",
    "advisory_published": "2026-07-14",
    "fix_commit_date": "2026-06-04",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "packages/commons/src/index.ts"
    ],
@@ -1310,12 +1461,17 @@
    "repo_url": "https://github.com/crewaiinc/crewai",
    "language": "py",
    "cwe": "CWE-918",
+   "cwes": [
+    "CWE-918"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "b6fbe078d6c45b90be9ebb533aa7715c721640f8",
    "patched_commit": "5d4851eac797cafc45b726f65747fe2c9520fc42",
    "advisory_published": "2026-07-14",
    "fix_commit_date": "2026-06-26",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "lib/crewai-tools/src/crewai_tools/rag/loaders/docs_site_loader.py",
     "lib/crewai-tools/src/crewai_tools/rag/loaders/docx_loader.py",
@@ -1345,12 +1501,17 @@
    "repo_url": "https://github.com/microsoft/prompty",
    "language": "js",
    "cwe": "CWE-94",
+   "cwes": [
+    "CWE-94"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "b4fd3608116d8b1c42319d060d49eb6da85f25e7",
    "patched_commit": "c27402da2487075be577f06aa79df627fb9d6853",
    "advisory_published": "2026-07-17",
    "fix_commit_date": "2026-06-06",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "runtime/typescript/package-lock.json",
     "runtime/typescript/packages/anthropic/package.json",
@@ -1378,12 +1539,17 @@
    "repo_url": "https://github.com/pipeboard-co/meta-ads-mcp",
    "language": "py",
    "cwe": "CWE-918",
+   "cwes": [
+    "CWE-918"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "95e852793b7ff8604a8132e85d5facd08c91a36e",
    "patched_commit": "7d9926336bbdac6285a988d043c4ccfe126c94c5",
    "advisory_published": "2026-07-17",
    "fix_commit_date": "2026-06-05",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     ".email-allowlist",
     "SECURITY.md",
@@ -1410,13 +1576,19 @@
    "repo": "mkreyman/mcp-memory-keeper",
    "repo_url": "https://github.com/mkreyman/mcp-memory-keeper",
    "language": "js",
-   "cwe": "CWE-22,CWE-209",
+   "cwe": "CWE-22",
+   "cwes": [
+    "CWE-209",
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "dd53a8fe8941fb1a5b98deffa19d7ccc655961ac",
    "patched_commit": "84f6dfa692736a34ff36e2d2cf2188b71facf73b",
    "advisory_published": "2026-07-17",
    "fix_commit_date": "2026-06-05",
+   "fix_commit_date_basis": "merge_compare",
    "fix_files": [
     "CHANGELOG.md",
     "README.md",
@@ -1442,13 +1614,20 @@
    "repo": "withastro/astro",
    "repo_url": "https://github.com/withastro/astro",
    "language": "js",
-   "cwe": "CWE-79,CWE-83,CWE-116",
+   "cwe": "CWE-79",
+   "cwes": [
+    "CWE-116",
+    "CWE-79",
+    "CWE-83"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "2f39a9946bfbcd57aef18c382c8cc7d8bd03f6a1",
    "patched_commit": "7ba0bb1dc7516e88caff9abd7767322af44b0294",
    "advisory_published": "2026-07-20",
    "fix_commit_date": "2026-06-29",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     ".changeset/crisp-tables-allow.md",
     "packages/astro/src/runtime/server/hydration.ts"
@@ -1472,12 +1651,17 @@
    "repo_url": "https://github.com/withastro/astro",
    "language": "js",
    "cwe": "CWE-79",
+   "cwes": [
+    "CWE-79"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "fee9069cc1547fb6b4725b728207e3aea90364e4",
    "patched_commit": "5240e26c9dd91f9bc7140dcfacdb48d5a132830d",
    "advisory_published": "2026-07-20",
    "fix_commit_date": "2026-07-02",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     ".changeset/quick-otters-attend.md",
     "packages/astro/src/runtime/server/render/dom.ts",
@@ -1502,12 +1686,17 @@
    "repo_url": "https://github.com/protobufjs/protobuf.js",
    "language": "js",
    "cwe": "CWE-1321",
+   "cwes": [
+    "CWE-1321"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "1aca107aa7938d1e49a25f9653186db2f40a0253",
    "patched_commit": "9f97fe413072d3beb52c74e62d88ea8adc9444d8",
    "advisory_published": "2026-07-20",
    "fix_commit_date": "2026-06-21",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "cli/targets/proto.js",
     "cli/targets/static.js",
@@ -1537,12 +1726,17 @@
    "repo_url": "https://github.com/aws/aws-cdk",
    "language": "js",
    "cwe": "CWE-78",
+   "cwes": [
+    "CWE-78"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "e360dd9b44d2111e28cd16ac683a813f33ed5793",
    "patched_commit": "baa9e1dff469306cc23b8f4bd232d703f98bf68a",
    "advisory_published": "2026-07-21",
    "fix_commit_date": "2026-06-12",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "packages/aws-cdk-lib/aws-lambda-nodejs/lib/bundling.ts"
    ],
@@ -1565,12 +1759,17 @@
    "repo_url": "https://github.com/fasterxml/jackson-databind",
    "language": "java",
    "cwe": "CWE-863",
+   "cwes": [
+    "CWE-863"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "bc1613c765704703ec7385e314fa8b19448e1ddd",
    "patched_commit": "d627a8a86fcb062429282f79f3f256f181ed2c7b",
    "advisory_published": "2026-07-21",
    "fix_commit_date": "2026-06-27",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "release-notes/VERSION-2.x",
     "src/main/java/com/fasterxml/jackson/databind/deser/impl/UnwrappedPropertyHandler.java"
@@ -1593,13 +1792,19 @@
    "repo": "honojs/hono",
    "repo_url": "https://github.com/honojs/hono",
    "language": "js",
-   "cwe": "CWE-79,CWE-116",
+   "cwe": "CWE-79",
+   "cwes": [
+    "CWE-116",
+    "CWE-79"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "d4853a8f2794ce982818783f123e388a6dedd966",
    "patched_commit": "cd3f6f7194f0e5c9d4b26ae0cf232018d0f388fc",
    "advisory_published": "2026-07-21",
    "fix_commit_date": "2026-06-23",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/helper/css/common.ts",
     "src/helper/css/index.ts"
@@ -1622,13 +1827,19 @@
    "repo": "gitpython-developers/gitpython",
    "repo_url": "https://github.com/gitpython-developers/gitpython",
    "language": "py",
-   "cwe": "CWE-77,CWE-88",
+   "cwe": "CWE-77",
+   "cwes": [
+    "CWE-77",
+    "CWE-88"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "65a72839c92768754bd51a37381235842a5ae0d8",
    "patched_commit": "701ce32fe5ba8cb622c0e0342a376a6beb47d738",
    "advisory_published": "2026-07-21",
    "fix_commit_date": "2026-07-12",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "git/cmd.py",
     "git/objects/commit.py",
@@ -1653,13 +1864,19 @@
    "repo": "gitpython-developers/gitpython",
    "repo_url": "https://github.com/gitpython-developers/gitpython",
    "language": "py",
-   "cwe": "CWE-78,CWE-184",
+   "cwe": "CWE-78",
+   "cwes": [
+    "CWE-184",
+    "CWE-78"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "181e8ede7543dbbdcee92756cea260f675316c63",
    "patched_commit": "56806080c1348749b07daa4a2024ce47b3cad285",
    "advisory_published": "2026-07-21",
    "fix_commit_date": "2026-07-12",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "git/cmd.py"
    ],
@@ -1682,12 +1899,17 @@
    "repo_url": "https://github.com/honojs/node-server",
    "language": "js",
    "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "9e1cdee836baeb13f33e857a582b29546185c324",
    "patched_commit": "cd076e117cfe4cb8d31f9eb11d2e8f38a6cb8faf",
    "advisory_published": "2026-07-21",
    "fix_commit_date": "2026-06-15",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/serve-static.ts"
    ],
@@ -1710,12 +1932,17 @@
    "repo_url": "https://github.com/danger/danger-js",
    "language": "js",
    "cwe": "CWE-77",
+   "cwes": [
+    "CWE-77"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "a9f198a96ac593c4b6968b91e4591d8931dc9861",
    "patched_commit": "087a7290264cc6fb7154ea8c2552a7b2cb8b33a3",
    "advisory_published": "2026-07-23",
    "fix_commit_date": "2026-06-16",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "CHANGELOG.md",
     "source/platforms/git/localGetFileAtSHA.ts"
@@ -1739,12 +1966,17 @@
    "repo_url": "https://github.com/remix-run/react-router",
    "language": "js",
    "cwe": "CWE-79",
+   "cwes": [
+    "CWE-79"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "1cebd2a823bb232ad74dcb2d970f750070b2bebe",
    "patched_commit": "ce596e823f0d7b883a433af1d5a839a8b9fe0242",
    "advisory_published": "2026-07-23",
    "fix_commit_date": "2026-06-11",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "integration/rsc/rsc-nojs-test.ts",
     "integration/rsc/rsc-test.ts",
@@ -1773,12 +2005,17 @@
    "repo_url": "https://github.com/swaldman/c3p0",
    "language": "java",
    "cwe": "CWE-502",
+   "cwes": [
+    "CWE-502"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "e604f8d7599e185803a7fa6584f7076331cbc847",
    "patched_commit": "7b022c4b6694dabc6204254dc917af9c38f2cb27",
    "advisory_published": "2026-07-23",
    "fix_commit_date": "2026-06-01",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "beanInfo/src/com/mchange/v2/c3p0/beaninfo/C3P0BeanInfoGen.java",
     "build.mill"
@@ -1801,13 +2038,19 @@
    "repo": "nextauthjs/next-auth",
    "repo_url": "https://github.com/nextauthjs/next-auth",
    "language": "js",
-   "cwe": "CWE-285,CWE-636",
+   "cwe": "CWE-285",
+   "cwes": [
+    "CWE-285",
+    "CWE-636"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "af42d8f6559aa118ab551274776d06b132775f82",
    "patched_commit": "d008b9b764bf4b322a87e1822d1dda7789258d8f",
    "advisory_published": "2026-07-23",
    "fix_commit_date": "2026-06-11",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "packages/next-auth/src/lib/index.ts"
    ],
@@ -1830,12 +2073,17 @@
    "repo_url": "https://github.com/fastify/fastify-static",
    "language": "js",
    "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "c68224e3067e18ee4c676cc9db66aae6b30ffb02",
    "patched_commit": "db4276f846ba56b21f93768cd6636ee5e2fc58b1",
    "advisory_published": "2026-07-24",
    "fix_commit_date": "2026-07-22",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "index.js"
    ],
@@ -1858,12 +2106,17 @@
    "repo_url": "https://github.com/open-webui/open-webui",
    "language": "py",
    "cwe": "CWE-863",
+   "cwes": [
+    "CWE-863"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "e038bab66dec8d17212eec35b5cb6d6b785a4200",
    "patched_commit": "17df0264929514599dbcb21c6578bcdfa204b04d",
    "advisory_published": "2026-07-24",
    "fix_commit_date": "2026-06-17",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "backend/open_webui/utils/access_control/files.py"
    ],
@@ -1885,13 +2138,21 @@
    "repo": "open-webui/open-webui",
    "repo_url": "https://github.com/open-webui/open-webui",
    "language": "py",
-   "cwe": "CWE-94,CWE-200,CWE-639,CWE-862",
+   "cwe": "CWE-94",
+   "cwes": [
+    "CWE-200",
+    "CWE-639",
+    "CWE-862",
+    "CWE-94"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "914039ac8111148a27f49bc0ca7ceedc5284ecb3",
    "patched_commit": "386ac958144dbbbf0aa6e268070d72b681a318aa",
    "advisory_published": "2026-07-24",
    "fix_commit_date": "2026-06-29",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "backend/open_webui/socket/main.py"
    ],
@@ -1913,13 +2174,19 @@
    "repo": "open-webui/open-webui",
    "repo_url": "https://github.com/open-webui/open-webui",
    "language": "py",
-   "cwe": "CWE-862,CWE-863",
+   "cwe": "CWE-862",
+   "cwes": [
+    "CWE-862",
+    "CWE-863"
+   ],
+   "cwe_basis": "first_of_2_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "1fc0e3ade79510d5b03c231e48b1ff118bd7b2b4",
    "patched_commit": "b7626f05fb92b24ab923ad81a037071ebd5623d1",
    "advisory_published": "2026-07-24",
    "fix_commit_date": "2026-06-16",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "backend/open_webui/routers/files.py"
    ],
@@ -1941,13 +2208,19 @@
    "repo": "open-webui/open-webui",
    "repo_url": "https://github.com/open-webui/open-webui",
    "language": "py",
-   "cwe": "CWE-22,CWE-918",
+   "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22",
+    "CWE-918"
+   ],
+   "cwe_basis": "first_of_2_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "3266a8c9eb6b8408a869a33378a0f4ad8a46809e",
    "patched_commit": "05098d25a58d03738e01c4e85e8852c3b4ad849c",
    "advisory_published": "2026-07-24",
    "fix_commit_date": "2026-06-16",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "backend/open_webui/routers/models.py",
     "backend/open_webui/routers/terminals.py"
@@ -1971,12 +2244,17 @@
    "repo_url": "https://github.com/facelessuser/pymdown-extensions",
    "language": "py",
    "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "9fb9643c84c46386d77eef1a18929330620e3111",
    "patched_commit": "edce35586d11a1ef78bb187bc60497fe6dbf3b64",
    "advisory_published": "2026-07-24",
    "fix_commit_date": "2026-06-23",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "docs/src/markdown/extensions/b64.md",
     "pymdownx/b64.py"
@@ -2000,12 +2278,17 @@
    "repo_url": "https://github.com/openidentityplatform/openam",
    "language": "java",
    "cwe": "CWE-502",
+   "cwes": [
+    "CWE-502"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "57a39069631f4c79d7d21b86cf244fcfc650ba1a",
    "patched_commit": "9dd0fbe07f70f118cf45042d3a9ffb32f3c21e08",
    "advisory_published": "2026-07-24",
    "fix_commit_date": "2026-07-20",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "openam-authentication/openam-auth-webauthn/src/main/java/org/openidentityplatform/openam/authentication/modules/webauthn/WebAuthnAuthentication.java"
    ],
@@ -2028,12 +2311,17 @@
    "repo_url": "https://github.com/openidentityplatform/openam",
    "language": "java",
    "cwe": "CWE-79",
+   "cwes": [
+    "CWE-79"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "9dd0fbe07f70f118cf45042d3a9ffb32f3c21e08",
    "patched_commit": "98cee2dfe701c2e16e5bcee34e6fd9d913925118",
    "advisory_published": "2026-07-24",
    "fix_commit_date": "2026-07-20",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "openam-oauth2/src/main/java/org/forgerock/oauth2/restlet/ConsentRequiredResource.java",
     "openam-oauth2/src/main/resources/templates/wap/authorize.ftl"
@@ -2058,12 +2346,17 @@
    "repo_raw": "ahujasid/blender-mcp",
    "language": "py",
    "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "584e892695deb28d8f09b258db981006bbb1b229",
    "patched_commit": "30a3308446cd8f81a9446e5a2ed657c0d8d86072",
    "advisory_published": "2026-07-24",
    "fix_commit_date": "2026-07-20",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "addon.py"
    ],
@@ -2086,12 +2379,17 @@
    "repo_url": "https://github.com/huggingface/datasets",
    "language": "py",
    "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "959825da1fcb58ec0151e7fa51628e4bc1bb60ca",
    "patched_commit": "f989ef9b4cc6c0039a7a82458eebca49e2b58b4b",
    "advisory_published": "2026-07-24",
    "fix_commit_date": "2026-07-23",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/datasets/packaged_modules/folder_based_builder/folder_based_builder.py"
    ],
@@ -2113,13 +2411,19 @@
    "repo": "better-auth/better-auth",
    "repo_url": "https://github.com/better-auth/better-auth",
    "language": "js",
-   "cwe": "CWE-639,CWE-863",
+   "cwe": "CWE-863",
+   "cwes": [
+    "CWE-639",
+    "CWE-863"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "82cbbd6f1d9ccb1e7ee7fe54a2153c40c13442f3",
    "patched_commit": "29fbcb573261242d8a05b131a9d39c9ae4352b06",
    "advisory_published": "2026-07-24",
    "fix_commit_date": "2026-06-25",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     ".changeset/stripe-subscription-reference-scope.md",
     "packages/stripe/src/middleware.ts",
@@ -2143,13 +2447,20 @@
    "repo": "budibase/budibase",
    "repo_url": "https://github.com/budibase/budibase",
    "language": "js",
-   "cwe": "CWE-285,CWE-345,CWE-352",
+   "cwe": "CWE-285",
+   "cwes": [
+    "CWE-285",
+    "CWE-345",
+    "CWE-352"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "7e911d6da8f3d78500587073a58e187200f70577",
    "patched_commit": "362e6c654fb4da6e123c734333da2d6cbdcdb7ef",
    "advisory_published": "2026-07-24",
-   "fix_commit_date": "2026-07-14",
+   "fix_commit_date": "2026-07-13",
+   "fix_commit_date_basis": "merge_compare",
    "fix_files": [
     "packages/server/src/api/controllers/ai/chatIdentityLinks.ts",
     "packages/server/src/sdk/workspace/ai/chatIdentityLinks.ts",
@@ -2173,13 +2484,19 @@
    "repo": "microsoft/prompty",
    "repo_url": "https://github.com/microsoft/prompty",
    "language": "js",
-   "cwe": "CWE-94,CWE-1336",
+   "cwe": "CWE-1336",
+   "cwes": [
+    "CWE-1336",
+    "CWE-94"
+   ],
+   "cwe_basis": "first_of_2_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "70912ce716e00d64cf5eff31ad3aabab8b1365c7",
    "patched_commit": "047756f4c8caf91c5868eeb42520c938393277b0",
    "advisory_published": "2026-07-24",
    "fix_commit_date": "2026-07-20",
+   "fix_commit_date_basis": "merge_compare",
    "fix_files": [
     "runtime/typescript/packages/anthropic/package.json",
     "runtime/typescript/packages/core/package.json",
@@ -2206,12 +2523,17 @@
    "repo_url": "https://github.com/budibase/budibase",
    "language": "js",
    "cwe": "CWE-862",
+   "cwes": [
+    "CWE-862"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "124e5df31a4725334c65aea3f4b37db6cb10d119",
    "patched_commit": "93db77846e68231ba655f180581c94503985421a",
    "advisory_published": "2026-07-24",
    "fix_commit_date": "2026-06-30",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "packages/worker/src/api/routes/global/groups.ts"
    ],
@@ -2234,12 +2556,17 @@
    "repo_url": "https://github.com/budibase/budibase",
    "language": "js",
    "cwe": "CWE-89",
+   "cwes": [
+    "CWE-89"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "d0afbb99b68ac008575d9560f6d5acfe5df3f722",
    "patched_commit": "2c61f389c9986c91ddd8ae161c2b5e8ec21c60ac",
    "advisory_published": "2026-07-24",
    "fix_commit_date": "2026-06-16",
+   "fix_commit_date_basis": "merge_compare",
    "fix_files": [
     "packages/server/src/integrations/microsoftSqlServer.ts",
     "packages/server/src/integrations/mysql.ts",
@@ -2266,12 +2593,17 @@
    "repo_url": "https://github.com/budibase/budibase",
    "language": "js",
    "cwe": "CWE-89",
+   "cwes": [
+    "CWE-89"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "b7e63df737eede85d951aa9665b0c0778ece7ccb",
    "patched_commit": "dd8c0654b35cd89ce3645f2355f4bf2ff9a5dd80",
    "advisory_published": "2026-07-24",
    "fix_commit_date": "2026-06-02",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "packages/server/src/sdk/workspace/queries/queries.ts",
     "packages/string-templates/src/index.ts"
@@ -2294,13 +2626,19 @@
    "repo": "openidentityplatform/opendj",
    "repo_url": "https://github.com/openidentityplatform/opendj",
    "language": "java",
-   "cwe": "CWE-285,CWE-639",
+   "cwe": "CWE-285",
+   "cwes": [
+    "CWE-285",
+    "CWE-639"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "131e8576dcf3613f944c3e02527959bbf52370c3",
    "patched_commit": "5c326850f1ab945cfca7ac9c5aaf77d1052c6bed",
    "advisory_published": "2026-07-24",
    "fix_commit_date": "2026-07-17",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "opendj-server-legacy/src/main/java/org/opends/server/extensions/PlainSASLMechanismHandler.java",
     "opendj-server-legacy/src/main/java/org/opends/server/extensions/SASLContext.java"
@@ -2324,12 +2662,17 @@
    "repo_url": "https://github.com/postcss/postcss",
    "language": "js",
    "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "74e25ae9f4efaa56a41a449064a655d7da78072c",
    "patched_commit": "95663d3eb7ba26f4854dd19d3b4f4425760cf56c",
    "advisory_published": "2026-07-24",
    "fix_commit_date": "2026-07-12",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "lib/postcss.d.ts",
     "lib/previous-map.js"
@@ -2353,12 +2696,17 @@
    "repo_url": "https://github.com/quasarframework/quasar",
    "language": "js",
    "cwe": "CWE-1321",
+   "cwes": [
+    "CWE-1321"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "57e63c7f862fcf7e33b7d3ccb442499d2493e79f",
    "patched_commit": "d0a95d95ab3c29d13e1b8ba8c5e5025fd6ce35e7",
    "advisory_published": "2026-07-24",
    "fix_commit_date": "2026-07-20",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "ui/src/utils/extend/extend.js"
    ],
@@ -2381,12 +2729,17 @@
    "repo_url": "https://github.com/shepherdwind/velocity.js",
    "language": "js",
    "cwe": "CWE-94",
+   "cwes": [
+    "CWE-94"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "4cbc7f102c1c7c3e938883a11789231c2d9e6eac",
    "patched_commit": "f8e47a6c4607249b9c967d3a1ced959b4dd64dba",
    "advisory_published": "2026-07-24",
    "fix_commit_date": "2026-07-14",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/compile/prototype-guard.ts",
     "src/compile/references.ts",
@@ -2411,12 +2764,17 @@
    "repo_url": "https://github.com/sveltejs/kit",
    "language": "js",
    "cwe": "CWE-1321",
+   "cwes": [
+    "CWE-1321"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "82790de5b87470a3cc7178bae2c322db62cf0a8e",
    "patched_commit": "df32f6fe86cdd0b68b650e3e4631e5896453dcd3",
    "advisory_published": "2026-07-24",
    "fix_commit_date": "2026-07-02",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     ".changeset/tough-kings-own.md",
     "packages/kit/src/runtime/client/remote-functions/form.svelte.js",
@@ -2440,13 +2798,20 @@
    "repo": "openidentityplatform/opendj",
    "repo_url": "https://github.com/openidentityplatform/opendj",
    "language": "java",
-   "cwe": "CWE-73,CWE-400,CWE-918",
+   "cwe": "CWE-73",
+   "cwes": [
+    "CWE-400",
+    "CWE-73",
+    "CWE-918"
+   ],
+   "cwe_basis": "first_of_2_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "5fa8ed760437453c7694ce9e8bd76d21e2f5d683",
    "patched_commit": "131e8576dcf3613f944c3e02527959bbf52370c3",
    "advisory_published": "2026-07-24",
    "fix_commit_date": "2026-07-17",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "opendj-dsml-servlet/pom.xml",
     "opendj-dsml-servlet/resources/webapp/web.xml",
@@ -2472,12 +2837,17 @@
    "repo_url": "https://github.com/agentfront/frontmcp",
    "language": "js",
    "cwe": "CWE-918",
+   "cwes": [
+    "CWE-918"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "d0337a416d199aaacacefdfecfa9b60a6c1db0ba",
    "patched_commit": "077201e109bf6f45dbc85c36d6bd77ded18ab13e",
    "advisory_published": "2026-07-24",
    "fix_commit_date": "2026-07-23",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "docs/frontmcp/adapters/openapi-adapter.mdx",
     "docs/frontmcp/adapters/openapi-polling.mdx",
@@ -2504,13 +2874,20 @@
    "repo": "better-auth/better-auth",
    "repo_url": "https://github.com/better-auth/better-auth",
    "language": "js",
-   "cwe": "CWE-20,CWE-639,CWE-862",
+   "cwe": "CWE-862",
+   "cwes": [
+    "CWE-20",
+    "CWE-639",
+    "CWE-862"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "8bd43d9d8312fd9ddbfb8fb5c827cf0a0e55132d",
    "patched_commit": "7c126dcd1aad24468ec37e876545c1d083d8acca",
    "advisory_published": "2026-07-24",
    "fix_commit_date": "2026-06-26",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     ".changeset/scim-write-path.md",
     "docs/content/docs/plugins/scim.mdx",
@@ -2538,13 +2915,19 @@
    "repo_url": "https://github.com/datamodel-code-generator/datamodel-code-generator",
    "repo_raw": "koxudaxi/datamodel-code-generator",
    "language": "py",
-   "cwe": "CWE-94,CWE-1336",
+   "cwe": "CWE-1336",
+   "cwes": [
+    "CWE-1336",
+    "CWE-94"
+   ],
+   "cwe_basis": "first_of_2_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "b73abb5cd703a50471b8950bbd3bd0b82ad71de7",
    "patched_commit": "17fc235e234cbcfaaadef8c74cb72c9687db0d1d",
    "advisory_published": "2026-07-28",
    "fix_commit_date": "2026-06-08",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/datamodel_code_generator/parser/jsonschema.py"
    ],
@@ -2567,13 +2950,19 @@
    "repo_url": "https://github.com/datamodel-code-generator/datamodel-code-generator",
    "repo_raw": "koxudaxi/datamodel-code-generator",
    "language": "py",
-   "cwe": "CWE-94,CWE-1336",
+   "cwe": "CWE-1336",
+   "cwes": [
+    "CWE-1336",
+    "CWE-94"
+   ],
+   "cwe_basis": "first_of_2_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "bcfdf30660ac4a17ea54400351c9aa4f3391f60e",
    "patched_commit": "b73abb5cd703a50471b8950bbd3bd0b82ad71de7",
    "advisory_published": "2026-07-28",
    "fix_commit_date": "2026-06-08",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/datamodel_code_generator/model/base.py"
    ],
@@ -2596,12 +2985,17 @@
    "repo_url": "https://github.com/pypa/pip",
    "language": "py",
    "cwe": "CWE-36",
+   "cwes": [
+    "CWE-36"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "ba52753ecf1803e5b6b5dfb2782835266a71c470",
    "patched_commit": "10dfb6b9005484578b386f64b9f36982e3dc6679",
    "advisory_published": "2026-07-29",
    "fix_commit_date": "2026-07-01",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "news/14110.bugfix.rst",
     "src/pip/_internal/models/link.py",
@@ -2627,12 +3021,17 @@
    "repo_url": "https://github.com/dynatrace-oss/dynatrace-mcp",
    "language": "js",
    "cwe": "CWE-862",
+   "cwes": [
+    "CWE-862"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "650ba47d1fe20e5e708a1635856e03b7bf134f55",
    "patched_commit": "2851d3ce29d834c93b67f0db903c10e0b488e7ac",
    "advisory_published": "2026-07-29",
    "fix_commit_date": "2026-06-08",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/index.ts"
    ],
@@ -2654,13 +3053,19 @@
    "repo": "linuxfabrik/lib",
    "repo_url": "https://github.com/linuxfabrik/lib",
    "language": "py",
-   "cwe": "CWE-200,CWE-918",
+   "cwe": "CWE-918",
+   "cwes": [
+    "CWE-200",
+    "CWE-918"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "dda087b0154718d8e9921959e4d2b148e65b5c58",
    "patched_commit": "6573ff9347e541200305d278d2663d2e54e052ff",
    "advisory_published": "2026-07-30",
    "fix_commit_date": "2026-07-07",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "CHANGELOG.md",
     "url.py"
@@ -2684,12 +3089,17 @@
    "repo_url": "https://github.com/nocobase/nocobase",
    "language": "js",
    "cwe": "CWE-89",
+   "cwes": [
+    "CWE-89"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "fac62d1d495aec554351113a80500e9e7b4f3d90",
    "patched_commit": "68d64e3fcfb8be2ae4f3bfc9e1ee3f85b87c89ce",
    "advisory_published": "2026-07-31",
    "fix_commit_date": "2026-06-03",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "packages/plugins/@nocobase/plugin-notification-in-app-message/src/server/defineMyInAppChannels.ts"
    ],
@@ -2712,12 +3122,17 @@
    "repo_url": "https://github.com/hackingrepo/dssrf-js",
    "language": "js",
    "cwe": "CWE-918",
+   "cwes": [
+    "CWE-918"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "2eef49dc0fc3a864e566f44bf6cf9c95e4410798",
    "patched_commit": "668c21792cd1252baf779a176aa652e2b4c0067d",
    "advisory_published": "2026-07-31",
    "fix_commit_date": "2026-06-09",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/helpers.ts"
    ],
@@ -2740,12 +3155,17 @@
    "repo_url": "https://github.com/phun-ky/defaults-deep",
    "language": "js",
    "cwe": "CWE-1321",
+   "cwes": [
+    "CWE-1321"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "1141f9aedab989fa1470883b929104f99f80a840",
    "patched_commit": "807dba930f8718f9126cad59d949b8fd3539b059",
    "advisory_published": "2026-07-31",
    "fix_commit_date": "2026-06-08",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/utils/merge-with.ts"
    ],
@@ -2768,12 +3188,17 @@
    "repo_url": "https://github.com/xdan/jodit",
    "language": "js",
    "cwe": "CWE-1321",
+   "cwes": [
+    "CWE-1321"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "3b75c6661940424b6693c1640edbd8ca0ce8da2d",
    "patched_commit": "d298397bc993793b17145806c15f7dae53f90104",
    "advisory_published": "2026-07-31",
    "fix_commit_date": "2026-06-09",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "CHANGELOG.md",
     "src/core/helpers/utils/config-proto.ts"
@@ -2796,13 +3221,19 @@
    "repo": "elyin/gemini-bridge",
    "repo_url": "https://github.com/elyin/gemini-bridge",
    "language": "py",
-   "cwe": "CWE-22,CWE-200",
+   "cwe": "CWE-22",
+   "cwes": [
+    "CWE-200",
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "bb3ad9e44dba04092abc2e2a8af83223f10402db",
    "patched_commit": "8f3b85afd02b692c4bc974b5176e12fb277ea801",
    "advisory_published": "2026-07-31",
    "fix_commit_date": "2026-06-09",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "CHANGELOG.md",
     "pyproject.toml",
@@ -2827,13 +3258,19 @@
    "repo": "kyndryl-open-source/hashi-vault-js",
    "repo_url": "https://github.com/kyndryl-open-source/hashi-vault-js",
    "language": "js",
-   "cwe": "CWE-23,CWE-74",
+   "cwe": "CWE-23",
+   "cwes": [
+    "CWE-23",
+    "CWE-74"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "236ee05c11bd36d7c4b54133792d36b9977b2d4d",
    "patched_commit": "ea2f76052d366a08f35f62ef4c12b6a334c91ec2",
    "advisory_published": "2026-07-31",
    "fix_commit_date": "2026-06-09",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "CHANGELOG.md",
     "README.md",
@@ -2858,13 +3295,19 @@
    "repo": "xdan/jodit",
    "repo_url": "https://github.com/xdan/jodit",
    "language": "js",
-   "cwe": "CWE-79,CWE-83",
+   "cwe": "CWE-79",
+   "cwes": [
+    "CWE-79",
+    "CWE-83"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "ada209207169b6067c05eafda54a713591c41702",
    "patched_commit": "0ebb61692cbe84f9abf10ac76dd594dbb6343b90",
    "advisory_published": "2026-07-31",
    "fix_commit_date": "2026-06-22",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/core/helpers/html/safe-html.ts"
    ],
@@ -2887,12 +3330,17 @@
    "repo_url": "https://github.com/dynatrace-oss/dynatrace-mcp",
    "language": "js",
    "cwe": "CWE-943",
+   "cwes": [
+    "CWE-943"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "35db4695ce24f19d5326edee5a86e9ba39e13f69",
    "patched_commit": "15d3546c0618ffbaeaeca477337e08e92f2151bc",
    "advisory_published": "2026-07-31",
    "fix_commit_date": "2026-07-14",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/capabilities/find-monitored-entity-by-name.ts",
     "src/capabilities/get-events-for-cluster.ts",
@@ -2919,13 +3367,19 @@
    "repo": "beaugunderson/ip-address",
    "repo_url": "https://github.com/beaugunderson/ip-address",
    "language": "js",
-   "cwe": "CWE-20,CWE-918",
+   "cwe": "CWE-918",
+   "cwes": [
+    "CWE-20",
+    "CWE-918"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "e82a6812ac9d16f1300d3c2051fe2cc88c5d9161",
    "patched_commit": "4a1f613f4c1bec915677dea923c10aaa09361ef9",
    "advisory_published": "2026-08-03",
    "fix_commit_date": "2026-07-25",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "README.md",
     "src/ipv6.ts",
@@ -2950,12 +3404,17 @@
    "repo_url": "https://github.com/angular/domino",
    "language": "js",
    "cwe": "CWE-79",
+   "cwes": [
+    "CWE-79"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "a9e9e17af7a54af8dde66f651bfde671c3a10444",
    "patched_commit": "f88e5aa49cf2804d7c2df22ef1640eb4ec43dd56",
    "advisory_published": "2026-08-03",
    "fix_commit_date": "2026-07-06",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "lib/NodeUtils.js"
    ],
@@ -2977,13 +3436,19 @@
    "repo": "postcss/postcss",
    "repo_url": "https://github.com/postcss/postcss",
    "language": "js",
-   "cwe": "CWE-22,CWE-200",
+   "cwe": "CWE-22",
+   "cwes": [
+    "CWE-200",
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "decea51421682341401575b3740709fda0e12930",
    "patched_commit": "7beca139e70f9075c6b19700fcb00dd8033e5da8",
    "advisory_published": "2026-08-03",
    "fix_commit_date": "2026-07-24",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "lib/previous-map.js"
    ],
@@ -3005,13 +3470,19 @@
    "repo": "beaugunderson/ip-address",
    "repo_url": "https://github.com/beaugunderson/ip-address",
    "language": "js",
-   "cwe": "CWE-20,CWE-918",
+   "cwe": "CWE-918",
+   "cwes": [
+    "CWE-20",
+    "CWE-918"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "9ed7949438f3f522ad95daebc0bccc8c20c07d6d",
    "patched_commit": "56368cb3d66c73ba0ee9b6b834fd31b22c2fd71e",
    "advisory_published": "2026-08-03",
    "fix_commit_date": "2026-07-25",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "README.md",
     "src/ipv4.ts",
@@ -3037,12 +3508,17 @@
    "repo_url": "https://github.com/flowiseai/flowise",
    "language": "js",
    "cwe": "CWE-862",
+   "cwes": [
+    "CWE-862"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "f4e2794f6a576b94578f2fdafbf49c2fb304626c",
    "patched_commit": "96a9b23b5a103b362a0ee1368d04636755be1bed",
    "advisory_published": "2026-08-04",
    "fix_commit_date": "2026-06-16",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "packages/server/src/enterprise/rbac/Permissions.ts",
     "packages/server/src/routes/executions/index.ts",
@@ -3068,12 +3544,17 @@
    "repo_url": "https://github.com/tryghost/ghost",
    "language": "js",
    "cwe": "CWE-918",
+   "cwes": [
+    "CWE-918"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "63c31fad7e473caa62d8fbb4651a04a2a62b5d00",
    "patched_commit": "5eff2de0f477b11c88f20bceb9d184c0d3b8a62e",
    "advisory_published": "2026-08-04",
    "fix_commit_date": "2026-07-15",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "ghost/core/core/server/lib/image/image-size.js",
     "ghost/core/core/server/lib/image/image-utils.js"
@@ -3097,12 +3578,17 @@
    "repo_url": "https://github.com/tryghost/ghost",
    "language": "js",
    "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "ad50490a27797c00cb5d6eb4a1998415aeb54a52",
    "patched_commit": "f466c300191a609ed36c8d7c5d1e33ccd440786b",
    "advisory_published": "2026-08-04",
    "fix_commit_date": "2026-07-15",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "ghost/core/core/server/api/endpoints/db.js",
     "ghost/core/core/server/data/exporter/export-filename.js"
@@ -3126,12 +3612,17 @@
    "repo_url": "https://github.com/flowiseai/flowise",
    "language": "js",
    "cwe": "CWE-862",
+   "cwes": [
+    "CWE-862"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "e816d26a7d35bf91a78a9e1562bee3caca5ff817",
    "patched_commit": "dbec8f9fd3c42faab49416fe81ff1774a5344cba",
    "advisory_published": "2026-08-04",
    "fix_commit_date": "2026-07-24",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "packages/server/src/controllers/text-to-speech/index.ts"
    ],
@@ -3153,13 +3644,19 @@
    "repo": "flowiseai/flowise",
    "repo_url": "https://github.com/flowiseai/flowise",
    "language": "js",
-   "cwe": "CWE-22,CWE-73",
+   "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22",
+    "CWE-73"
+   ],
+   "cwe_basis": "first_of_2_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "d07186844263bad057008863037466aff7c3390f",
    "patched_commit": "571b5d6218b1c129588ac625c8f20e30905a67cb",
    "advisory_published": "2026-08-04",
    "fix_commit_date": "2026-06-23",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "packages/components/nodes/documentloaders/S3Directory/S3Directory.ts",
     "packages/components/nodes/documentloaders/S3File/S3File.ts",
@@ -3183,13 +3680,19 @@
    "repo": "nuxt/nuxt",
    "repo_url": "https://github.com/nuxt/nuxt",
    "language": "js",
-   "cwe": "CWE-524,CWE-862",
+   "cwe": "CWE-862",
+   "cwes": [
+    "CWE-524",
+    "CWE-862"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "4e35ae9babd94be53246e31200232d48438bb34e",
    "patched_commit": "ac9b41a36b62296a117862254ee7d2b21a2a5203",
    "advisory_published": "2026-08-05",
    "fix_commit_date": "2026-07-23",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "packages/nitro-server/src/index.ts",
     "packages/nitro-server/src/runtime/handlers/renderer.ts",
@@ -3214,13 +3717,19 @@
    "repo": "langchain-ai/langgraph",
    "repo_url": "https://github.com/langchain-ai/langgraph",
    "language": "py",
-   "cwe": "CWE-200,CWE-863",
+   "cwe": "CWE-863",
+   "cwes": [
+    "CWE-200",
+    "CWE-863"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "41341457342327166d72fc11952ab28fb61ec0bf",
    "patched_commit": "66ebe1a0da921e73f0f9f879ba105d314c079f7c",
    "advisory_published": "2026-08-06",
    "fix_commit_date": "2026-07-30",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "libs/checkpoint-postgres/langgraph/store/postgres/base.py",
     "libs/checkpoint-sqlite/langgraph/store/sqlite/aio.py",
@@ -3245,12 +3754,17 @@
    "repo_url": "https://github.com/mermaid-js/mermaid",
    "language": "js",
    "cwe": "CWE-1321",
+   "cwes": [
+    "CWE-1321"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "2337f7ecd629c8e777684a2edff341976230ad67",
    "patched_commit": "99af3fc35ef0a9a9c8c6314521344d67523ddccf",
    "advisory_published": "2026-08-06",
    "fix_commit_date": "2026-08-04",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     ".changeset/dry-ducks-agree.md",
     ".cspell/misc-terms.txt",
@@ -3277,12 +3791,17 @@
    "repo_url": "https://github.com/jhy/jsoup",
    "language": "java",
    "cwe": "CWE-79",
+   "cwes": [
+    "CWE-79"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "a682fd5bc8acdf841e5f858e8a19e3d2c92c4df8",
    "patched_commit": "92f1aca552548b484bc7d4b94c51e48b8e6eca70",
    "advisory_published": "2026-08-06",
    "fix_commit_date": "2026-07-26",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "CHANGES.md",
     "src/main/java/org/jsoup/parser/TagSet.java",
@@ -3307,12 +3826,17 @@
    "repo_url": "https://github.com/nltk/nltk",
    "language": "py",
    "cwe": "CWE-284",
+   "cwes": [
+    "CWE-284"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "4085d53c7793d3d6622f2bf02272faf54d4c3975",
    "patched_commit": "7a5740af89feeb739193db766e11e85dfe78339c",
    "advisory_published": "2026-08-07",
    "fix_commit_date": "2026-06-26",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "nltk/downloader.py"
    ],
@@ -3334,13 +3858,19 @@
    "repo": "oscal-compass/compliance-trestle",
    "repo_url": "https://github.com/oscal-compass/compliance-trestle",
    "language": "py",
-   "cwe": "CWE-184,CWE-918",
+   "cwe": "CWE-918",
+   "cwes": [
+    "CWE-184",
+    "CWE-918"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "e92bde95d24ac9cec46618c031d7cb9c19b3e833",
    "patched_commit": "d107cd16efe8eb15d46be3c1d97f1ec73d32447c",
    "advisory_published": "2026-08-12",
    "fix_commit_date": "2026-06-09",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "trestle/core/remote/security.py"
    ],
@@ -3363,12 +3893,17 @@
    "repo_url": "https://github.com/dep0we/atomic-agents-stack",
    "language": "py",
    "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "da861310c27c87e1a0187e71ea7ff53817e54648",
    "patched_commit": "ec474f458122c5c0ca718d0df3078c8080338b2c",
    "advisory_published": "2026-08-13",
    "fix_commit_date": "2026-06-10",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "atomic_agents/dashboard/serve.py"
    ],
@@ -3391,12 +3926,17 @@
    "repo_url": "https://github.com/ether/etherpad",
    "language": "js",
    "cwe": "CWE-79",
+   "cwes": [
+    "CWE-79"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "e417bc1047cf9dd1cb90c256c24f12f33a4feb15",
    "patched_commit": "86c56cf827dd6e5ff1b6cd3760f87adc47f58bb1",
    "advisory_published": "2026-08-17",
    "fix_commit_date": "2026-06-07",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/node/utils/ExportHtml.ts",
     "src/node/utils/Settings.ts"
@@ -3420,12 +3960,17 @@
    "repo_url": "https://github.com/andialbrecht/sqlparse",
    "language": "py",
    "cwe": "CWE-94",
+   "cwes": [
+    "CWE-94"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "e7d95d494cebc66fd220198ea2eb2cf94a8bb5fe",
    "patched_commit": "53ff44b53e27cff78259acc1af015506fea60f63",
    "advisory_published": "2026-08-17",
    "fix_commit_date": "2026-06-29",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "CHANGELOG",
     "sqlparse/filters/output.py"
@@ -3449,12 +3994,17 @@
    "repo_url": "https://github.com/nicolargo/glances",
    "language": "py",
    "cwe": "CWE-78",
+   "cwes": [
+    "CWE-78"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "92156d069425fbe57326e3bdc268c5bfdf994f62",
    "patched_commit": "ea4cf2f54f0d961e24aa0b24fff9584bab39db93",
    "advisory_published": "2026-08-17",
    "fix_commit_date": "2026-06-28",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "glances/actions.py"
    ],
@@ -3477,12 +4027,17 @@
    "repo_url": "https://github.com/mlflow/mlflow",
    "language": "py",
    "cwe": "CWE-918",
+   "cwes": [
+    "CWE-918"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "3e6c1b1af5d2b884b9152ca4df23684bb2cfccbb",
    "patched_commit": "ba949522477cbd5915aa55d29b0cfad7d5ddf939",
    "advisory_published": "2026-08-17",
    "fix_commit_date": "2026-07-02",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "mlflow/webhooks/delivery.py",
     "mlflow/webhooks/ssrf.py"
@@ -3506,12 +4061,17 @@
    "repo_url": "https://github.com/nicolargo/glances",
    "language": "py",
    "cwe": "CWE-78",
+   "cwes": [
+    "CWE-78"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "5c260ace313d425ef6589b594ef00be952d61cba",
    "patched_commit": "9c280eae5419da680827024b60f6265956e31994",
    "advisory_published": "2026-08-17",
    "fix_commit_date": "2026-07-05",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "glances/actions.py"
    ],
@@ -3534,12 +4094,17 @@
    "repo_url": "https://github.com/mlflow/mlflow",
    "language": "py",
    "cwe": "CWE-862",
+   "cwes": [
+    "CWE-862"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "4a5b53a2cb0a91432714a7909dbc1c0b8eb8a51d",
    "patched_commit": "5c34aec5669e2386b38b5ee0855cd61174e27693",
    "advisory_published": "2026-08-17",
    "fix_commit_date": "2026-07-06",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "mlflow/server/auth/__init__.py"
    ],
@@ -3562,12 +4127,17 @@
    "repo_url": "https://github.com/mlflow/mlflow",
    "language": "py",
    "cwe": "CWE-862",
+   "cwes": [
+    "CWE-862"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "51846bf4363a9206d3bc22c8bc87188b66e920fe",
    "patched_commit": "4bb7474771c3be808cd9e129defef9305f2869be",
    "advisory_published": "2026-08-17",
    "fix_commit_date": "2026-07-06",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "mlflow/server/auth/__init__.py"
    ],
@@ -3589,13 +4159,22 @@
    "repo": "ether/etherpad",
    "repo_url": "https://github.com/ether/etherpad",
    "language": "js",
-   "cwe": "CWE-22,CWE-208,CWE-209,CWE-235,CWE-330",
+   "cwe": "CWE-22",
+   "cwes": [
+    "CWE-208",
+    "CWE-209",
+    "CWE-22",
+    "CWE-235",
+    "CWE-330"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "86c56cf827dd6e5ff1b6cd3760f87adc47f58bb1",
    "patched_commit": "7ea99706483443239bbbc0f2df9aff8ab5de4805",
    "advisory_published": "2026-08-17",
    "fix_commit_date": "2026-06-07",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/node/db/API.ts",
     "src/node/handler/RestAPI.ts",
@@ -3623,12 +4202,17 @@
    "repo_url": "https://github.com/9001/copyparty",
    "language": "py",
    "cwe": "CWE-863",
+   "cwes": [
+    "CWE-863"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "89040874f53e426e54a94787a3e3ddfa2acd1bad",
    "patched_commit": "e40755331ba9449993ff482456e6bdd2c6deb950",
    "advisory_published": "2026-08-18",
    "fix_commit_date": "2026-07-06",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "copyparty/httpcli.py"
    ],
@@ -3651,12 +4235,17 @@
    "repo_url": "https://github.com/netflix/lemur",
    "language": "py",
    "cwe": "CWE-918",
+   "cwes": [
+    "CWE-918"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "08e7db67faeb403f4d26b5936b9b2da6371103f1",
    "patched_commit": "6dcb19b6d6004e97796d6a0344b130b2ba57f050",
    "advisory_published": "2026-08-18",
    "fix_commit_date": "2026-06-29",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "lemur/authorities/service.py",
     "lemur/plugins/lemur_acme/acme_handlers.py",
@@ -3680,13 +4269,19 @@
    "repo": "netflix/lemur",
    "repo_url": "https://github.com/netflix/lemur",
    "language": "py",
-   "cwe": "CWE-367,CWE-918",
+   "cwe": "CWE-918",
+   "cwes": [
+    "CWE-367",
+    "CWE-918"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "e9ade7dad5c9bc1369a831554ed6df3277c9cbae",
    "patched_commit": "ed504a830f38a83825b1570302e9f38d6553938a",
    "advisory_published": "2026-08-18",
    "fix_commit_date": "2026-06-30",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "lemur/certificates/verify.py"
    ],
@@ -3709,12 +4304,17 @@
    "repo_url": "https://github.com/netflix/lemur",
    "language": "py",
    "cwe": "CWE-862",
+   "cwes": [
+    "CWE-862"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "2fedb8fba47a36990a9c7edc390d5260145ff403",
    "patched_commit": "751c970ec42a53d00ecc9c6a96e0e51b6737ae53",
    "advisory_published": "2026-08-18",
    "fix_commit_date": "2026-06-29",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "lemur/destinations/schemas.py",
     "lemur/destinations/views.py",
@@ -3738,13 +4338,19 @@
    "repo": "netflix/lemur",
    "repo_url": "https://github.com/netflix/lemur",
    "language": "py",
-   "cwe": "CWE-639,CWE-862",
+   "cwe": "CWE-862",
+   "cwes": [
+    "CWE-639",
+    "CWE-862"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "e9ade7dad5c9bc1369a831554ed6df3277c9cbae",
    "patched_commit": "286874535160952143b0afe2d356642669f9d4c6",
    "advisory_published": "2026-08-18",
    "fix_commit_date": "2026-07-01",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "lemur/certificates/service.py",
     "lemur/certificates/views.py"
@@ -3767,13 +4373,19 @@
    "repo": "linuxfabrik/lib",
    "repo_url": "https://github.com/linuxfabrik/lib",
    "language": "py",
-   "cwe": "CWE-22,CWE-269",
+   "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22",
+    "CWE-269"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "07ba0bd64df1ba8335b163340f6049d49273c28c",
    "patched_commit": "d665042c55fae83a295ebc0023e8b77f6c473a28",
    "advisory_published": "2026-08-18",
    "fix_commit_date": "2026-07-08",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "CHANGELOG.md",
     "db_sqlite.py",
@@ -3799,12 +4411,17 @@
    "repo_url": "https://github.com/gina-io/swig",
    "language": "js",
    "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "a617cbf5f8c3cd5883d51ee4ef72d9d0523a2407",
    "patched_commit": "381bdc305e0b10e45368d56324328b9b4f7017fc",
    "advisory_published": "2026-08-18",
    "fix_commit_date": "2026-06-08",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "packages/swig-core/lib/loaders/filesystem.js"
    ],
@@ -3827,12 +4444,17 @@
    "repo_url": "https://github.com/contentful/contentful-mcp-server",
    "language": "js",
    "cwe": "CWE-918",
+   "cwes": [
+    "CWE-918"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "6e0038494a09c435f6a0a9a76fde2dc077f18b18",
    "patched_commit": "fa7477ee48515f4248bc91a025eab0ca83423fe0",
    "advisory_published": "2026-08-19",
    "fix_commit_date": "2026-06-01",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "packages/mcp-server/src/config/env.ts",
     "packages/mcp-server/src/tools/register.ts",
@@ -3859,13 +4481,19 @@
    "repo": "tinacms/tinacms",
    "repo_url": "https://github.com/tinacms/tinacms",
    "language": "js",
-   "cwe": "CWE-639,CWE-862",
+   "cwe": "CWE-862",
+   "cwes": [
+    "CWE-639",
+    "CWE-862"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "d08ffb40de47f8c8296646b9076af79a26d76c47",
    "patched_commit": "d44558e9b4502d4f4fc2c970d22985339fe2b6ce",
    "advisory_published": "2026-08-19",
    "fix_commit_date": "2026-06-22",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     ".changeset/rude-ears-remember.md",
     "package.json",
@@ -3897,12 +4525,17 @@
    "repo_url": "https://github.com/logto-io/logto",
    "language": "js",
    "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "021381237511bc0d42f81d65df8b036b01f40547",
    "patched_commit": "5686815955534f803d3d50738259efd0f741e62c",
    "advisory_published": "2026-08-19",
    "fix_commit_date": "2026-06-30",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     ".changeset/fix-tunnel-path-traversal.md",
     "packages/tunnel/src/commands/tunnel/utils.ts"
@@ -3926,12 +4559,17 @@
    "repo_url": "https://github.com/nocobase/nocobase",
    "language": "js",
    "cwe": "CWE-78",
+   "cwes": [
+    "CWE-78"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "3f4ec12fc60157ea15c41ea3f696f0ddb7366e7c",
    "patched_commit": "0e1aba1b7b112ffc841588963f7343c00edd9806",
    "advisory_published": "2026-08-20",
    "fix_commit_date": "2026-07-02",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "packages/plugins/@nocobase/plugin-backups/src/server/adapters/database.ts"
    ],
@@ -3954,12 +4592,17 @@
    "repo_url": "https://github.com/locize/gettext-converter",
    "language": "js",
    "cwe": "CWE-1321",
+   "cwes": [
+    "CWE-1321"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "955bec4dea60d9c0f570c8fd60e8771b4822088a",
    "patched_commit": "df90c3b93e51faef68891d97b626544f619c5b31",
    "advisory_published": "2026-08-20",
    "fix_commit_date": "2026-06-12",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "CHANGELOG.md",
     "gettext.js",
@@ -3985,13 +4628,19 @@
    "repo": "django-cms/django-cms",
    "repo_url": "https://github.com/django-cms/django-cms",
    "language": "py",
-   "cwe": "CWE-639,CWE-862",
+   "cwe": "CWE-862",
+   "cwes": [
+    "CWE-639",
+    "CWE-862"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "2b5de9f19b698005f55f57a90019412f99ce1a07",
    "patched_commit": "9c82abfeb25471583e23906ea1ebef9202527b04",
    "advisory_published": "2026-08-20",
    "fix_commit_date": "2026-06-29",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "cms/cms_toolbars.py",
     "cms/models/contentmodels.py",
@@ -4017,13 +4666,19 @@
    "repo": "django-cms/django-cms",
    "repo_url": "https://github.com/django-cms/django-cms",
    "language": "py",
-   "cwe": "CWE-639,CWE-862",
+   "cwe": "CWE-862",
+   "cwes": [
+    "CWE-639",
+    "CWE-862"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "3edf89a0a8bb06cdd54d2d22cba33ee7b72b5b82",
    "patched_commit": "3e1ccf7573eb1a74ebbbfaaa812c1f5cadf14e6c",
    "advisory_published": "2026-08-20",
    "fix_commit_date": "2026-07-08",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "cms/admin/forms.py",
     "cms/forms/validators.py"
@@ -4047,12 +4702,17 @@
    "repo_url": "https://github.com/django-cms/django-cms",
    "language": "py",
    "cwe": "CWE-79",
+   "cwes": [
+    "CWE-79"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "27b1f6313232ea7806b25dc8a207dabf3a8f6d29",
    "patched_commit": "b56a568844ff3702495945f73a31d0868285bf88",
    "advisory_published": "2026-08-20",
    "fix_commit_date": "2026-06-30",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "cms/admin/placeholderadmin.py",
     "cms/plugin_rendering.py",
@@ -4076,13 +4736,19 @@
    "repo": "kepano/defuddle",
    "repo_url": "https://github.com/kepano/defuddle",
    "language": "js",
-   "cwe": "CWE-79,CWE-116",
+   "cwe": "CWE-79",
+   "cwes": [
+    "CWE-116",
+    "CWE-79"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "19520add09282abdfadbc6d23eb6bf8393af2bf8",
    "patched_commit": "baf2eaef61d334ef595b28c89e5c5e89e52daf7f",
    "advisory_published": "2026-08-21",
    "fix_commit_date": "2026-06-24",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "CLAUDE.md",
     "src/defuddle.ts",
@@ -4108,13 +4774,19 @@
    "repo": "hydra-ecosystem/hydra",
    "repo_url": "https://github.com/hydra-ecosystem/hydra",
    "language": "py",
-   "cwe": "CWE-94,CWE-470",
+   "cwe": "CWE-94",
+   "cwes": [
+    "CWE-470",
+    "CWE-94"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "d69214b2b8b5bcaef0152cdbd750fa16c42c8fae",
    "patched_commit": "7faad0dcedfb4c0a364aa1067c0080fd6fdf8dca",
    "advisory_published": "2026-08-21",
    "fix_commit_date": "2026-07-04",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "hydra/_internal/instantiate/_instantiate2.py",
     "news/3259.bugfix"
@@ -4138,12 +4810,17 @@
    "repo_url": "https://github.com/geotools/geotools",
    "language": "java",
    "cwe": "CWE-89",
+   "cwes": [
+    "CWE-89"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "86de3d3dad82db14e523e24e07473c3a2165f1db",
    "patched_commit": "d821c4d321dd91c22e31fcd5b1ce676645da5176",
    "advisory_published": "2026-08-21",
    "fix_commit_date": "2026-08-14",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "modules/plugin/jdbc/jdbc-postgis/src/main/java/org/geotools/data/postgis/FilterToSqlHelper.java"
    ],
@@ -4166,12 +4843,17 @@
    "repo_url": "https://github.com/qwed-ai/qwed-mcp",
    "language": "py",
    "cwe": "CWE-94",
+   "cwes": [
+    "CWE-94"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "54ac682699407310b5a71fbaed8c33f581b84301",
    "patched_commit": "362e61892052e250c56cb1ee852024d6f98c467b",
    "advisory_published": "2026-08-25",
    "fix_commit_date": "2026-06-13",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/qwed_mcp/engines/math_engine.py",
     "src/qwed_mcp/engines/safe_parser.py"
@@ -4195,12 +4877,17 @@
    "repo_url": "https://github.com/that1drifter/browse-mcp",
    "language": "js",
    "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "b106ffe0fcf2c46b9a23bfefd990ef8618dcc0c2",
    "patched_commit": "5352a4a56f626254b445bfa07e4bb48c5aad15c1",
    "advisory_published": "2026-08-25",
    "fix_commit_date": "2026-06-13",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "CHANGELOG.md",
     "SECURITY.md",
@@ -4227,13 +4914,19 @@
    "repo": "djust-org/djust",
    "repo_url": "https://github.com/djust-org/djust",
    "language": "py",
-   "cwe": "CWE-285,CWE-306",
+   "cwe": "CWE-285",
+   "cwes": [
+    "CWE-285",
+    "CWE-306"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "3b369d0c1a5e1efd6d63ad244ef5874440675bd2",
    "patched_commit": "1ae8aa9246b80477de7ddc4d90319a3b267bef04",
    "advisory_published": "2026-08-25",
    "fix_commit_date": "2026-06-13",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "CHANGELOG.md",
     "docs/audits/websocket-auth-2026-06.md",
@@ -4258,12 +4951,17 @@
    "repo_url": "https://github.com/udecode/plate",
    "language": "js",
    "cwe": "CWE-79",
+   "cwes": [
+    "CWE-79"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "5ce8ca0366c808e0f6ee76695a73d5b7fcd0b4f2",
    "patched_commit": "6214914ca811adf22d0ad503154494216eed68ba",
    "advisory_published": "2026-08-25",
    "fix_commit_date": "2026-06-14",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     ".changeset/media-embed-url-sanitization.md",
     "docs/plans/2026-06-14-fix-media-embed-advisory.md",
@@ -4287,13 +4985,19 @@
    "repo": "ronf/asyncssh",
    "repo_url": "https://github.com/ronf/asyncssh",
    "language": "py",
-   "cwe": "CWE-22,CWE-639",
+   "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22",
+    "CWE-639"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "a60f863b3aea9825f845d36687fc4ddfc3738ce1",
    "patched_commit": "3d515ba9ba0cd9990d248bdf62bcf05d51261a88",
    "advisory_published": "2026-08-26",
    "fix_commit_date": "2026-06-06",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "asyncssh/config.py"
    ],
@@ -4316,12 +5020,17 @@
    "repo_url": "https://github.com/ronf/asyncssh",
    "language": "py",
    "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "3d515ba9ba0cd9990d248bdf62bcf05d51261a88",
    "patched_commit": "d730803b8e4e94c20c7580d90f94d1e05f9f58de",
    "advisory_published": "2026-08-26",
    "fix_commit_date": "2026-06-06",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "asyncssh/scp.py"
    ],
@@ -4344,12 +5053,17 @@
    "repo_url": "https://github.com/spring-projects/spring-framework",
    "language": "java",
    "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "8647e90bc7b2da9b299566296f2b253a6fd9c128",
    "patched_commit": "692dbc9160de3b5de50ccedeee014716d0cedb7b",
    "advisory_published": "2026-08-27",
    "fix_commit_date": "2026-06-29",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "spring-webmvc/src/main/java/org/springframework/web/servlet/view/xslt/XsltView.java"
    ],
@@ -4372,12 +5086,17 @@
    "repo_url": "https://github.com/dangerblack/n8n-node-sqlite3",
    "language": "js",
    "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "8a3493f19a426bd99ea91b2c337978e0488cc1c9",
    "patched_commit": "145a8876ff12375813bdcd4ae4fe78f460c53a98",
    "advisory_published": "2026-08-27",
    "fix_commit_date": "2026-06-07",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "nodes/SqliteNode/v1/SqliteV1.node.ts"
    ],
@@ -4400,12 +5119,17 @@
    "repo_url": "https://github.com/elwerene/libreoffice-convert",
    "language": "js",
    "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "b358581adf6310b519841b275559b201bd4009f1",
    "patched_commit": "b78f17df9b9183bd503fc4635fc8b3df6705047b",
    "advisory_published": "2026-08-27",
    "fix_commit_date": "2026-06-09",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "index.js",
     "package.json"
@@ -4429,12 +5153,17 @@
    "repo_url": "https://github.com/mar10/wsgidav",
    "language": "py",
    "cwe": "CWE-89",
+   "cwes": [
+    "CWE-89"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "67abdbd7d622fcf29aefdfbd0c9910de9e0c8b3d",
    "patched_commit": "6f35776c9188f130ab044ce557015d51aaa83500",
    "advisory_published": "2026-08-28",
    "fix_commit_date": "2026-06-27",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "wsgidav/samples/mysql_dav_provider.py"
    ],
@@ -4456,13 +5185,19 @@
    "repo": "browserslist/browserslist",
    "repo_url": "https://github.com/browserslist/browserslist",
    "language": "js",
-   "cwe": "CWE-248,CWE-1321",
+   "cwe": "CWE-1321",
+   "cwes": [
+    "CWE-1321",
+    "CWE-248"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "f2931a3ff2a3a31abf84ef01a7400b270aad6405",
    "patched_commit": "f9914ad9effc865ccc27d816255625890b31ca51",
    "advisory_published": "2026-09-01",
    "fix_commit_date": "2026-07-21",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "node.js"
    ],
@@ -4485,12 +5220,17 @@
    "repo_url": "https://github.com/mlflow/mlflow",
    "language": "py",
    "cwe": "CWE-502",
+   "cwes": [
+    "CWE-502"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "6135259c681e4d01cdd55923db8c51a967576148",
    "patched_commit": "38615289094a4b700a20b5d1dbfbe57bdfb0411f",
    "advisory_published": "2026-09-01",
    "fix_commit_date": "2026-07-27",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "mlflow/statsmodels/__init__.py"
    ],
@@ -4513,12 +5253,17 @@
    "repo_url": "https://github.com/omnigent-ai/omnigent",
    "language": "py",
    "cwe": "CWE-94",
+   "cwes": [
+    "CWE-94"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "b10358603f301451d20a737cdfd870917de8245d",
    "patched_commit": "25a22dc9e6da4648d23749f0a589e47e6aed991b",
    "advisory_published": "2026-09-02",
    "fix_commit_date": "2026-06-26",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "omnigent/server/routes/sessions.py"
    ],
@@ -4541,12 +5286,17 @@
    "repo_url": "https://github.com/omnigent-ai/omnigent",
    "language": "py",
    "cwe": "CWE-94",
+   "cwes": [
+    "CWE-94"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "1a05b7b139ef504bf2be89bf37918abe104fb95c",
    "patched_commit": "1f3f398f41cbf97b905133c21e848621c21da6e0",
    "advisory_published": "2026-09-02",
    "fix_commit_date": "2026-06-26",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "omnigent/server/bundles.py"
    ],
@@ -4568,13 +5318,20 @@
    "repo": "jknack/handlebars.java",
    "repo_url": "https://github.com/jknack/handlebars.java",
    "language": "java",
-   "cwe": "CWE-22,CWE-23,CWE-552",
+   "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22",
+    "CWE-23",
+    "CWE-552"
+   ],
+   "cwe_basis": "first_of_2_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "c95855064f48f1a66af2a5da5a9c1522d7f57264",
    "patched_commit": "61f43423a337b87db5fec1fe59f0725aaaa38df5",
    "advisory_published": "2026-09-02",
    "fix_commit_date": "2026-06-28",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "handlebars-springmvc/src/main/java/com/github/jknack/handlebars/springmvc/HandlebarsViewResolver.java",
     "handlebars-springmvc/src/main/java/com/github/jknack/handlebars/springmvc/SpringTemplateLoader.java"
@@ -4598,12 +5355,17 @@
    "repo_url": "https://github.com/apostrophecms/apostrophe",
    "language": "js",
    "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "d50c6ad61b9c1788958752358f1fca714cc8368c",
    "patched_commit": "87cccf44a23d09420875ca8a3765eb3db843836a",
    "advisory_published": "2026-09-02",
    "fix_commit_date": "2026-07-08",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     ".changeset/import-export-archive-nosql-operator.md",
     ".changeset/import-export-attachment-path-traversal.md",
@@ -4630,12 +5392,17 @@
    "repo_url": "https://github.com/udecode/plate",
    "language": "js",
    "cwe": "CWE-918",
+   "cwes": [
+    "CWE-918"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "5be29c686430534d49a94244b0e7eeb98dc944f0",
    "patched_commit": "21aa59926f4bbd421027354823cca09c6700ed73",
    "advisory_published": "2026-09-02",
    "fix_commit_date": "2026-07-03",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     ".changeset/fix-docx-remote-images.md",
     "docs/plans/2026-07-03-open-ghsa-4q39-pr.md",
@@ -4666,13 +5433,19 @@
    "repo": "dicebear/dicebear",
    "repo_url": "https://github.com/dicebear/dicebear",
    "language": "js",
-   "cwe": "CWE-79,CWE-184",
+   "cwe": "CWE-79",
+   "cwes": [
+    "CWE-184",
+    "CWE-79"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "efe62f2700e9e45b60e40b0e92a22e93d07e237d",
    "patched_commit": "922946d738c4e77ab6c412e27ede75941fec4b59",
    "advisory_published": "2026-09-02",
    "fix_commit_date": "2026-07-05",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "packages/@dicebear/core/src/utils/svg.ts",
     "packages/@dicebear/initials/src/index.ts"
@@ -4696,12 +5469,17 @@
    "repo_url": "https://github.com/masci/banks",
    "language": "py",
    "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "3ab65baca00fd3917a12ca1fcfaab03176782bc4",
    "patched_commit": "a215f6d779966945c56e0af5abed1ae5916fd9d3",
    "advisory_published": "2026-09-02",
    "fix_commit_date": "2026-07-07",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/banks/registries/directory.py"
    ],
@@ -4724,12 +5502,17 @@
    "repo_url": "https://github.com/apostrophecms/apostrophe",
    "language": "js",
    "cwe": "CWE-1321",
+   "cwes": [
+    "CWE-1321"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "1135516a1a4a8f9638641c460488a43d8af20081",
    "patched_commit": "5a3746aaed49761e171c2cbfe793267c959829fd",
    "advisory_published": "2026-09-02",
    "fix_commit_date": "2026-08-12",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     ".changeset/dot-path-inherited-properties.md",
     "packages/apostrophe/modules/@apostrophecms/util/index.js"
@@ -4752,13 +5535,20 @@
    "repo": "nltk/nltk",
    "repo_url": "https://github.com/nltk/nltk",
    "language": "py",
-   "cwe": "CWE-59,CWE-61,CWE-73",
+   "cwe": "CWE-73",
+   "cwes": [
+    "CWE-59",
+    "CWE-61",
+    "CWE-73"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "a79356490469d741dba11b5cb97acccd12be0d8e",
    "patched_commit": "9e6d5f05902b9aaa1221a0a565448d17a9c9b3e8",
    "advisory_published": "2026-09-02",
    "fix_commit_date": "2026-08-28",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "nltk/pathsec.py"
    ],
@@ -4780,13 +5570,19 @@
    "repo": "ueberdosis/tiptap",
    "repo_url": "https://github.com/ueberdosis/tiptap",
    "language": "js",
-   "cwe": "CWE-79,CWE-1321",
+   "cwe": "CWE-1321",
+   "cwes": [
+    "CWE-1321",
+    "CWE-79"
+   ],
+   "cwe_basis": "first_of_2_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "98b469dbb7fb51e4c306dc2860355307801e8897",
    "patched_commit": "01d7af8c983ee5954c63734f4fa46cb23ae3246d",
    "advisory_published": "2026-09-02",
    "fix_commit_date": "2026-08-26",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     ".changeset/fix-merge-attributes-prototype.md",
     "packages/core/src/utilities/mergeAttributes.ts"
@@ -4809,13 +5605,19 @@
    "repo": "apostrophecms/apostrophe",
    "repo_url": "https://github.com/apostrophecms/apostrophe",
    "language": "js",
-   "cwe": "CWE-639,CWE-862",
+   "cwe": "CWE-862",
+   "cwes": [
+    "CWE-639",
+    "CWE-862"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "252635917446ec9b30c895181490220cab1fed26",
    "patched_commit": "d50c6ad61b9c1788958752358f1fca714cc8368c",
    "advisory_published": "2026-09-03",
    "fix_commit_date": "2026-07-08",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     ".changeset/page-move-destination-authorization.md",
     "packages/apostrophe/modules/@apostrophecms/page/index.js"
@@ -4838,13 +5640,19 @@
    "repo": "unstructured-io/unstructured",
    "repo_url": "https://github.com/unstructured-io/unstructured",
    "language": "py",
-   "cwe": "CWE-601,CWE-918",
+   "cwe": "CWE-918",
+   "cwes": [
+    "CWE-601",
+    "CWE-918"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "f6eea758911fcf627cbe6f9df9f790e549500d7b",
    "patched_commit": "445c95735c4045057f51f399bc04c657751923bd",
    "advisory_published": "2026-09-03",
    "fix_commit_date": "2026-07-06",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "CHANGELOG.md",
     "test_unstructured/partition/html/test_partition.py",
@@ -4874,13 +5682,20 @@
    "repo": "davila7/claude-code-templates",
    "repo_url": "https://github.com/davila7/claude-code-templates",
    "language": "js",
-   "cwe": "CWE-78,CWE-306,CWE-352",
+   "cwe": "CWE-78",
+   "cwes": [
+    "CWE-306",
+    "CWE-352",
+    "CWE-78"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "acdb5893412a81eaec9862ee24a4613bf296ab45",
    "patched_commit": "bc4618b07232633c1c0aac12a43e436268d31783",
    "advisory_published": "2026-09-03",
    "fix_commit_date": "2026-07-14",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "CHANGELOG.md",
     "cli-tool/package.json",
@@ -4906,12 +5721,17 @@
    "repo_url": "https://github.com/squidfunk/mkdocs-material",
    "language": "js",
    "cwe": "CWE-79",
+   "cwes": [
+    "CWE-79"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "901e6335cc80b0f12e46a1e34bd85e983dd78a6e",
    "patched_commit": "52fb6be8aafe326419f34dc94d3211e7bbfbfb25",
    "advisory_published": "2026-09-03",
    "fix_commit_date": "2026-07-17",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "material/templates/assets/javascripts/bundle.d7400e89.min.js",
     "material/templates/assets/javascripts/bundle.d7400e89.min.js.map",
@@ -4941,12 +5761,17 @@
    "repo_url": "https://github.com/toon-format/toon",
    "language": "js",
    "cwe": "CWE-1321",
+   "cwes": [
+    "CWE-1321"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "09a7b38f2ca7c4ea79cf61bf9173460e8878eec9",
    "patched_commit": "94a2b7560b2b5ed903a4d466a3bce8b13daa2660",
    "advisory_published": "2026-09-03",
    "fix_commit_date": "2026-07-15",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "packages/toon/src/decode/event-builder.ts",
     "packages/toon/src/decode/expand.ts",
@@ -4973,13 +5798,19 @@
    "repo": "nltk/nltk",
    "repo_url": "https://github.com/nltk/nltk",
    "language": "py",
-   "cwe": "CWE-22,CWE-59",
+   "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22",
+    "CWE-59"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "0f8957002c7790d67b3dc02d41713136962c1cd6",
    "patched_commit": "ee1a42e51982c4dce6ad3ee77ff1ac43894288ab",
    "advisory_published": "2026-09-08",
    "fix_commit_date": "2026-08-04",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "nltk/corpus/reader/ipipan.py"
    ],
@@ -5002,12 +5833,17 @@
    "repo_url": "https://github.com/prowler-cloud/prowler",
    "language": "py",
    "cwe": "CWE-79",
+   "cwes": [
+    "CWE-79"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "0b98a34687e05016ee3327146ca0723661d02364",
    "patched_commit": "6db407ed3c17d4c73a8f619fdb30580c8465027f",
    "advisory_published": "2026-09-08",
    "fix_commit_date": "2026-07-30",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "prowler/changelog.d/html-report-xss.security.md",
     "prowler/lib/outputs/html/html.py"
@@ -5031,12 +5867,17 @@
    "repo_url": "https://github.com/vllm-project/vllm",
    "language": "py",
    "cwe": "CWE-918",
+   "cwes": [
+    "CWE-918"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "006731153693b01320feb93ab165de24fc364b0c",
    "patched_commit": "54503ecec0f3ac31e5ecfc5f28652e4cc42307b5",
    "advisory_published": "2026-09-08",
    "fix_commit_date": "2026-07-11",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "vllm/transformers_utils/processors/mimo_v2_omni.py"
    ],
@@ -5059,12 +5900,17 @@
    "repo_url": "https://github.com/honojs/hono",
    "language": "js",
    "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "9c28d724c5a7fb086ebaa812fdc1ad6e957c63bc",
    "patched_commit": "3a67f7f3997e1437d108f7bcba2dbcee2df69221",
    "advisory_published": "2026-09-08",
    "fix_commit_date": "2026-08-26",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/helper/ssg/ssg.ts",
     "src/helper/ssg/utils.ts"
@@ -5088,12 +5934,17 @@
    "repo_url": "https://github.com/maplibre/maplibre-gl-js",
    "language": "js",
    "cwe": "CWE-79",
+   "cwes": [
+    "CWE-79"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "ac8580b7ef6c55584198c0c84efc2104ad4cc0c7",
    "patched_commit": "1da69f3cd913a39fa948708e01478663bf48bc27",
    "advisory_published": "2026-09-08",
    "fix_commit_date": "2026-08-18",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "CHANGELOG.md",
     "src/util/dom.ts"
@@ -5117,12 +5968,17 @@
    "repo_url": "https://github.com/adaltas/node-csv",
    "language": "js",
    "cwe": "CWE-1321",
+   "cwes": [
+    "CWE-1321"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "1d4ed3b24327d65dae4610f3ec643de8ce56d3fb",
    "patched_commit": "eb4d1484589c976dcb977db8dd0b90e015a6f66e",
    "advisory_published": "2026-09-08",
    "fix_commit_date": "2026-08-02",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "packages/csv-parse/lib/api/index.js"
    ],
@@ -5144,13 +6000,19 @@
    "repo": "microsoft/typespec",
    "repo_url": "https://github.com/microsoft/typespec",
    "language": "js",
-   "cwe": "CWE-22,CWE-73",
+   "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22",
+    "CWE-73"
+   ],
+   "cwe_basis": "first_of_2_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "ddb3519c8e1bba87b21fa0649f4ef8df9d9b8e52",
    "patched_commit": "e0f67bdf3c5a0875dfa98b475648af37caac71a6",
    "advisory_published": "2026-09-08",
    "fix_commit_date": "2026-08-28",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     ".chronus/changes/escape-version-2026-8-27.md",
     ".chronus/changes/escape-version-asset-emitter-2026-8-27.md",
@@ -5182,12 +6044,17 @@
    "repo_url": "https://github.com/naorsabag/openhop",
    "language": "js",
    "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "6bde78bf88aafa09a39dfaf45978c73d1c5fedc3",
    "patched_commit": "c8190fbefa3a50e7b0c16c001d2e05b0e920cfb4",
    "advisory_published": "2026-09-09",
    "fix_commit_date": "2026-06-20",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "packages/server/src/flow-id.ts",
     "packages/server/src/index.ts",
@@ -5213,12 +6080,17 @@
    "repo_url": "https://github.com/argos-ci/argos-javascript",
    "language": "js",
    "cwe": "CWE-78",
+   "cwes": [
+    "CWE-78"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "1787fe78cba46f408493e02114150f2d73f47fa4",
    "patched_commit": "8355f3af3be3f4fe361d58a688d21535cf672717",
    "advisory_published": "2026-09-10",
    "fix_commit_date": "2026-06-21",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "packages/core/src/ci-environment/git.ts"
    ],
@@ -5241,12 +6113,17 @@
    "repo_url": "https://github.com/jhb-software/payload-plugins",
    "language": "js",
    "cwe": "CWE-863",
+   "cwes": [
+    "CWE-863"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "1ac5d7ee8bf228a214723439b959d8f2740dd4ec",
    "patched_commit": "e39634868ce13a414e2981e219befc58101654d3",
    "advisory_published": "2026-09-10",
    "fix_commit_date": "2026-06-21",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "alt-text/CHANGELOG.md",
     "alt-text/package.json",
@@ -5275,13 +6152,19 @@
    "repo_url": "https://github.com/cheaper-inference/omniroute",
    "repo_raw": "diegosouzapw/omniroute",
    "language": "js",
-   "cwe": "CWE-94,CWE-306",
+   "cwe": "CWE-94",
+   "cwes": [
+    "CWE-306",
+    "CWE-94"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "c130f2aa1ccc7aaddd7a7685bd6a0e08136dccf1",
    "patched_commit": "60829241fd64d0317aa6a0dd8cd7a445a5287fed",
    "advisory_published": "2026-09-10",
    "fix_commit_date": "2026-08-21",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/lib/acp/registry.ts",
     "src/proxy.ts",
@@ -5307,13 +6190,19 @@
    "repo": "mockoon/mockoon",
    "repo_url": "https://github.com/mockoon/mockoon",
    "language": "js",
-   "cwe": "CWE-22,CWE-23",
+   "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22",
+    "CWE-23"
+   ],
+   "cwe_basis": "first_of_2_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "cf1c8f414996bc0f14467da884fd2c82b8d09024",
    "patched_commit": "b42bdfb7f82e83f0e81bea8e6fe41adf5ec82585",
    "advisory_published": "2026-09-11",
    "fix_commit_date": "2026-06-18",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "packages/cli/README.md",
     "packages/cli/docker/Dockerfile",
@@ -5338,12 +6227,17 @@
    "repo_url": "https://github.com/zereight/gitlab-mcp",
    "language": "js",
    "cwe": "CWE-918",
+   "cwes": [
+    "CWE-918"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "e614f9983ee25ed2753d5bf0bf64ca69061bab40",
    "patched_commit": "6ffb4cc70706fd05b1ab80901676bc2998b6db6d",
    "advisory_published": "2026-09-15",
    "fix_commit_date": "2026-07-26",
+   "fix_commit_date_basis": "merge_compare",
    "fix_files": [
     "downloads/proxy.ts",
     "index.ts"
@@ -5367,12 +6261,17 @@
    "repo_url": "https://github.com/zereight/gitlab-mcp",
    "language": "js",
    "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "404a993ef5f86e99db693e8075fdb3a63625f1bd",
    "patched_commit": "e436ee4ad067b64584ec9312c9e9c9a2641c1976",
    "advisory_published": "2026-09-16",
    "fix_commit_date": "2026-06-22",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "Dockerfile",
     "README.md",
@@ -5399,13 +6298,19 @@
    "repo": "nuxt-content/mdc",
    "repo_url": "https://github.com/nuxt-content/mdc",
    "language": "js",
-   "cwe": "CWE-79,CWE-184",
+   "cwe": "CWE-79",
+   "cwes": [
+    "CWE-184",
+    "CWE-79"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "d6e5fc6001085f2d34b905ba0407a2f7392de388",
    "patched_commit": "61d636c2983f021288e4fc5c4006733b38cf0d53",
    "advisory_published": "2026-09-16",
    "fix_commit_date": "2026-06-21",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/runtime/parser/utils/props.ts"
    ],
@@ -5428,12 +6333,17 @@
    "repo_url": "https://github.com/mariadb-corporation/mariadb-connector-j",
    "language": "java",
    "cwe": "CWE-284",
+   "cwes": [
+    "CWE-284"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "42b5008aeb98ae863a74a2535a24879e71329de9",
    "patched_commit": "0205d8be947918566cd9ce5a9db149541bbc8dee",
    "advisory_published": "2026-09-17",
    "fix_commit_date": "2026-06-08",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/main/java/org/mariadb/jdbc/message/ClientMessage.java"
    ],
@@ -5455,13 +6365,22 @@
    "repo": "nuxt-modules/og-image",
    "repo_url": "https://github.com/nuxt-modules/og-image",
    "language": "js",
-   "cwe": "CWE-20,CWE-441,CWE-749,CWE-918,CWE-1188",
+   "cwe": "CWE-918",
+   "cwes": [
+    "CWE-1188",
+    "CWE-20",
+    "CWE-441",
+    "CWE-749",
+    "CWE-918"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "5aa6dbf0b3848b578a87144032cfb6b734454b56",
    "patched_commit": "243cac2228671d3711c2bd65e300c278fcdf5a4e",
    "advisory_published": "2026-09-17",
    "fix_commit_date": "2026-06-24",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/runtime/server/og-image/bindings/font-assets/cloudflare.ts",
     "src/runtime/server/og-image/bindings/font-assets/dev-prerender.ts",
@@ -5489,12 +6408,17 @@
    "repo_url": "https://github.com/vendurehq/vendure",
    "language": "js",
    "cwe": "CWE-79",
+   "cwes": [
+    "CWE-79"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "d61f3ffc8e5cf1d913942022bc672d28a26aa557",
    "patched_commit": "d7aa42a3f0cb524297a1a2fdf700e4aba9aca684",
    "advisory_published": "2026-09-17",
    "fix_commit_date": "2026-06-26",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "packages/dashboard/src/lib/components/shared/table-cell/order-table-cell-components.tsx"
    ],
@@ -5517,12 +6441,17 @@
    "repo_url": "https://github.com/cyclonedx/cyclonedx-node-npm",
    "language": "js",
    "cwe": "CWE-78",
+   "cwes": [
+    "CWE-78"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "ee61a4416b45410dae2e5e65a97aebff6cac24f5",
    "patched_commit": "15d3beb5bcd2b0b6eccfdf31192f5103b3f12c0f",
    "advisory_published": "2026-09-17",
    "fix_commit_date": "2026-07-07",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "HISTORY.md",
     "src/npmRunner.ts"
@@ -5546,12 +6475,17 @@
    "repo_url": "https://github.com/middleapi/orpc",
    "language": "js",
    "cwe": "CWE-113",
+   "cwes": [
+    "CWE-113"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "669f0b59cfc31efd6ea50bb50c320de2f3be2300",
    "patched_commit": "daabded122a89d323357c4c401e879701864cb2f",
    "advisory_published": "2026-09-17",
    "fix_commit_date": "2026-07-12",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "packages/server/src/plugins/cors.ts"
    ],
@@ -5574,12 +6508,17 @@
    "repo_url": "https://github.com/junrar/junrar",
    "language": "java",
    "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "99866b7445ff326b8916e9077dc23a2c4acac012",
    "patched_commit": "e6e333b195a1e3ad271a18fd79d8ac1eb5289343",
    "advisory_published": "2026-09-17",
    "fix_commit_date": "2026-07-20",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/main/java/com/github/junrar/LocalFolderExtractor.java"
    ],
@@ -5602,12 +6541,17 @@
    "repo_url": "https://github.com/internlm/lmdeploy",
    "language": "py",
    "cwe": "CWE-502",
+   "cwes": [
+    "CWE-502"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "eb94bd8cb4155eb055e2404d8304a7af089a6099",
    "patched_commit": "f05b4ad8bf2e2d84101a1d63b3c44fadd99223b2",
    "advisory_published": "2026-09-18",
    "fix_commit_date": "2026-08-12",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "lmdeploy/pytorch/disagg/conn/engine_conn.py"
    ],
@@ -5630,12 +6574,17 @@
    "repo_url": "https://github.com/opencast/opencast",
    "language": "js",
    "cwe": "CWE-79",
+   "cwes": [
+    "CWE-79"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "9e8472566038293c849b26d5e844ea9daaf87d43",
    "patched_commit": "701682c635f668228c3e8fb7b4564b3294788e40",
    "advisory_published": "2026-09-18",
    "fix_commit_date": "2026-06-24",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "modules/engage-paella-player-8/package-lock.json",
     "modules/engage-paella-player-8/package.json",
@@ -5661,12 +6610,17 @@
    "repo_url": "https://github.com/imzbf/md-editor-v3",
    "language": "js",
    "cwe": "CWE-79",
+   "cwes": [
+    "CWE-79"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "bea48ec0ba51c19deda9486eb06050b5b8f50b51",
    "patched_commit": "2c07360420e74087f5bc63032ab155d93e0a0b10",
    "advisory_published": "2026-09-18",
    "fix_commit_date": "2026-07-17",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "packages/MdEditor/layouts/Content/composition/useCopyCode.ts",
     "packages/MdEditor/layouts/Content/composition/useMarkdownIt.ts",
@@ -5691,12 +6645,17 @@
    "repo_url": "https://github.com/joniles/mpxj",
    "language": "java",
    "cwe": "CWE-611",
+   "cwes": [
+    "CWE-611"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "c68a658b148020017afce76de1923350fd712267",
    "patched_commit": "6e8288bc4d1cd62842af298004dc74fe66fb0805",
    "advisory_published": "2026-09-22",
    "fix_commit_date": "2026-06-22",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/main/java/org/mpxj/common/UnmarshalHelper.java",
     "src/main/java/org/mpxj/merlin/MerlinReader.java"
@@ -5720,12 +6679,17 @@
    "repo_url": "https://github.com/ondata/ckan-mcp-server",
    "language": "js",
    "cwe": "CWE-918",
+   "cwes": [
+    "CWE-918"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "129ba172ec15429347ea1faf5c919af730720370",
    "patched_commit": "bb7439b553b9f965adc3d43bcd415c42eebe2f40",
    "advisory_published": "2026-09-22",
    "fix_commit_date": "2026-06-22",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "LOG.md",
     "manifest.json",
@@ -5754,13 +6718,19 @@
    "repo": "roomi-fields/notebooklm-mcp",
    "repo_url": "https://github.com/roomi-fields/notebooklm-mcp",
    "language": "js",
-   "cwe": "CWE-22,CWE-73",
+   "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22",
+    "CWE-73"
+   ],
+   "cwe_basis": "first_of_2_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "50f74d6bec799687066a25355894077577683231",
    "patched_commit": "13828d9ff3933839ce14c1797d3b20a6bb7694a6",
    "advisory_published": "2026-09-22",
    "fix_commit_date": "2026-06-20",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     ".claude-plugin/plugin.json",
     ".github/workflows/ci.yml",
@@ -5792,12 +6762,17 @@
    "repo_url": "https://github.com/opencve/opencve",
    "language": "py",
    "cwe": "CWE-918",
+   "cwes": [
+    "CWE-918"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "928bbadbb1672051bcfc2a6289a9e6a8f029c106",
    "patched_commit": "0af7f894debc95c67fa53e7ba5a6cdecb10c34f0",
    "advisory_published": "2026-09-22",
    "fix_commit_date": "2026-06-23",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "web/opencve/utils/__init__.py",
     "web/opencve/utils/ssrf.py",
@@ -5824,12 +6799,17 @@
    "repo_url": "https://github.com/deepstreamio/deepstream.io",
    "language": "js",
    "cwe": "CWE-862",
+   "cwes": [
+    "CWE-862"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "3abde8de3df91e1b6d18f719d9e38e94bfa314f6",
    "patched_commit": "1c2adde6581c53ef47e204364bc740bc3c2e2e2a",
    "advisory_published": "2026-09-22",
    "fix_commit_date": "2026-06-29",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/services/permission/valve/rules-map.ts"
    ],
@@ -5852,12 +6832,17 @@
    "repo_url": "https://github.com/joniles/mpxj",
    "language": "java",
    "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "4785c84553081796e8aaa206ddbdb10885736a59",
    "patched_commit": "4347315afab1ef5a2907978a754fbc5b0ff58e6f",
    "advisory_published": "2026-09-22",
    "fix_commit_date": "2026-07-03",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/changes/changes.xml",
     "src/main/java/org/mpxj/common/FileHelper.java",
@@ -5884,12 +6869,17 @@
    "repo_url": "https://github.com/novuhq/novu",
    "language": "js",
    "cwe": "CWE-79",
+   "cwes": [
+    "CWE-79"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "6f4f1fb709de433e953a10e59dcf100d8edf33c3",
    "patched_commit": "f105f3d41a4405a75f803634d49f15a967524d8a",
    "advisory_published": "2026-09-22",
    "fix_commit_date": "2026-06-07",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "apps/api/src/app/inbox/utils/notification-mapper.ts",
     "libs/application-generic/src/schemas/control/in-app-control.schema.ts",
@@ -5918,13 +6908,19 @@
    "repo": "unleash/unleash",
    "repo_url": "https://github.com/unleash/unleash",
    "language": "js",
-   "cwe": "CWE-639,CWE-863",
+   "cwe": "CWE-863",
+   "cwes": [
+    "CWE-639",
+    "CWE-863"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "b38bf1ec4b8c6fd8d82396fa73e7086ad1815826",
    "patched_commit": "43e8db37b846921c8a94db58b44935ecbd15d9d1",
    "advisory_published": "2026-09-22",
    "fix_commit_date": "2026-07-06",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/lib/features/feature-toggle/feature-toggle-service.ts"
    ],
@@ -5946,13 +6942,19 @@
    "repo": "nautobot/nautobot",
    "repo_url": "https://github.com/nautobot/nautobot",
    "language": "py",
-   "cwe": "CWE-285,CWE-639",
+   "cwe": "CWE-285",
+   "cwes": [
+    "CWE-285",
+    "CWE-639"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "e6ff20d50e0759135c6d278e7b2ceec56ed9b3c8",
    "patched_commit": "8682707d0391cbfd7694e3276127b78dc9cf29d8",
    "advisory_published": "2026-09-22",
    "fix_commit_date": "2026-07-17",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "changes/ghsa-q4c5-2j6f-r476.removed",
     "changes/ghsa-q4c5-2j6f-r476.security",
@@ -5982,12 +6984,17 @@
    "repo_url": "https://github.com/hkuds/lightrag",
    "language": "js",
    "cwe": "CWE-79",
+   "cwes": [
+    "CWE-79"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "a1cd6b44d25cb20665859a0e0f1bc5bbfce460a9",
    "patched_commit": "8bf032a5200f293b482dd945d436e25cd08bd953",
    "advisory_published": "2026-09-22",
    "fix_commit_date": "2026-07-20",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "lightrag_webui/bun.lock",
     "lightrag_webui/package.json",
@@ -6012,13 +7019,19 @@
    "repo": "decolua/9router",
    "repo_url": "https://github.com/decolua/9router",
    "language": "js",
-   "cwe": "CWE-367,CWE-918",
+   "cwe": "CWE-918",
+   "cwes": [
+    "CWE-367",
+    "CWE-918"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "7ae9fff663b5227fe214c5225a767ed4c4380a7b",
    "patched_commit": "c7d07448c58bec1200741de0b73305b860416b82",
    "advisory_published": "2026-09-23",
    "fix_commit_date": "2026-06-17",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "open-sse/translator/concerns/image.js"
    ],
@@ -6040,13 +7053,19 @@
    "repo": "decolua/9router",
    "repo_url": "https://github.com/decolua/9router",
    "language": "js",
-   "cwe": "CWE-20,CWE-918",
+   "cwe": "CWE-918",
+   "cwes": [
+    "CWE-20",
+    "CWE-918"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "f2a7ae20309b4af55023eb11d1c02f63be1b80d1",
    "patched_commit": "126aa244c5b51b74ab8c7594e3418fcf4437bf6f",
    "advisory_published": "2026-09-23",
    "fix_commit_date": "2026-06-19",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/app/api/oauth/kiro/api-key/route.js",
     "src/lib/oauth/constants/oauth.js",
@@ -6072,12 +7091,17 @@
    "repo_url": "https://github.com/fecommunity/reactpress",
    "language": "js",
    "cwe": "CWE-89",
+   "cwes": [
+    "CWE-89"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "c3dd10681b3d2b5e224f7ac647b3769557603975",
    "patched_commit": "78ecb70af1c021455c05fdcbe137212c70e310d6",
    "advisory_published": "2026-09-23",
    "fix_commit_date": "2026-06-19",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "server/src/modules/article/article.service.ts",
     "server/src/modules/comment/comment.controller.ts",
@@ -6107,13 +7131,19 @@
    "repo": "gchq/cyberchef",
    "repo_url": "https://github.com/gchq/cyberchef",
    "language": "js",
-   "cwe": "CWE-79,CWE-1321",
+   "cwe": "CWE-1321",
+   "cwes": [
+    "CWE-1321",
+    "CWE-79"
+   ],
+   "cwe_basis": "first_of_2_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "50a7319b69ff6fd4473c8648fcaac1eeb3027dac",
    "patched_commit": "85db3be5d0096859b810f0e8d3e151d5dc9b948f",
    "advisory_published": "2026-09-24",
    "fix_commit_date": "2026-06-17",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/core/lib/Charts.mjs",
     "src/core/lib/Protocol.mjs"
@@ -6137,12 +7167,17 @@
    "repo_url": "https://github.com/jihong88/suneditor",
    "language": "js",
    "cwe": "CWE-79",
+   "cwes": [
+    "CWE-79"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "d943fe581be00ba1218a367d9b302c015a7c3771",
    "patched_commit": "a94ace269c7102bfb6de58a27a6547bc4eb09045",
    "advisory_published": "2026-09-24",
    "fix_commit_date": "2026-07-15",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/lib/core.js"
    ],
@@ -6164,13 +7199,19 @@
    "repo": "cstigler/node-xhtml-purifier",
    "repo_url": "https://github.com/cstigler/node-xhtml-purifier",
    "language": "js",
-   "cwe": "CWE-79,CWE-116",
+   "cwe": "CWE-79",
+   "cwes": [
+    "CWE-116",
+    "CWE-79"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "9370430332aa1398cc3f5abae5f335d1d8da032b",
    "patched_commit": "21d461ad23e7bc9b3073693d5b51b9b8662044d3",
    "advisory_published": "2026-09-24",
    "fix_commit_date": "2026-06-23",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "XHTMLPurifier.js",
     "test.js"
@@ -6193,13 +7234,20 @@
    "repo": "bytebase/dbhub",
    "repo_url": "https://github.com/bytebase/dbhub",
    "language": "js",
-   "cwe": "CWE-184,CWE-636,CWE-863",
+   "cwe": "CWE-863",
+   "cwes": [
+    "CWE-184",
+    "CWE-636",
+    "CWE-863"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "d65c6b424e9d10678fb6f7dda93fba180d7baff9",
    "patched_commit": "872bb338f7d31f6afe517a076ac3e3edafaaaf08",
    "advisory_published": "2026-09-24",
    "fix_commit_date": "2026-06-24",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/connectors/manager.ts",
     "src/connectors/mariadb/index.ts",
@@ -6228,12 +7276,17 @@
    "repo_url": "https://github.com/streamlink/streamlink",
    "language": "py",
    "cwe": "CWE-73",
+   "cwes": [
+    "CWE-73"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "46c9b288b5f95176b15cc05daf55285b5c3f0e10",
    "patched_commit": "4b99c64dde21ea70c24d9ffdbd15849b05f465c6",
    "advisory_published": "2026-09-24",
    "fix_commit_date": "2026-08-09",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/streamlink/session/http.py"
    ],
@@ -6256,12 +7309,17 @@
    "repo_url": "https://github.com/langchain-ai/langchain-nvidia",
    "language": "py",
    "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "7ebc4cb23a756cd54931b6deb8c6f0450f32ff02",
    "patched_commit": "b483c7cad07dd9d5fd0fee2668238c4a08825d86",
    "advisory_published": "2026-09-24",
    "fix_commit_date": "2026-06-23",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "libs/ai-endpoints/README.md",
     "libs/ai-endpoints/langchain_nvidia_ai_endpoints/_utils.py",
@@ -6288,13 +7346,19 @@
    "repo": "thomaspoignant/scim-patch",
    "repo_url": "https://github.com/thomaspoignant/scim-patch",
    "language": "js",
-   "cwe": "CWE-915,CWE-1321",
+   "cwe": "CWE-1321",
+   "cwes": [
+    "CWE-1321",
+    "CWE-915"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "0a281dd1567efd3fd1f0a77698fdbc80c274bf02",
    "patched_commit": "c86474f7a9b16191d939f59ba94eca6c6e63044b",
    "advisory_published": "2026-09-28",
    "fix_commit_date": "2026-06-24",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     ".gitignore",
     "src/scimPatch.ts"
@@ -6318,12 +7382,17 @@
    "repo_url": "https://github.com/fasterxml/jackson-databind",
    "language": "java",
    "cwe": "CWE-918",
+   "cwes": [
+    "CWE-918"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "c628b357ed143d8492756d5c1458cfb9fbeb29ed",
    "patched_commit": "2fc7bd9057dd051d7dea0e5fcad89822d0fa5ebd",
    "advisory_published": "2026-09-28",
    "fix_commit_date": "2026-07-06",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "release-notes/VERSION-2.x",
     "src/main/java/com/fasterxml/jackson/databind/deser/std/FromStringDeserializer.java",
@@ -6347,13 +7416,19 @@
    "repo": "fasterxml/jackson-databind",
    "repo_url": "https://github.com/fasterxml/jackson-databind",
    "language": "java",
-   "cwe": "CWE-502,CWE-915",
+   "cwe": "CWE-502",
+   "cwes": [
+    "CWE-502",
+    "CWE-915"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "65947556b62ee935a85aa5edaebf409813fd2456",
    "patched_commit": "eb3b7fc0f9c0d27f471550ac3316b17d1987388f",
    "advisory_published": "2026-09-28",
    "fix_commit_date": "2026-08-11",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "release-notes/CREDITS-2.x",
     "release-notes/VERSION-2.x",
@@ -6377,13 +7452,20 @@
    "repo": "jpadilla/pyjwt",
    "repo_url": "https://github.com/jpadilla/pyjwt",
    "language": "py",
-   "cwe": "CWE-200,CWE-345,CWE-918",
+   "cwe": "CWE-918",
+   "cwes": [
+    "CWE-200",
+    "CWE-345",
+    "CWE-918"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "f91ed44dd65baaf457f4b3353ed35e98a753934c",
    "patched_commit": "0a795b8e1f6ef08f634aa7086fc41cc6d5ce3e56",
    "advisory_published": "2026-09-29",
    "fix_commit_date": "2026-09-10",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "jwt/jwks_client.py"
    ],
@@ -6405,13 +7487,19 @@
    "repo": "yahoo/serialize-javascript",
    "repo_url": "https://github.com/yahoo/serialize-javascript",
    "language": "js",
-   "cwe": "CWE-79,CWE-80",
+   "cwe": "CWE-79",
+   "cwes": [
+    "CWE-79",
+    "CWE-80"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "8c8caa7066a52106fa719c6abb5dc69858c9f799",
    "patched_commit": "2bdbaaff9cb8a4639135eb24cfcd383d3fefb534",
    "advisory_published": "2026-09-30",
    "fix_commit_date": "2026-09-23",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "index.js"
    ],
@@ -6434,12 +7522,17 @@
    "repo_url": "https://github.com/pypa/virtualenv",
    "language": "py",
    "cwe": "CWE-78",
+   "cwes": [
+    "CWE-78"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "087a2ef8bd3aa15b562a3558b1068f603e50f77a",
    "patched_commit": "d721ff140ce4afdc2a9b76751e4584e25d9fbea6",
    "advisory_published": "2026-10-01",
    "fix_commit_date": "2026-09-18",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "docs/changelog/3250.bugfix.rst",
     "src/virtualenv/activation/batch/__init__.py",
@@ -6464,13 +7557,19 @@
    "repo": "patriksimek/vm2",
    "repo_url": "https://github.com/patriksimek/vm2",
    "language": "js",
-   "cwe": "CWE-94,CWE-693",
+   "cwe": "CWE-94",
+   "cwes": [
+    "CWE-693",
+    "CWE-94"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "54b54b74a382577f0bcd0538c5bf99acdcd7f53b",
    "patched_commit": "315786904c416be68ff2517b86fb9d71fa6761db",
    "advisory_published": "2026-10-01",
    "fix_commit_date": "2026-08-22",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "CHANGELOG.md",
     "docs/ATTACKS.md",
@@ -6494,13 +7593,19 @@
    "repo": "patriksimek/vm2",
    "repo_url": "https://github.com/patriksimek/vm2",
    "language": "js",
-   "cwe": "CWE-269,CWE-284",
+   "cwe": "CWE-284",
+   "cwes": [
+    "CWE-269",
+    "CWE-284"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "aa146a77f859325e079f3bfbfe6d8309af483daa",
    "patched_commit": "b0f50662dd499ff33544bb42387958c64711af1e",
    "advisory_published": "2026-10-01",
    "fix_commit_date": "2026-08-22",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "CHANGELOG.md",
     "docs/ATTACKS.md",
@@ -6524,13 +7629,19 @@
    "repo": "patriksimek/vm2",
    "repo_url": "https://github.com/patriksimek/vm2",
    "language": "js",
-   "cwe": "CWE-269,CWE-284",
+   "cwe": "CWE-284",
+   "cwes": [
+    "CWE-269",
+    "CWE-284"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "b0f50662dd499ff33544bb42387958c64711af1e",
    "patched_commit": "59d35f68e52a9bd229a8a72bcd9274bd4cec2bc5",
    "advisory_published": "2026-10-01",
    "fix_commit_date": "2026-08-22",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "CHANGELOG.md",
     "docs/ATTACKS.md",
@@ -6555,12 +7666,17 @@
    "repo_url": "https://github.com/sveltejs/devalue",
    "language": "js",
    "cwe": "CWE-1321",
+   "cwes": [
+    "CWE-1321"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "8ade61d0e70d935a780e6cb0a69ee2a5383b4855",
    "patched_commit": "9ec513072e31f45e60d44dad6f0dba9c92bb8675",
    "advisory_published": "2026-10-01",
    "fix_commit_date": "2026-09-18",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     ".changeset/quiet-keys-hold.md",
     "src/parse.js"
@@ -6584,12 +7700,17 @@
    "repo_url": "https://github.com/a2ui-project/a2ui",
    "language": "js",
    "cwe": "CWE-79",
+   "cwes": [
+    "CWE-79"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "b2b75e237037779d5251e3ad92fa41aa561434f8",
    "patched_commit": "71573078c4168b2dc166bb847c3a85715dadc675",
    "advisory_published": "2026-10-02",
    "fix_commit_date": "2026-06-19",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "renderers/web_core/CHANGELOG.md",
     "renderers/web_core/src/v0_9/basic_catalog/functions/basic_functions.ts",
@@ -6615,13 +7736,19 @@
    "repo": "jelmer/dulwich",
    "repo_url": "https://github.com/jelmer/dulwich",
    "language": "py",
-   "cwe": "CWE-22,CWE-59",
+   "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22",
+    "CWE-59"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "4b6ac339f169ef75994dd3a45b4b386757f9a669",
    "patched_commit": "9571ac60b851fce228dae7ededb380c6ce9b3fb8",
    "advisory_published": "2026-10-02",
    "fix_commit_date": "2026-07-03",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "NEWS",
     "dulwich/filter_branch.py",
@@ -6646,12 +7773,17 @@
    "repo_url": "https://github.com/jelmer/dulwich",
    "language": "py",
    "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "d55b456efc7f5d31091388e853de01749e6e0933",
    "patched_commit": "4ca77f9f470742ba246cd6fa07beb6d735045664",
    "advisory_published": "2026-10-02",
    "fix_commit_date": "2026-07-06",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "NEWS",
     "dulwich/index.py",
@@ -6675,13 +7807,19 @@
    "repo": "steveukx/git-js",
    "repo_url": "https://github.com/steveukx/git-js",
    "language": "js",
-   "cwe": "CWE-78,CWE-184",
+   "cwe": "CWE-78",
+   "cwes": [
+    "CWE-184",
+    "CWE-78"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "76f308ed445013d8dd973bc515e7815b59426e3e",
    "patched_commit": "d762810c13b331ff1e5eb24c0b434646d2a8d1b3",
    "advisory_published": "2026-10-05",
    "fix_commit_date": "2026-09-25",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     ".changeset/safe-rebase-exec.md",
     ".changeset/safe-trailer-config.md",
@@ -6708,13 +7846,19 @@
    "repo": "steveukx/git-js",
    "repo_url": "https://github.com/steveukx/git-js",
    "language": "js",
-   "cwe": "CWE-78,CWE-184",
+   "cwe": "CWE-78",
+   "cwes": [
+    "CWE-184",
+    "CWE-78"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "8430817f552ffb7cb52072b2f87def14dcfc0a4b",
    "patched_commit": "68874c239f0c7a87f4a68c3d2c4a0d7c75bb27f4",
    "advisory_published": "2026-10-05",
    "fix_commit_date": "2026-09-26",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     ".changeset/fresh-mugs-love.md",
     "packages/argv-parser/CHANGELOG.md",
@@ -6740,12 +7884,17 @@
    "repo_url": "https://github.com/sqlalchemy/mako",
    "language": "py",
    "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "411b4ac6cf054e61a8fb44c236990fda1e41ade4",
    "patched_commit": "000ed85e4e48771eff460bf4fc721fb43de80e08",
    "advisory_published": "2026-10-05",
    "fix_commit_date": "2026-09-22",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "doc/build/unreleased/441.rst",
     "mako/template.py"
@@ -6768,13 +7917,19 @@
    "repo": "middleapi/orpc",
    "repo_url": "https://github.com/middleapi/orpc",
    "language": "js",
-   "cwe": "CWE-915,CWE-1321",
+   "cwe": "CWE-1321",
+   "cwes": [
+    "CWE-1321",
+    "CWE-915"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "4dd5133c3a7597482021c8c9e9dffb4a06a8518c",
    "patched_commit": "26314dfb443237c495116c5794d3d30a7a22c570",
    "advisory_published": "2026-10-05",
    "fix_commit_date": "2026-07-25",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "packages/zod/src/coercer.ts",
     "packages/zod/src/zod4/coercer.ts"
@@ -6798,12 +7953,17 @@
    "repo_url": "https://github.com/tinylibs/tinypool",
    "language": "js",
    "cwe": "CWE-1321",
+   "cwes": [
+    "CWE-1321"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "abc247f85cba0309e3f1e5655db1837a2a1c2483",
    "patched_commit": "24df4e730e7d0857a6d226c9b58f8924227404fd",
    "advisory_published": "2026-10-05",
    "fix_commit_date": "2026-08-23",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/index.ts"
    ],
@@ -6825,13 +7985,19 @@
    "repo": "tinylibs/tinypool",
    "repo_url": "https://github.com/tinylibs/tinypool",
    "language": "js",
-   "cwe": "CWE-94,CWE-1321",
+   "cwe": "CWE-1321",
+   "cwes": [
+    "CWE-1321",
+    "CWE-94"
+   ],
+   "cwe_basis": "first_of_2_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "4b5229a1cf6512989738676a6bcb247879be3298",
    "patched_commit": "f41411a3e23324c674f35a19a3240f7a7c40ffbf",
    "advisory_published": "2026-10-05",
    "fix_commit_date": "2026-08-23",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/common.ts",
     "src/index.ts"
@@ -6855,12 +8021,17 @@
    "repo_url": "https://github.com/ardatan/graphql-tools",
    "language": "js",
    "cwe": "CWE-1321",
+   "cwes": [
+    "CWE-1321"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "1eabf0a45ae173daf046a7e1e91cfea8d481720b",
    "patched_commit": "0b9529f1988fd36186a7c106a6efe0356f1b7f2e",
    "advisory_published": "2026-10-05",
    "fix_commit_date": "2026-09-07",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     ".changeset/wet-ears-rush.md",
     "packages/utils/src/mergeDeep.ts"
@@ -6884,12 +8055,17 @@
    "repo_url": "https://github.com/langchain-ai/langgraph",
    "language": "py",
    "cwe": "CWE-863",
+   "cwes": [
+    "CWE-863"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "bdb8a9c7a4aa1390af225f6a5d292e5088659bd5",
    "patched_commit": "5a77be5e8bec1600ad0a865638d88c1368497559",
    "advisory_published": "2026-10-05",
    "fix_commit_date": "2026-08-27",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "libs/sdk-py/CHANGELOG.md",
     "libs/sdk-py/langgraph_sdk/auth/__init__.py"
@@ -6913,12 +8089,17 @@
    "repo_url": "https://github.com/docling-project/docling",
    "language": "py",
    "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "ac1f2cee6ee4b4b4eac6d0906dd08c1059ec7962",
    "patched_commit": "6ee9965adfc364b3696a67c825ec2f0d9cee4311",
    "advisory_published": "2026-10-05",
    "fix_commit_date": "2026-08-18",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "docling/backend/opendocument_backend.py",
     "docling/backend/utils/image_resource_loader.py"
@@ -6942,12 +8123,17 @@
    "repo_url": "https://github.com/langflow-ai/langflow",
    "language": "py",
    "cwe": "CWE-94",
+   "cwes": [
+    "CWE-94"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "094694d3f20c1da499f4d8dbac15c510609e3026",
    "patched_commit": "e7c33dbaade20b5295c7fa26bf83cc1ff68fba02",
    "advisory_published": "2026-10-05",
    "fix_commit_date": "2026-06-18",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/lfx/src/lfx/custom/validate.py"
    ],
@@ -6969,13 +8155,19 @@
    "repo": "patriksimek/vm2",
    "repo_url": "https://github.com/patriksimek/vm2",
    "language": "js",
-   "cwe": "CWE-913,CWE-1321",
+   "cwe": "CWE-1321",
+   "cwes": [
+    "CWE-1321",
+    "CWE-913"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "c8c232530b860cfecf6f94bc8d0d0890aa381460",
    "patched_commit": "92a10fca7b3ca63bb1574b6795540264f6805b30",
    "advisory_published": "2026-10-05",
    "fix_commit_date": "2026-08-25",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "CHANGELOG.md",
     "docs/ATTACKS.md",
@@ -6999,13 +8191,19 @@
    "repo": "vuejs/core",
    "repo_url": "https://github.com/vuejs/core",
    "language": "js",
-   "cwe": "CWE-79,CWE-116",
+   "cwe": "CWE-79",
+   "cwes": [
+    "CWE-116",
+    "CWE-79"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "f8975657d7451d8e4291406427e6a8ae5e50c8d5",
    "patched_commit": "a2b40db9a83b36ed9da3a16403cf8f040262d73f",
    "advisory_published": "2026-10-05",
    "fix_commit_date": "2026-08-11",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "packages/shared/src/domAttrConfig.ts"
    ],
@@ -7028,12 +8226,17 @@
    "repo_url": "https://github.com/ljharb/shell-quote",
    "language": "js",
    "cwe": "CWE-78",
+   "cwes": [
+    "CWE-78"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "36f23944db50dd3f0df4da9c7cba0bb63df05f64",
    "patched_commit": "6002b2ed90c6b83095eb272b6b0adaf3a172b0bc",
    "advisory_published": "2026-10-06",
    "fix_commit_date": "2026-09-27",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "README.md",
     "quote.d.ts",
@@ -7057,13 +8260,20 @@
    "repo": "langflow-ai/langflow",
    "repo_url": "https://github.com/langflow-ai/langflow",
    "language": "py",
-   "cwe": "CWE-94,CWE-95,CWE-266",
+   "cwe": "CWE-94",
+   "cwes": [
+    "CWE-266",
+    "CWE-94",
+    "CWE-95"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "11a18f78346d15f4cc269fa4558ee33b99f54368",
    "patched_commit": "2754c84aad1306f463db1c3bbb3e8ffbe85da77d",
    "advisory_published": "2026-10-06",
    "fix_commit_date": "2026-06-19",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/lfx/src/lfx/_assets/component_index.json",
     "src/lfx/src/lfx/components/tools/python_repl.py",
@@ -7088,13 +8298,19 @@
    "repo": "docling-project/docling",
    "repo_url": "https://github.com/docling-project/docling",
    "language": "py",
-   "cwe": "CWE-552,CWE-863",
+   "cwe": "CWE-863",
+   "cwes": [
+    "CWE-552",
+    "CWE-863"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "8df76a5ab1c83b58b744d662d20fccf0c805d624",
    "patched_commit": "1612b8875b0937447ce3122536fb5360a7102a0a",
    "advisory_published": "2026-10-06",
    "fix_commit_date": "2026-08-06",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "docling/backend/html_backend.py"
    ],
@@ -7116,13 +8332,19 @@
    "repo": "i18next/i18next-http-backend",
    "repo_url": "https://github.com/i18next/i18next-http-backend",
    "language": "js",
-   "cwe": "CWE-74,CWE-918",
+   "cwe": "CWE-918",
+   "cwes": [
+    "CWE-74",
+    "CWE-918"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "08cb05d3ef8396cb74ab9d6885f4c3ddb43bfbf3",
    "patched_commit": "07e028862b25d0b9251bf3cafb92be2d35285f85",
    "advisory_published": "2026-10-06",
    "fix_commit_date": "2026-09-02",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "CHANGELOG.md",
     "i18nextHttpBackend.js",
@@ -7147,13 +8369,19 @@
    "repo": "payloadcms/payload",
    "repo_url": "https://github.com/payloadcms/payload",
    "language": "js",
-   "cwe": "CWE-749,CWE-862",
+   "cwe": "CWE-862",
+   "cwes": [
+    "CWE-749",
+    "CWE-862"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "bf5fa9e75255995d7bcd6d3b89e37b46967434d0",
    "patched_commit": "2f94a4205e5ba3ec0e91c92ed54f24f429826dd0",
    "advisory_published": "2026-10-06",
    "fix_commit_date": "2026-08-26",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "docs/plugins/stripe.mdx",
     "packages/plugin-stripe/src/admin.ts",
@@ -7182,12 +8410,17 @@
    "repo_url": "https://github.com/payloadcms/payload",
    "language": "js",
    "cwe": "CWE-862",
+   "cwes": [
+    "CWE-862"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "f537fd7b4ad81b4c5456d571c3afb73712eff5d5",
    "patched_commit": "94059cf4bc6170ce88453015c0c6551329ae3982",
    "advisory_published": "2026-10-06",
    "fix_commit_date": "2026-09-01",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "packages/db-mongodb/src/queries/buildSearchParams.ts",
     "packages/drizzle/src/queries/getTableColumnFromPath.ts",
@@ -7215,13 +8448,19 @@
    "repo": "tryghost/ghost",
    "repo_url": "https://github.com/tryghost/ghost",
    "language": "js",
-   "cwe": "CWE-269,CWE-863",
+   "cwe": "CWE-863",
+   "cwes": [
+    "CWE-269",
+    "CWE-863"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "d23d552e257e2696c60293bc5cd7898a49d6bd1f",
    "patched_commit": "99c5642b9bb481df4811a004a6f19d6143ed9aaf",
    "advisory_published": "2026-10-07",
    "fix_commit_date": "2026-09-14",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "ghost/core/core/server/models/user.js"
    ],
@@ -7244,12 +8483,17 @@
    "repo_url": "https://github.com/tryghost/ghost",
    "language": "js",
    "cwe": "CWE-862",
+   "cwes": [
+    "CWE-862"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "a6028f2331f0efb336b97c1250aa5005fe482c57",
    "patched_commit": "cf2f718a67faa342c27989b701554ddd63862165",
    "advisory_published": "2026-10-07",
    "fix_commit_date": "2026-08-25",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "ghost/core/core/server/models/relations/authors.js"
    ],
@@ -7271,13 +8515,20 @@
    "repo": "docling-project/docling",
    "repo_url": "https://github.com/docling-project/docling",
    "language": "py",
-   "cwe": "CWE-22,CWE-73,CWE-1188",
+   "cwe": "CWE-22",
+   "cwes": [
+    "CWE-1188",
+    "CWE-22",
+    "CWE-73"
+   ],
+   "cwe_basis": "first_of_2_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "5e469137f275ffc443306a30d12a3a45bceb80fb",
    "patched_commit": "38b6fa0a465d46fdacbbec333f50fa19c4f6b342",
    "advisory_published": "2026-10-07",
    "fix_commit_date": "2026-09-29",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "docling/backend/latex/engines/tectonic.py",
     "docling/datamodel/backend_options.py",
@@ -7302,12 +8553,17 @@
    "repo_url": "https://github.com/payloadcms/payload",
    "language": "js",
    "cwe": "CWE-89",
+   "cwes": [
+    "CWE-89"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "d9283dcd12e6ad3f4d870e5f2361dc0d8c022716",
    "patched_commit": "03b78c7e0901d19c67f07bdf6396a276010adbcc",
    "advisory_published": "2026-10-07",
    "fix_commit_date": "2026-09-03",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "packages/drizzle/src/postgres/createJSONQuery/index.ts",
     "packages/drizzle/src/sqlite/createJSONQuery/convertPathToJSONTraversal.ts",
@@ -7331,13 +8587,19 @@
    "repo": "payloadcms/payload",
    "repo_url": "https://github.com/payloadcms/payload",
    "language": "js",
-   "cwe": "CWE-94,CWE-1321",
+   "cwe": "CWE-1321",
+   "cwes": [
+    "CWE-1321",
+    "CWE-94"
+   ],
+   "cwe_basis": "first_of_2_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "b703780bf8da0e9364178ff403fce02a448f0ea6",
    "patched_commit": "333b82b9f3e685fed6826c2e3270da79df8336c6",
    "advisory_published": "2026-10-07",
    "fix_commit_date": "2026-09-08",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "packages/plugin-form-builder/src/collections/FormSubmissions/index.ts",
     "packages/plugin-form-builder/src/collections/Forms/index.ts"
@@ -7360,13 +8622,19 @@
    "repo": "quasarframework/quasar",
    "repo_url": "https://github.com/quasarframework/quasar",
    "language": "js",
-   "cwe": "CWE-79,CWE-116",
+   "cwe": "CWE-79",
+   "cwes": [
+    "CWE-116",
+    "CWE-79"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "87c89a80ec84f1eb7dbe258e5367161b0598ceb3",
    "patched_commit": "11505afe5b5218f2c468f130181815b898fd1e40",
    "advisory_published": "2026-10-07",
    "fix_commit_date": "2026-07-20",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "docs/src/pages/quasar-plugins/meta.md",
     "ui/src/plugins/meta/Meta.js"
@@ -7390,12 +8658,17 @@
    "repo_url": "https://github.com/backstage/backstage",
    "language": "js",
    "cwe": "CWE-863",
+   "cwes": [
+    "CWE-863"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "989db63b6f87c8fc04d440f296ad89e10c79b363",
    "patched_commit": "9df92923ac32558bb80edeceafd8de780c44e218",
    "advisory_published": "2026-10-07",
    "fix_commit_date": "2026-09-03",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     ".changeset/tidy-proxies-check.md",
     "plugins/proxy-backend/src/plugin.ts",
@@ -7420,12 +8693,17 @@
    "repo_url": "https://github.com/backstage/backstage",
    "language": "js",
    "cwe": "CWE-863",
+   "cwes": [
+    "CWE-863"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "62d1a6fe310d197dbaea74a872e730f04498f08a",
    "patched_commit": "989db63b6f87c8fc04d440f296ad89e10c79b363",
    "advisory_published": "2026-10-07",
    "fix_commit_date": "2026-09-01",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     ".changeset/calm-buckets-align.md",
     "plugins/catalog-backend-module-bitbucket-server/config.d.ts",
@@ -7449,13 +8727,19 @@
    "repo": "backstage/backstage",
    "repo_url": "https://github.com/backstage/backstage",
    "language": "js",
-   "cwe": "CWE-200,CWE-918",
+   "cwe": "CWE-918",
+   "cwes": [
+    "CWE-200",
+    "CWE-918"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "e53d33f6fa67d46a5b7fe45aa930a62f0e6a41d3",
    "patched_commit": "b0170fad7962fb8c3d71366b5265cf283c7bbcf7",
    "advisory_published": "2026-10-07",
    "fix_commit_date": "2026-08-21",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     ".changeset/curvy-lions-rest.md",
     "plugins/scaffolder-backend-module-sentry/src/actions/createProject.examples.ts",
@@ -7482,13 +8766,19 @@
    "repo": "backstage/backstage",
    "repo_url": "https://github.com/backstage/backstage",
    "language": "js",
-   "cwe": "CWE-22,CWE-59",
+   "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22",
+    "CWE-59"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "bf6bbf7326ada7d96d7b2c4ebc4a71546106f311",
    "patched_commit": "818528e112c36167d76187e9e63fb518399c4dd2",
    "advisory_published": "2026-10-07",
    "fix_commit_date": "2026-08-24",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     ".changeset/calm-birds-rest.md",
     "plugins/scaffolder-backend-module-bitbucket-cloud/src/actions/bitbucketCloudPullRequest.ts",
@@ -7513,12 +8803,17 @@
    "repo_url": "https://github.com/vercel/next.js",
    "language": "js",
    "cwe": "CWE-918",
+   "cwes": [
+    "CWE-918"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "4c20699e29178d444994cf5a31b8a617ca3a2c80",
    "patched_commit": "e002ad68bd676bb0ed0c87bb22e3590304763e0b",
    "advisory_published": "2026-10-07",
    "fix_commit_date": "2026-09-30",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "packages/next/src/server/image-optimizer.ts"
    ],
@@ -7541,12 +8836,17 @@
    "repo_url": "https://github.com/langchain-ai/langchainjs",
    "language": "js",
    "cwe": "CWE-943",
+   "cwes": [
+    "CWE-943"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "04d8ea58fc7b9b7617fd47e0b99ba210b40a9632",
    "patched_commit": "946e3d856ff1f8ce7f7b9374c83f680a6ada79af",
    "advisory_published": "2026-10-08",
    "fix_commit_date": "2026-09-22",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     ".changeset/mongodb-chat-history-query-injection.md",
     "libs/providers/langchain-mongodb/src/cache.ts",
@@ -7570,13 +8870,19 @@
    "repo": "asynchttpclient/async-http-client",
    "repo_url": "https://github.com/asynchttpclient/async-http-client",
    "language": "java",
-   "cwe": "CWE-346,CWE-863",
+   "cwe": "CWE-863",
+   "cwes": [
+    "CWE-346",
+    "CWE-863"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "fd9763620725126c1c8bb0af1ceb9a7523099a5f",
    "patched_commit": "d3bb4d68b41acf5d3ab7541afa9fdfe7ec3ba054",
    "advisory_published": "2026-10-08",
    "fix_commit_date": "2026-09-06",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "client/src/main/java/org/asynchttpclient/netty/channel/ChannelManager.java",
     "client/src/main/java/org/asynchttpclient/netty/channel/NettyConnectListener.java",
@@ -7606,12 +8912,17 @@
    "repo_url": "https://github.com/mcollina/msgpack5",
    "language": "js",
    "cwe": "CWE-1321",
+   "cwes": [
+    "CWE-1321"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "85da345bf1acc18ca441741e5cf4aa0ed0d69314",
    "patched_commit": "20e82600ac9462e679c8a45e5723315f21e2c774",
    "advisory_published": "2026-10-08",
    "fix_commit_date": "2026-08-11",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "README.md",
     "dist/msgpack5.js",
@@ -7637,12 +8948,17 @@
    "repo_url": "https://github.com/indico/indico",
    "language": "py",
    "cwe": "CWE-918",
+   "cwes": [
+    "CWE-918"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "d7a07ccc7001915f049479f8ab51fd86baae8f82",
    "patched_commit": "44540e70ab4e20a12f14ddba5218a33749a86736",
    "advisory_published": "2026-10-08",
    "fix_commit_date": "2026-06-04",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "indico/util/network.py"
    ],
@@ -7665,12 +8981,17 @@
    "repo_url": "https://github.com/indico/indico",
    "language": "py",
    "cwe": "CWE-862",
+   "cwes": [
+    "CWE-862"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "982be1f5be9343d30f689eef6f61858409fe4598",
    "patched_commit": "524e8e93eadcd8484905b1147020a35f5dce6038",
    "advisory_published": "2026-10-08",
    "fix_commit_date": "2026-07-26",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "indico/modules/events/api.py"
    ],
@@ -7692,13 +9013,19 @@
    "repo": "masci/banks",
    "repo_url": "https://github.com/masci/banks",
    "language": "py",
-   "cwe": "CWE-22,CWE-59",
+   "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22",
+    "CWE-59"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "b1feadd9bb635e22ea0a68015f357af8b30df3b6",
    "patched_commit": "23ed13e50b4e217693fa5f9c30943fac8a41582f",
    "advisory_published": "2026-10-08",
    "fix_commit_date": "2026-09-10",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "pyproject.toml",
     "src/banks/__init__.py",
@@ -7723,12 +9050,17 @@
    "repo_url": "https://github.com/strawberry-graphql/strawberry",
    "language": "py",
    "cwe": "CWE-863",
+   "cwes": [
+    "CWE-863"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "4e975a25d55b54cc129eba6cacbc75c047374037",
    "patched_commit": "2ebb79796c0e5ebb43cae1abd2b5a21363b1c00e",
    "advisory_published": "2026-10-09",
    "fix_commit_date": "2026-08-31",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "RELEASE.md",
     "strawberry/exceptions/__init__.py",
@@ -7753,12 +9085,17 @@
    "repo_url": "https://github.com/posit-dev/py-shiny",
    "language": "py",
    "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "48b4faa0d651476afa84d6423d57503b60716902",
    "patched_commit": "1d8ecb46cbc9621b7dc8812111d26692e086b376",
    "advisory_published": "2026-10-09",
    "fix_commit_date": "2026-07-28",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "shiny/_app.py",
     "shiny/bookmark/_bookmark.py",
@@ -7785,12 +9122,17 @@
    "repo_url": "https://github.com/tinacms/tinacms",
    "language": "js",
    "cwe": "CWE-94",
+   "cwes": [
+    "CWE-94"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "df351832c37fd0efaf5a06cb6cde9a5ec404201e",
    "patched_commit": "d030d414d39e15de79bf36e4c728d57205e71dde",
    "advisory_published": "2026-10-09",
    "fix_commit_date": "2026-09-14",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     ".changeset/escape-values-in-generated-client.md",
     "packages/@tinacms/cli/src/next/codegen/codegen/plugin.ts",
@@ -7815,12 +9157,17 @@
    "repo_url": "https://github.com/pyload/pyload",
    "language": "py",
    "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "8d514bfffbf973292ee64d837f2bf8506f0b7f13",
    "patched_commit": "09eec1b431b6942a1917f094f2c77bfbf5637f60",
    "advisory_published": "2026-10-09",
    "fix_commit_date": "2026-08-19",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/pyload/plugins/extractors/UnTar.py"
    ],
@@ -7842,13 +9189,20 @@
    "repo": "pipecat-ai/pipecat",
    "repo_url": "https://github.com/pipecat-ai/pipecat",
    "language": "py",
-   "cwe": "CWE-345,CWE-770,CWE-862",
+   "cwe": "CWE-862",
+   "cwes": [
+    "CWE-345",
+    "CWE-770",
+    "CWE-862"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "access_control",
    "tier": "headline",
    "vulnerable_commit": "5e5d14726cbe59e4a4dee71f4e17e5101f665ba6",
    "patched_commit": "acaac3e49f50968f3ffb645a42ecc48d71c4e723",
    "advisory_published": "2026-10-15",
    "fix_commit_date": "2026-07-16",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "changelog/+dev-runner-banner.added.md",
     "src/pipecat/runner/run.py"
@@ -7872,12 +9226,17 @@
    "repo_url": "https://github.com/tanstack/router",
    "language": "js",
    "cwe": "CWE-79",
+   "cwes": [
+    "CWE-79"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "614bc27034c8ec98747bf305ed41d4a619640949",
    "patched_commit": "d521abd71c69f1ff010bb3def4d417cb5fa058cb",
    "advisory_published": "2026-10-15",
    "fix_commit_date": "2026-09-30",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     ".changeset/quiet-apes-protect.md",
     "packages/router-core/src/ssr/handlerCallback.ts",
@@ -7905,12 +9264,17 @@
    "repo_url": "https://github.com/9001/copyparty",
    "language": "py",
    "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "c122e103bd7440e28aa455e2fc9b9a45dc577ed1",
    "patched_commit": "b331bb1c8c8cc306b91e4d94221969335a7a3e86",
    "advisory_published": "2026-10-15",
    "fix_commit_date": "2026-07-27",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "copyparty/ftpd.py"
    ],
@@ -7933,12 +9297,17 @@
    "repo_url": "https://github.com/queueforge/clickmigrate",
    "language": "py",
    "cwe": "CWE-22",
+   "cwes": [
+    "CWE-22"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "6a350e294cf60cd0dfd50d76a92cdfd44787b00c",
    "patched_commit": "6b1f2c0202630a82252b3331aa57e64327e112b6",
    "advisory_published": "2026-10-16",
    "fix_commit_date": "2026-07-01",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/clickmigrate/manager.py"
    ],
@@ -7960,13 +9329,20 @@
    "repo": "anthropics/claude-agent-sdk-python",
    "repo_url": "https://github.com/anthropics/claude-agent-sdk-python",
    "language": "py",
-   "cwe": "CWE-20,CWE-78,CWE-88",
+   "cwe": "CWE-78",
+   "cwes": [
+    "CWE-20",
+    "CWE-78",
+    "CWE-88"
+   ],
+   "cwe_basis": "only_qualifying",
    "kind": "dataflow",
    "tier": "headline",
    "vulnerable_commit": "af69c0125eb48978631c671d877d0a3c246d210d",
    "patched_commit": "347a1cb88d7652199399db1b7f914e0a459a6662",
    "advisory_published": "2026-10-16",
    "fix_commit_date": "2026-07-16",
+   "fix_commit_date_basis": "fix_commit",
    "fix_files": [
     "src/claude_agent_sdk/_internal/transport/subprocess_cli.py"
    ],

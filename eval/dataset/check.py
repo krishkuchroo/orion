@@ -23,14 +23,24 @@ def _le(date_a: str, cutoff: str) -> bool:
     return bool(date_a) and date_a <= cutoff
 
 
+def distinct_commits(shas) -> list[str]:
+    """The listed fix shas as distinct commits: a sha that abbreviates another listed sha (a short and
+    a full sha of one commit) is folded into the longer one. Longest first."""
+    out: list[str] = []
+    for s in sorted({str(x).lower() for x in shas}, key=lambda x: (-len(x), x)):
+        if not any(o.startswith(s) for o in out):
+            out.append(s)
+    return out
+
+
 def _exclusion(row: dict) -> str | None:
     """First row-driven exclusion for a mined row (eval.dataset.mine); each rule fires only when
     its key is present, so hand-made TSV rows classify exactly as before."""
     if row.get("training_repo"):
         return f"training_repo: {row['training_repo']}"
-    shas = row.get("fix_shas")
-    if shas is not None and len(shas) > 1:
-        return f"multi_commit_fix: {len(shas)} fix commits"
+    commits = distinct_commits(row["fix_shas"]) if row.get("fix_shas") is not None else []
+    if len(commits) > 1:
+        return f"multi_commit_fix: {len(commits)} fix commits"
     if row.get("shared_fix_with"):
         return f"bundled_fix: the fix commit also fixes {', '.join(row['shared_fix_with'])}"
     status = row.get("enrich_status")

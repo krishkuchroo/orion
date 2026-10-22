@@ -123,3 +123,22 @@ def test_split_repos_missing_file_and_missing_pair_raise(tmp_path):
         manifest.split_repos(str(tmp_path / "nope.json"), sp)
     with pytest.raises(FileNotFoundError, match="splits"):
         manifest.split_repos(pp, str(tmp_path / "nope.json"))
+
+
+def test_cwe_must_be_exactly_one_parseable_cwe():
+    assert _errs(_row(cwe="CWE-89")) == [] and _errs(_row(cwe="89")) == []
+    assert any("cwe" in e for e in _errs(_row(cwe="CWE-20,CWE-918")))
+    assert any("cwe" in e for e in _errs(_row(cwe="injection")))
+
+
+def test_cwes_must_be_parseable_and_include_cwe():
+    assert _errs(_row(cwe="CWE-918", cwes=["CWE-20", "CWE-918"])) == []
+    assert any("cwes" in e for e in _errs(_row(cwe="CWE-918", cwes=["CWE-20"])))
+    assert any("cwes" in e for e in _errs(_row(cwe="CWE-918", cwes=["CWE-918", "bogus"])))
+    assert any("cwes" in e for e in _errs(_row(cwe="CWE-918", cwes="CWE-918")))
+
+
+def test_training_check_covers_repo_raw():
+    errs = _errs(_row(repo="o/new", repo_url="https://github.com/o/new", repo_raw="O/Trained"),
+                 split_repos={"o/trained"})
+    assert any("training" in e for e in errs)

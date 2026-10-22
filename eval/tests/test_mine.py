@@ -270,26 +270,39 @@ def test_reason_kind():
 
 # ---- the whole run against a fake GitHub (no network) ----
 
-def _commit(sha, repo, files, date="2026-07-01T10:00:00Z"):
+def _commit(sha, repo, files, date="2026-07-01T10:00:00Z", parents=("p" * 40,)):
     return 200, {"x-ratelimit-remaining": "4000"}, json.dumps(
         {"sha": sha, "html_url": f"https://github.com/{repo}/commit/{sha}",
          "commit": {"author": {"date": date}, "committer": {"date": date}},
-         "parents": [{"sha": "p" * 40}], "files": [{"filename": f} for f in files]}).encode()
+         "parents": [{"sha": p} for p in parents], "files": [{"filename": f} for f in files]}).encode()
+
+
+def _compare(shas_dates, files):
+    return 200, {"x-ratelimit-remaining": "4000"}, json.dumps(
+        {"total_commits": len(shas_dates), "files": [{"filename": f} for f in files],
+         "commits": [{"sha": s, "commit": {"author": {"date": a}, "committer": {"date": c}}}
+                     for s, a, c in shas_dates]}).encode()
 
 
 def test_mine_testset_end_to_end_with_cached_github(tmp_path):
     from eval import manifest
-    a, b, c, d = ("a" * 40, "b" * 40, "c" * 40, "d" * 40)
+    a, b, c, d, e = ("a" * 40, "b" * 40, "c" * 40, "d" * 40, "e" * 40)
     path = _zip(tmp_path, [_osv("GHSA-ok01", "2026-07-01", shas=(a,)),
                            _osv("GHSA-sm01", "2026-07-02", cwes=("CWE-79",), shas=(b,)),
                            _osv("GHSA-mi01", "2026-07-03", repo="o/gone", shas=(c,)),
-                           _osv("GHSA-tr01", "2026-07-04", repo="o/trained", shas=(d,))])
+                           _osv("GHSA-tr01", "2026-07-04", repo="o/trained", shas=(d,)),
+                           _osv("GHSA-mg01", "2026-07-05", cwes=("CWE-20", "CWE-89"), shas=(e,))])
     mods = json.dumps({"encoding": "base64", "content": base64.b64encode(b"[submodule]\n path = vendor/lib\n")
                        .decode()}).encode()
     responses = {f"/repos/o/r/commits/{a}": _commit(a, "O/R", ["src/a.py", "tests/test_a.py"]),
                  f"/repos/o/r/commits/{b}": _commit(b, "O/R", ["src/b.js", "vendor/lib"]),
                  f"/repos/o/trained/commits/{d}": _commit(d, "o/trained", ["src/d.py"]),
-                 f"/contents/.gitmodules?ref={b}": (200, {}, mods)}
+                 f"/contents/.gitmodules?ref={b}": (200, {}, mods),
+                 f"/repos/o/r/commits/{e}": _commit(e, "O/R", ["src/e.py"], date="2026-07-05T10:00:00Z",
+                                                    parents=("3" * 40, "4" * 40)),
+                 f"/repos/o/r/compare/{'3' * 40}...{e}": _compare(
+                     [("4" * 40, "2026-05-20T09:00:00Z", "2026-06-02T09:00:00Z"),
+                      (e, "2026-07-05T10:00:00Z", "2026-07-05T10:00:00Z")], ["src/e.py"])}
     calls = []
 
     def get(url):
@@ -304,15 +317,88 @@ def test_mine_testset_end_to_end_with_cached_github(tmp_path):
     assert why["GHSA-sm01"] == ("excluded", "submodule: the fix touches vendor/lib")
     assert why["GHSA-mi01"] == ("excluded", "commit_missing")
     assert why["GHSA-tr01"] == ("excluded", "training_repo: o/trained")
+    merge = next(x for x in assessed if x["id"] == "GHSA-mg01")    # the branch commit predates the cutoff
+    assert why["GHSA-mg01"] == ("control", "fix_commit_date 2026-05-20 <= 2026-05-31")
+    assert merge["fix_commit_date_merge"] == "2026-07-05" and merge["fix_commit_date_basis"] == "merge_compare"
+    assert merge["vulnerable_commit"] == "3" * 40 and merge["merge_compare_files_match"] is True
+    assert merge["cwe"] == "CWE-89" and merge["cwes"] == ["CWE-20", "CWE-89"]
+    assert summary["merge_fix_check"] == {"merge_fixes": 1, "date_moved_earlier": 1, "errors": 0,
+                                          "truncated": 0, "files_match": 1}
     assert summary["submodule_check"]["checked"] == 2 and summary["submodule_check"]["fix_touches_submodule"] == 1
     assert summary["by_kind"]["dataflow"]["manifest"] == 1
     row = mine.manifest_row(selected[0])
     assert row["vulnerable_commit"] == "p" * 40 and row["patched_commit"] == a and row["repo"] == "o/r"
     assert row["language"] == "py" and row["n_files"] == 1 and row["fix_commit_date"] == "2026-07-01"
+    assert row["cwe"] == "CWE-89" and row["cwes"] == ["CWE-89"] and row["cwe_basis"] == "only_qualifying"
+    assert row["fix_commit_date_basis"] == "fix_commit"
     assert manifest.validate({"repos": [row]}, split_repos={"o/trained"}) == []
-    assert [x["selection"] for x in assessed] == ["manifest", None, None, None]
+    assert [x["selection"] for x in assessed] == ["manifest", None, None, None, None]
 
     calls.clear()                                   # a rerun is served from the cache
     again, _, summary2 = mine.mine_testset([path], **kw)
     assert [x["id"] for x in again] == ["GHSA-ok01"] and summary2 == summary
-    assert not any("/contents/" in u or "/commits/" in u for u in calls)
+    assert not any("/contents/" in u or "/commits/" in u or "/compare/" in u for u in calls)
+
+
+# ---- the qualifying CWE (advisory order) ----
+
+def test_cwe_is_the_qualifying_cwe_in_advisory_order_and_cwes_keep_that_order(tmp_path):
+    path = _zip(tmp_path, [
+        _osv("GHSA-q001", "2026-07-01", cwes=("CWE-20", "CWE-918"), shas=("1" * 40,)),
+        _osv("GHSA-q002", "2026-07-02", cwes=("CWE-1336", "CWE-94"), shas=("2" * 40,)),
+        _osv("GHSA-q003", "2026-07-03", cwes=("CWE-639", "CWE-862"), shas=("3" * 40,)),
+        _osv("GHSA-q004", "2026-07-04", cwes=("CWE-862", "CWE-22"), shas=("4" * 40,))])
+    got = {c["id"]: c for c in mine.candidates(path, max_per_repo=None)}
+    assert (got["GHSA-q001"]["cwe"], got["GHSA-q001"]["cwes"], got["GHSA-q001"]["cwe_basis"]) == \
+        ("CWE-918", ["CWE-20", "CWE-918"], "only_qualifying")
+    assert (got["GHSA-q002"]["cwe"], got["GHSA-q002"]["cwes"], got["GHSA-q002"]["cwe_basis"]) == \
+        ("CWE-1336", ["CWE-1336", "CWE-94"], "first_of_2_qualifying")
+    assert (got["GHSA-q003"]["kind"], got["GHSA-q003"]["cwe"]) == ("access_control", "CWE-862")
+    assert (got["GHSA-q004"]["kind"], got["GHSA-q004"]["cwe"], got["GHSA-q004"]["cwe_basis"]) == \
+        ("dataflow", "CWE-22", "only_qualifying")
+    assert mine.qualifying_cwe(["CWE-284", "CWE-285"], "access_control") == ("CWE-284", "first_of_2_qualifying")
+
+
+def test_manifest_row_carries_cwes_and_basis_and_passes_validate():
+    from eval import manifest
+    c = _cand(1, cwe="CWE-918", cwes=["CWE-20", "CWE-918"], cwe_basis="only_qualifying")
+    row = mine.to_manifest_rows([c], **_kw())[0]
+    assert (row["cwe"], row["cwes"], row["cwe_basis"]) == ("CWE-918", ["CWE-20", "CWE-918"], "only_qualifying")
+    assert manifest.validate({"repos": [row]}) == []
+    assert mine.to_manifest_rows([_cand(2)], **_kw())[0]["cwes"] == ["CWE-89"]
+
+
+# ---- merge-commit fixes: date from the commits the merge brings in ----
+
+def test_fetch_compare_reads_the_commits_a_merge_brings_in():
+    _, _, body = _compare([("4" * 40, "2026-05-20T23:30:00-02:00", "2026-06-02T09:00:00Z")], ["src/e.py"])
+    seen = []
+
+    def get(url):
+        seen.append(url)
+        return (200, {}, body) if "/o/r/" in url else (404, {}, b"{}")
+
+    client = enrich_gh.GitHub(get, sleep=lambda s: None, clock=lambda: 0.0, log=lambda *a: None)
+    rec = mine.fetch_compare(client, "o/r", "base", "head")
+    assert seen[0].endswith("/repos/o/r/compare/base...head") and rec["key"] == mine.compare_key("o/r", "base", "head")
+    assert rec["status"] == "ok" and rec["truncated"] is False and rec["files"] == ["src/e.py"]
+    assert rec["commits"] == [{"sha": "4" * 40, "author_date": "2026-05-21", "committer_date": "2026-06-02"}]
+    assert mine.fetch_compare(client, "o/gone", "base", "head")["status"] == "error"
+
+
+def test_apply_merge_compare_takes_the_earliest_date_or_none():
+    c = mine.fill_commit(_cand(1), _rec(parents=["3" * 40, "4" * 40], author_date="2026-07-05",
+                                        committer_date="2026-07-05", files=["src/a.py"]))
+    ok = {"status": "ok", "truncated": False, "files": ["src/a.py"],
+          "commits": [{"sha": "4", "author_date": "2026-06-10", "committer_date": "2026-06-11"},
+                      {"sha": "m", "author_date": "2026-07-05", "committer_date": "2026-07-05"}]}
+    m = mine.apply_merge_compare(c, ok)
+    assert m["fix_commit_date"] == "2026-06-10" and m["fix_commit_date_merge"] == "2026-07-05"
+    assert m["merge_commits_brought_in"] == 2 and m["merge_compare_files_match"] is True
+    assert mine.classify_candidate(dict(m, fix_shas=["s1"]))[0] == "headline"
+    t = mine.apply_merge_compare(c, dict(ok, truncated=True))
+    assert t["fix_commit_date"] is None and t["fix_commit_date_basis"] == "merge_compare_truncated"
+    assert mine.classify_candidate(t) == ("excluded", ["fix_commit_date missing"])
+    e = mine.apply_merge_compare(c, {"status": "error"})
+    assert e["fix_commit_date"] is None and e["fix_commit_date_basis"] == "merge_compare_error"
+    assert mine.apply_merge_compare(c, dict(ok, files=["src/other.py"]))["merge_compare_files_match"] is False

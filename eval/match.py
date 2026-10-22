@@ -75,7 +75,12 @@ def l1_fix_site(lead: dict, fix_site: dict) -> bool:
 
 
 def l2(finding: dict, answer_key: dict) -> bool:
-    return l1(finding, answer_key) and _cwe.same_family(finding.get("cwe"), answer_key.get("cwe"))
+    """L1 + the finding's CWE is in the family of ANY CWE the advisory lists (``cwes``, when the
+    answer key has a non-empty list), else of the answer key's single ``cwe``."""
+    if not l1(finding, answer_key):
+        return False
+    keys = answer_key.get("cwes") or [answer_key.get("cwe")]
+    return any(_cwe.same_family(finding.get("cwe"), k) for k in keys)
 
 
 def _f1(a: set, b: set):

@@ -6,29 +6,35 @@ Required (every row):
   id: str (unique)                      repo_url: str
   tier: "headline"|"control"|"scale"|"excluded"   (the names eval.dataset.check.classify returns)
   vulnerable_commit: str                patched_commit: str
-  cwe: str
+  cwe: str - exactly one CWE (eval.cwe.parse must read it): the CWE that qualified the row
+       for its kind (eval.dataset.mine.qualifying_cwe)
   fix_sites: list[{file: str, line: int|None, end_line: int|None, function: str|None,
                    method_full_name: str|None}]   (the shape eval.match.path_levels reads)
   accepted_entry_points: list[dict]     (eval.pathgt: uid, kind, method_full_name, file)
   labelers: list[str]                   ([] until a human signs; required non-empty with
                                         require_labels=True, the tag-time check)
 Optional (type-checked when present):
-  repo: str ("owner/name"), repo_canonical: str, language: str, ghsa: str, cve: str,
+  repo: str ("owner/name"), repo_canonical: str, repo_raw: str (the advisory's name for a renamed
+  repo), language: str, ghsa: str, cve: str, cwe_basis: str,
+  cwes: list[str] (every CWE the advisory lists, in its order; must parse and include cwe),
   sink_or_protected_operation: dict|str|None, entry_evidence: str, guard: str|dict|None,
   agreement: number|str|dict|None, graph_missed: bool, kind: "dataflow"|"access_control".
 
 validate() returns human-readable errors and never raises on bad rows. A row whose repo (or
-repo_canonical, or the repo parsed from repo_url) is a training/dev/oldcve repo is an error.
+repo_canonical, repo_raw, or the repo parsed from repo_url) is a training/dev/oldcve repo is an
+error.
 """
 import json
 import os
 import re
 
+from eval import cwe as _cwe
+
 _TIERS = ("headline", "control", "scale", "excluded")
 _KINDS = ("dataflow", "access_control")
 _REQUIRED_STR = ("id", "repo_url", "tier", "vulnerable_commit", "patched_commit", "cwe")
 _REQUIRED_LIST = ("fix_sites", "accepted_entry_points", "labelers")
-_OPT_STR = ("repo", "repo_canonical", "language", "ghsa", "cve", "entry_evidence")
+_OPT_STR = ("repo", "repo_canonical", "repo_raw", "language", "ghsa", "cve", "entry_evidence", "cwe_basis")
 _GH = re.compile(r"github\.com[/:]([^/\s]+)/([^/\s]+?)(?:\.git)?/?$", re.I)
 
 
@@ -61,7 +67,7 @@ def _site_errors(label: str, i: int, s) -> list[str]:
 
 
 def _row_repos(row: dict) -> set[str]:
-    out = {row[k].lower() for k in ("repo", "repo_canonical") if isinstance(row.get(k), str)}
+    out = {row[k].lower() for k in ("repo", "repo_canonical", "repo_raw") if isinstance(row.get(k), str)}
     m = _GH.search(row["repo_url"]) if isinstance(row.get("repo_url"), str) else None
     if m:
         out.add(f"{m.group(1)}/{m.group(2)}".lower())
@@ -89,6 +95,14 @@ def validate(data, *, split_repos=None, require_labels: bool = False) -> list[st
             if row["id"] in seen:
                 errs.append(f"{label}: duplicate id")
             seen.add(row["id"])
+        if isinstance(row.get("cwe"), str) and row["cwe"] and _cwe.parse(row["cwe"]) is None:
+            errs.append(f"{label}: cwe {row['cwe']!r} must be exactly one CWE (e.g. 'CWE-89')")
+        if "cwes" in row:
+            cw = row["cwes"]
+            if not isinstance(cw, list) or any(_cwe.parse(x) is None for x in cw):
+                errs.append(f"{label}: cwes must be a list of CWEs")
+            elif _cwe.parse(row.get("cwe")) not in {_cwe.parse(x) for x in cw}:
+                errs.append(f"{label}: cwes must include cwe {row.get('cwe')!r}")
         if isinstance(row.get("tier"), str) and row["tier"] not in _TIERS:
             errs.append(f"{label}: tier {row['tier']!r} not one of {list(_TIERS)}")
         for k in _OPT_STR:

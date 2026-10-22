@@ -8,7 +8,9 @@ Steps (``mine_testset`` runs them; GitHub objects are cached and resumable via `
 
 1. ``candidates``: advisories published strictly after the cutoff with a GitHub fix commit and a
    dataflow (``sources.DATAFLOW_CWES``) or access-control (CWE-284/285/862/863) weakness.
-2. GitHub: each fix commit (parents, files, dates, canonical repo) -> ``fill_commit``.
+2. GitHub: each fix commit (parents, files, dates, canonical repo) -> ``fill_commit``; for a
+   merge-commit fix, the compare ``parents[0]...merge`` dates the commits it brings in
+   (``apply_merge_compare``: the earliest of them is the fix date).
 3. ``assess``: training checks + ``check.classify``; ``.gitmodules`` at every otherwise-passing
    fix commit is read, and a fix that touches a submodule is excluded.
 4. ``select``: headline rows, at most ``max_per_repo`` per (repo, kind), earliest advisories first.
@@ -81,16 +83,29 @@ def _ecosystem(path: str) -> str | None:
     return m.group(1) if m else None
 
 
-def _nvd_dates(zips, want: set[str]) -> dict[str, str | None]:
-    """source_id -> NVD publication date (``database_specific.nvd_published_at``) for ``want``."""
-    out: dict[str, str | None] = {}
+def _record_extras(zips, want: set[str]) -> dict[str, tuple[str | None, list[str]]]:
+    """source_id -> (NVD publication date, the CWEs in the advisory's own order) for ``want``
+    (``database_specific.nvd_published_at`` / ``cwe_ids``; osv_pairs sorts its CWE list)."""
+    out: dict[str, tuple[str | None, list[str]]] = {}
     for path in zips:
         for name, z in sources._osv_records(path):
             sid = name[:-len(".json")]
             if sid in want and sid not in out:
                 ds = json.loads(z.read(name)).get("database_specific") or {}
-                out[sid] = sources._date(ds.get("nvd_published_at"))
+                order = list(dict.fromkeys(c for c in map(sources.norm_cwe, ds.get("cwe_ids") or []) if c))
+                out[sid] = (sources._date(ds.get("nvd_published_at")), order)
     return out
+
+
+def qualifying_cwe(cwes, kind: str, *, dataflow=sources.DATAFLOW_CWES,
+                   access=ACCESS_CONTROL_CWES) -> tuple[str | None, str | None]:
+    """(cwe, basis): the first CWE in ``cwes`` (advisory order) that is in ``kind``'s set, and
+    "only_qualifying" or "first_of_<n>_qualifying". (None, None) when none qualifies."""
+    pool = dataflow if kind == "dataflow" else access if kind == "access_control" else frozenset()
+    hits = [c for c in cwes if _cwe_ids([c]) & pool]
+    if not hits:
+        return None, None
+    return hits[0], "only_qualifying" if len(hits) == 1 else f"first_of_{len(hits)}_qualifying"
 
 
 def _same_vuln(a: dict, b: dict) -> bool:
@@ -133,8 +148,9 @@ def candidates(osv_zip, *, cutoff: str = sources.CUTOFF, cwes=sources.DATAFLOW_C
     ``osv_zip`` is one export or a list (an advisory listed in several is kept once; one CVE with
     several advisory records is kept once, GHSA first). Each candidate carries every fix commit the
     advisory links (``fix_shas``), ``shared_fix_with`` (other advisories linking the same commit),
-    and ``advisory_first_public``: the earliest of its own date, any alias's OSV date and its NVD
-    date. ``max_per_repo`` keeps the earliest advisories per (raw repo, kind); ``None`` keeps all
+    ``advisory_first_public``: the earliest of its own date, any alias's OSV date and its NVD
+    date; ``cwes`` (every listed CWE, advisory order), ``cwe`` (the one that qualified it for its
+    kind, ``qualifying_cwe``) and ``cwe_basis``. ``max_per_repo`` keeps the earliest advisories per (raw repo, kind); ``None`` keeps all
     (the mining run caps after the tier rules instead, see ``select``). ``stats`` gets the funnel.
     """
     zips = [osv_zip] if isinstance(osv_zip, str) else list(osv_zip)
@@ -166,7 +182,7 @@ def candidates(osv_zip, *, cutoff: str = sources.CUTOFF, cwes=sources.DATAFLOW_C
     picked = [r for r in linked if kinds[r["source_id"]]]
 
     first_dates = sources.advisory_date_index(rows)
-    nvd = _nvd_dates(zips, {r["source_id"] for r in picked})
+    extras = _record_extras(zips, {r["source_id"] for r in picked})
     by_repo: dict = {}
     for r in rows:
         for s in r["fix_shas"]:
@@ -176,13 +192,15 @@ def candidates(osv_zip, *, cutoff: str = sources.CUTOFF, cwes=sources.DATAFLOW_C
         if r["id"] in by_id:
             by_id[r["id"]]["merged_source_ids"].append(r["source_id"])
             continue
-        nv = nvd.get(r["source_id"])
+        nv, order = extras.get(r["source_id"], (None, []))
+        listed = order + [c for c in r["cwe"] if c not in order]     # advisory order; osv_pairs' set
+        cwe, cwe_basis = qualifying_cwe(listed, kinds[r["source_id"]], dataflow=cwes, access=access_cwes)
         first, basis = min([(r["advisory_published"], "advisory")]
                            + [(first_dates[a], "osv_alias") for a in r["aliases"] if a in first_dates]
                            + ([(nv, "nvd_published_at")] if nv else []), key=lambda x: x[0])
         c = {"id": r["id"], "cve": r["cve"], "ghsa": r["ghsa"], "aliases": r["aliases"], "source": r["source"],
-             "source_id": r["source_id"], "merged_source_ids": [], "repo": r["repo"], "cwe": ",".join(r["cwe"]),
-             "cwes": r["cwe"], "kind": kinds[r["source_id"]], "fix_sha": r["fix_sha"], "fix_shas": r["fix_shas"],
+             "source_id": r["source_id"], "merged_source_ids": [], "repo": r["repo"], "cwe": cwe,
+             "cwes": listed, "cwe_basis": cwe_basis, "kind": kinds[r["source_id"]], "fix_sha": r["fix_sha"], "fix_shas": r["fix_shas"],
              "shared_fix_with": _shared_with(r, by_repo), "advisory_published": r["advisory_published"],
              "nvd_published": nv, "advisory_first_public": first, "advisory_first_public_basis": basis,
              "language": r["language"], "language_basis": r["language_basis"], "packages": r["packages"],
@@ -220,10 +238,57 @@ def fill_commit(c: dict, rec: dict | None, *, canonical: str | None = None) -> d
     lang = None if truncated else sources.language_from_files(files)
     c.update(fix_sha_full=rec.get("sha_full"), parents=rec.get("parents") or [],
              author_date=rec.get("author_date"), committer_date=rec.get("committer_date"),
-             fix_commit_date=min(dates) if dates else None, files_truncated=truncated,
+             fix_commit_date=min(dates) if dates else None, fix_commit_date_basis="fix_commit",
+             files_truncated=truncated,
              language=lang, language_basis="fix_files" if lang else None,
              n_files=None if truncated else len(non_test), n_files_total=None if truncated else len(files),
              fix_files=None if truncated else non_test)
+    return c
+
+
+def compare_key(repo: str, base: str, head: str) -> str:
+    return f"compare:{repo}@{base}...{head}"
+
+
+def fetch_compare(client: enrich_gh.GitHub, repo: str, base: str, head: str) -> dict:
+    """The commits ``head`` brings in over ``base``: ``GET /repos/{repo}/compare/{base}...{head}``.
+    For a merge fix with base = its first parent this is the merged branch plus the merge itself,
+    and ``files`` is the vulnerable->patched diff. ok (commits with UTC dates, ``truncated`` when
+    GitHub returned fewer commits than ``total_commits``) or error."""
+    status, _, data = client.request(f"/repos/{repo}/compare/{base}...{head}")
+    rec = {"key": compare_key(repo, base, head), "kind": "compare", "repo": repo, "base": base, "head": head,
+           "http_status": status, "fetched_at": enrich_gh._now()}
+    if status == 200 and isinstance(data, dict) and isinstance(data.get("commits"), list):
+        commits = [{"sha": x.get("sha"),
+                    "author_date": sources._date(((x.get("commit") or {}).get("author") or {}).get("date")),
+                    "committer_date": sources._date(((x.get("commit") or {}).get("committer") or {}).get("date"))}
+                   for x in data["commits"]]
+        total = data.get("total_commits")
+        rec.update(status="ok", total_commits=total, commits=commits,
+                   truncated=not isinstance(total, int) or total > len(commits),
+                   files=[f.get("filename") for f in data.get("files") or []])
+    else:
+        rec["status"] = "error"
+    return rec
+
+
+def apply_merge_compare(c: dict, rec: dict | None) -> dict:
+    """Copy of a merge-commit fix ``c`` whose ``fix_commit_date`` is the EARLIEST author/committer
+    date among the commits the merge brings in (``rec`` from ``fetch_compare``; the merge's own
+    date is kept as ``fix_commit_date_merge``). A failed or truncated compare leaves the date None
+    (never headline). ``merge_compare_files_match``: the compare's non-test files equal ``fix_files``."""
+    c = dict(c, fix_commit_date_merge=c.get("fix_commit_date"))
+    if not rec or rec.get("status") != "ok" or rec.get("truncated"):
+        c["fix_commit_date"] = None
+        c["fix_commit_date_basis"] = "merge_compare_truncated" if rec and rec.get("status") == "ok" \
+            else "merge_compare_error"
+        return c
+    dates = [d for x in rec["commits"] for d in (x.get("author_date"), x.get("committer_date")) if d]
+    dates += [c["fix_commit_date"]] if c.get("fix_commit_date") else []
+    c.update(fix_commit_date=min(dates) if dates else None, fix_commit_date_basis="merge_compare",
+             merge_commits_brought_in=len(rec["commits"]),
+             merge_compare_files_match=sorted(f for f in rec.get("files") or [] if not sources._is_test(f))
+             == sorted(c.get("fix_files") or []))
     return c
 
 
@@ -323,10 +388,11 @@ def manifest_row(a: dict) -> dict:
            "repo_url": f"https://github.com/{repo}"}
     if repo != a["repo"]:
         row["repo_raw"] = a["repo"]
-    row.update(language=a.get("language"), cwe=a["cwe"] if isinstance(a["cwe"], str) else ",".join(a["cwe"]),
-               kind=a["kind"], tier=a["tier"], vulnerable_commit=a["vulnerable_commit"],
+    row.update(language=a.get("language"), cwe=a["cwe"], cwes=a.get("cwes") or [a["cwe"]],
+               cwe_basis=a.get("cwe_basis"), kind=a["kind"], tier=a["tier"], vulnerable_commit=a["vulnerable_commit"],
                patched_commit=a["patched_commit"], advisory_published=a.get("advisory_published"),
-               fix_commit_date=a.get("fix_commit_date"), fix_files=a.get("fix_files"), n_files=a.get("n_files"),
+               fix_commit_date=a.get("fix_commit_date"), fix_commit_date_basis=a.get("fix_commit_date_basis"),
+               fix_files=a.get("fix_files"), n_files=a.get("n_files"),
                loc_first_party=None, fix_sites=[], sink_or_protected_operation=None, accepted_entry_points=[],
                entry_evidence=None, guard=None, labelers=[], agreement=None, graph_missed=None)
     return row
@@ -368,7 +434,8 @@ def _counts(rows, key) -> dict:
     return dict(sorted(c.items(), key=lambda kv: (-kv[1], str(kv[0]))))
 
 
-def summarize(stats: dict, assessed, selected, beyond_cap, *, submodules: dict, max_per_repo: int | None) -> dict:
+def summarize(stats: dict, assessed, selected, beyond_cap, *, submodules: dict, merges: dict,
+              max_per_repo: int | None) -> dict:
     per_kind = {}
     for k in KINDS:
         rows = [a for a in assessed if a["kind"] == k]
@@ -381,12 +448,15 @@ def summarize(stats: dict, assessed, selected, beyond_cap, *, submodules: dict, 
                        "first_reason": [[t, r, first[(t, r)]] for t, r in order],
                        "headline": len(head), "beyond_repo_cap": sum(1 for a in beyond_cap if a["kind"] == k),
                        "manifest": len(sel), "manifest_repos": len({a.get("repo_canonical") or a["repo"] for a in sel}),
-                       "manifest_by_cwe": _counts(sel, lambda a: a["cwes"] if a.get("cwes") else [a["cwe"]]),
+                       "manifest_by_cwe": _counts(sel, lambda a: [a["cwe"]]),
+                       "manifest_by_cwe_basis": _counts(sel, lambda a: [a.get("cwe_basis")]),
+                       "manifest_listing_several_cwes": sum(1 for a in sel if len(a.get("cwes") or []) > 1),
                        "manifest_by_language": _counts(sel, lambda a: [a.get("language")]),
                        "headline_by_language": _counts(head, lambda a: [a.get("language")]),
                        "candidates_by_ecosystem_language": _counts(rows, lambda a: [a.get("ecosystem_language")]),
                        "manifest_fix_is_merge_commit": sum(1 for a in sel if len(a.get("parents") or []) > 1)}
-    return {"funnel": stats, "submodule_check": submodules, "max_per_repo": max_per_repo, "by_kind": per_kind}
+    return {"funnel": stats, "merge_fix_check": merges, "submodule_check": submodules,
+            "max_per_repo": max_per_repo, "by_kind": per_kind}
 
 
 def mine_testset(zips, *, cache_path: str, splits: dict, split_repos, cutoff: str = sources.CUTOFF,
@@ -415,8 +485,24 @@ def mine_testset(zips, *, cache_path: str, splits: dict, split_repos, cutoff: st
 
     kw = dict(splits=splits, split_repos=split_repos, classify=classify, parent=parent)
     filled = [fill_commit(c, record(c), canonical=canon.get(c["repo"])) for c in cands]
-    first = {a["id"]: a for a in assess(filled, **kw)}
     client = enrich_gh.GitHub(get, sleep=sleep, clock=clock, log=log)
+    merges, fetched = {"merge_fixes": 0, "date_moved_earlier": 0, "errors": 0, "truncated": 0, "files_match": 0}, 0
+    for i, c in enumerate(filled):                 # merge-commit fixes: date from the merged commits
+        if c.get("enrich_status") != "ok" or len(c.get("parents") or []) < 2:
+            continue
+        repo = c.get("repo_canonical") or c["repo"]
+        key = compare_key(repo, c["parents"][0], c["fix_sha_full"])
+        if not cache.done(key):
+            cache.add(fetch_compare(client, repo, c["parents"][0], c["fix_sha_full"]))
+            fetched += 1
+        filled[i] = m = apply_merge_compare(c, cache.records[key])
+        merges["merge_fixes"] += 1
+        merges["date_moved_earlier"] += bool(m["fix_commit_date"] and m["fix_commit_date"] < c["fix_commit_date"])
+        merges["errors"] += m["fix_commit_date_basis"] == "merge_compare_error"
+        merges["truncated"] += m["fix_commit_date_basis"] == "merge_compare_truncated"
+        merges["files_match"] += bool(m.get("merge_compare_files_match"))
+    log(f"[mine] merge-commit fixes: {merges}; compares fetched from GitHub this run: {fetched}")
+    first = {a["id"]: a for a in assess(filled, **kw)}
     sub, fetched = {"checked": 0, "with_gitmodules": 0, "fix_touches_submodule": 0, "errors": 0}, 0
     for i, c in enumerate(filled):
         if first[c["id"]]["tier"] != "headline":
@@ -439,7 +525,7 @@ def mine_testset(zips, *, cache_path: str, splits: dict, split_repos, cutoff: st
     chosen, capped = {a["id"] for a in selected}, {a["id"] for a in beyond}
     for a in assessed:
         a["selection"] = "manifest" if a["id"] in chosen else "beyond_repo_cap" if a["id"] in capped else None
-    return selected, assessed, summarize(stats, assessed, selected, beyond, submodules=sub,
+    return selected, assessed, summarize(stats, assessed, selected, beyond, submodules=sub, merges=merges,
                                          max_per_repo=max_per_repo)
 
 
@@ -461,9 +547,11 @@ def tables_markdown(summary: dict) -> str:
                 f"| headline beyond the per-repo cap | ({summary['max_per_repo']} per repo and kind) | "
                 f"{d['beyond_repo_cap']} |",
                 f"| **manifest rows** | in {d['manifest_repos']} repos | **{d['manifest']}** |", ""]
-        for name in ("manifest_by_cwe", "manifest_by_language", "headline_by_language"):
+        for name in ("manifest_by_cwe", "manifest_by_cwe_basis", "manifest_by_language", "headline_by_language"):
             out.append(f"{name.replace('_', ' ')}: " + (", ".join(f"{a} {b}" for a, b in d[name].items()) or "none"))
-        out += [f"manifest rows whose fix is a merge commit: {d['manifest_fix_is_merge_commit']}", ""]
+        out += [f"manifest rows whose advisory lists several CWEs: {d['manifest_listing_several_cwes']}",
+                f"manifest rows whose fix is a merge commit: {d['manifest_fix_is_merge_commit']}", ""]
+    out.append(f"merge-commit fix check: {summary['merge_fix_check']}")
     out.append(f"submodule check: {summary['submodule_check']}")
     return "\n".join(out) + "\n"
 

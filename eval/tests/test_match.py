@@ -166,3 +166,18 @@ def test_read_matches_returns_bool(tmp_path):
     f = [{"file": "app.js", "function": "handler", "line": 100, "cwe": "CWE-89"}]
     match.write_matches(conn, rid, match.match_run(f, [AK]))
     assert match.read_matches(conn, rid)[0]["cwe_family"] is True
+
+
+def test_l2_credits_any_cwe_in_cwes_when_present():
+    ak = {**AK, "cwe": "CWE-918", "cwes": ["CWE-20", "CWE-918"]}
+    hit = {"file": "app.js", "function": "handler", "line": 100}
+    assert match.l2({**hit, "cwe": "CWE-918"}, ak)
+    assert match.l2({**hit, "cwe": "CWE-20"}, ak)            # any listed CWE counts
+    assert not match.l2({**hit, "cwe": "CWE-79"}, ak)
+    assert not match.l2({**hit, "file": "other.js", "cwe": "CWE-20"}, ak)
+
+
+def test_l2_falls_back_to_cwe_without_cwes():
+    hit = {"file": "app.js", "function": "handler", "line": 100}
+    assert match.l2({**hit, "cwe": "CWE-89"}, {**AK, "cwes": []})
+    assert not match.l2({**hit, "cwe": "CWE-20"}, AK)
