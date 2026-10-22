@@ -130,7 +130,11 @@ What each piece buys, and why (all measured on 2026-10-18, transcripts below):
 ```
 
 Needs `eval/dataset/manifest.json` (`{"repos":[{id, repo_url, tier, vulnerable_commit,
-patched_commit, ...}]}`), frozen at `orion-lm-prereg-v1`.
+patched_commit, ...}]}`), frozen at `orion-lm-prereg-v1`. `eval.run` refuses (exit 2) a manifest
+whose rows are not labeled and keyed (`labelers`, `fix_sites`, `fix_sites_patched` non-empty:
+`manifest.validate(require_labels=True)`), so the test set cannot be run before its labels exist.
+A dev or smoke manifest runs with `--unlabeled-ok`, which prints a warning banner. A skipped row or
+benchmark (mirror failure) makes the run exit 1 after everything else has run.
 
 ## Inspect
 

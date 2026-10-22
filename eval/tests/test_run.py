@@ -6,6 +6,11 @@ from eval import db, run
 from eval.arms import ArmResult
 
 META = {"id": "r1", "tier": "headline", "commit_sha": "c1"}
+SITE = [{"file": "a.js", "line": 3, "end_line": 4, "function": "f", "method_full_name": "a.js::program:f"}]
+# a labeled, keyed row: what run.main accepts without --unlabeled-ok
+LABELED = {"id": "r1", "repo_url": "u", "tier": "headline", "vulnerable_commit": "v1",
+           "patched_commit": "p1", "cwe": "CWE-89", "fix_sites": SITE, "fix_sites_patched": SITE,
+           "accepted_entry_points": [], "labelers": ["k"]}
 
 
 class FakeProc:
@@ -160,10 +165,7 @@ def _patch_main(monkeypatch, tmp_path, statuses, calls):
     import json
     from eval import preflight, shim_setup
     man = tmp_path / "m.json"
-    man.write_text(json.dumps({"repos": [{"id": "r1", "repo_url": "u", "tier": "headline",
-                                          "vulnerable_commit": "v1", "patched_commit": "p1",
-                                          "cwe": "CWE-89", "fix_sites": [],
-                                          "accepted_entry_points": [], "labelers": ["k"]}]}))
+    man.write_text(json.dumps({"repos": [LABELED]}))
     from eval import manifest
     monkeypatch.setattr(manifest, "split_repos", lambda *a, **k: set())
     monkeypatch.setattr(run.repo, "mirror", lambda *a, **k: None)
@@ -351,10 +353,7 @@ def test_main_runs_manifest_rows_and_owasp_items_in_one_invocation(tmp_path, mon
     seen, _ = _spy_main(monkeypatch, tmp_path)
     import json
     m = tmp_path / "m.json"
-    m.write_text(json.dumps({"repos": [{"id": "r1", "repo_url": "u", "tier": "headline",
-                                        "vulnerable_commit": "v1", "patched_commit": "p1",
-                                        "cwe": "CWE-89", "fix_sites": [],
-                                        "accepted_entry_points": [], "labelers": ["k"]}]}))
+    m.write_text(json.dumps({"repos": [LABELED]}))
     argv = ["--arm", "plain-opus5", "--runs", "2", "--manifest", str(m), "--owasp", _owasp_file(tmp_path),
             "--owasp-runs", "1", "--db", str(tmp_path / "t.db")]
     assert run.main(argv) == 0
@@ -380,3 +379,48 @@ def test_main_refuses_an_invalid_owasp_sample_before_mirroring(tmp_path, monkeyp
     assert mirrored == [] and seen == []
     out = capsys.readouterr().out
     assert ("duplicate case_id" in out) if bad == "duplicate" else ("pinned_sha" in out)
+
+
+# ---- I5: the test set cannot be run before it is labeled -------------------------------------------
+
+@pytest.mark.parametrize("unlabeled", [dict(labelers=[]), dict(fix_sites=[]), dict(fix_sites_patched=[])])
+def test_main_refuses_an_unlabeled_manifest_by_default(tmp_path, monkeypatch, capsys, unlabeled):
+    import json
+    calls, mirrored = [], []
+    argv = _patch_main(monkeypatch, tmp_path, [], calls)
+    monkeypatch.setattr(run.repo, "mirror", lambda *a, **k: mirrored.append(a))
+    open(argv[argv.index("--manifest") + 1], "w").write(json.dumps({"repos": [dict(LABELED, **unlabeled)]}))
+    assert run.main(argv) == 2
+    assert calls == [] and mirrored == [] and not os.path.exists(tmp_path / "t.db")
+    out = capsys.readouterr().out
+    assert "require_labels" in out and "--unlabeled-ok" in out
+
+
+def test_unlabeled_ok_runs_a_dev_manifest_with_a_loud_warning(tmp_path, monkeypatch, capsys):
+    import json
+    calls = []
+    argv = _patch_main(monkeypatch, tmp_path, ["ok", "ok"], calls)
+    dev = dict(LABELED, labelers=[], fix_sites=[])
+    dev.pop("fix_sites_patched")
+    open(argv[argv.index("--manifest") + 1], "w").write(json.dumps({"repos": [dev]}))
+    assert run.main(argv + ["--unlabeled-ok"]) == 0 and len(calls) == 2
+    out = capsys.readouterr().out
+    assert "WARNING --unlabeled-ok" in out and "NOT checked" in out
+
+
+def test_unlabeled_ok_still_refuses_a_broken_or_training_row(tmp_path, monkeypatch, capsys):
+    import json
+    from eval import manifest
+    argv = _patch_main(monkeypatch, tmp_path, [], [])
+    monkeypatch.setattr(manifest, "split_repos", lambda *a, **k: {"o/trained"})
+    open(argv[argv.index("--manifest") + 1], "w").write(
+        json.dumps({"repos": [dict(LABELED, labelers=[], repo="o/trained")]}))
+    assert run.main(argv + ["--unlabeled-ok"]) == 2
+    assert "training" in capsys.readouterr().out
+
+
+def test_labeled_manifest_runs_without_the_flag_or_a_warning(tmp_path, monkeypatch, capsys):
+    calls = []
+    argv = _patch_main(monkeypatch, tmp_path, ["ok", "ok"], calls)
+    assert run.main(argv) == 0 and len(calls) == 2
+    assert "WARNING" not in capsys.readouterr().out

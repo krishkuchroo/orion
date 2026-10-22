@@ -257,6 +257,14 @@ def build_launcher(*, base_env, shim_dir, graph_cache, _plain=_default_plain, _l
     return launcher
 
 
+_UNLABELED_WARNING = """\
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!! WARNING --unlabeled-ok: manifest {manifest} is NOT checked for labelers or fix sites.
+!! For a dev or smoke manifest ONLY. Never on the test set before its labels exist and it is
+!! frozen at orion-lm-prereg-v1: the test set is run once, and these runs would count as that once.
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"""
+
+
 def main(argv=None, sleep=time.sleep):
     from . import manifest, preflight
     from .shim_setup import shim_dir as _shim_dir
@@ -279,6 +287,10 @@ def main(argv=None, sleep=time.sleep):
                     help="local model path for the orion-lm arm (recorded as runs.model_tag)")
     ap.add_argument("--lm-base-model", metavar="PATH",
                     help="local model path for the orion-lm-base arm (recorded as runs.model_tag)")
+    ap.add_argument("--unlabeled-ok", action="store_true",
+                    help="DEV / SMOKE manifests only: run rows that have no labelers or no fix sites "
+                         "(manifest.validate(require_labels=False)). Without it every row must be "
+                         "signed and keyed, so the test set cannot be run before its labels exist.")
     args = ap.parse_args(argv)
     arms = args.arm or ARMS
     # A selected orion-lm* arm needs an existing model path. Refuse here, before any run row or
@@ -295,12 +307,18 @@ def main(argv=None, sleep=time.sleep):
             return 2
         model_tags[arm] = os.path.abspath(path)
     data = manifest.load(args.manifest) if args.manifest else {"repos": []}
-    errors = manifest.validate(data, split_repos=manifest.split_repos()) if data["repos"] else []
+    errors = (manifest.validate(data, split_repos=manifest.split_repos(),
+                                require_labels=not args.unlabeled_ok) if data["repos"] else [])
     if errors:  # the test set must be clean to run: refuse before mirroring anything
         print(f"manifest {args.manifest} is invalid ({len(errors)} error(s)):", flush=True)
         for e in errors:
             print(f"  {e}", flush=True)
+        if not args.unlabeled_ok and any("(require_labels)" in e for e in errors):
+            print("rows must be labeled (labelers, fix_sites, fix_sites_patched) before a run; "
+                  "for a dev or smoke manifest pass --unlabeled-ok", flush=True)
         return 2
+    if args.unlabeled_ok and data["repos"]:
+        print(_UNLABELED_WARNING.format(manifest=args.manifest), flush=True)
     benchmarks = []
     if args.owasp:  # validated before anything is mirrored, like the manifest
         sample = owasp.load_sample(args.owasp)
