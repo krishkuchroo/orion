@@ -11,6 +11,10 @@ def _meta(commit, **kw):
                  "case_id": "", "run_no": 1, "attempt_no": 1, "mirror_dir": "/m"}, **kw)
 
 
+def _tree(tmp_path, arm, meta, root="trees"):
+    return os.path.join(run.work_dir_for(arm, meta, str(tmp_path / root)), "tree")
+
+
 def _launcher(tmp_path, **kw):
     base = dict(base_env={}, shim_dir="/s", graph_cache={}, tree_root=str(tmp_path / "trees"))
     base.update(kw)
@@ -42,11 +46,11 @@ def test_build_launcher_dispatches_exports_and_cleans_up(tmp_path, monkeypatch):
     assert kw1["effort"] == "xhigh" and kw1["model_tag"] == "opus"
     assert "ollama_url" not in kw1
     run_dir = str(tmp_path / "eval/runs/plain-opus5/r1/c1/_/1")
-    tree = str(tmp_path / "trees/plain-opus5/r1/c1/_/1/tree")
+    tree = _tree(tmp_path, "plain-opus5", _meta("c1"))
     assert called["exports"][0] == ("/m", "c1", tree)
     assert kw1["repo_dir"] == tree
     assert kw1["usage_log"] == f"{run_dir}/usage.jsonl"
-    assert not os.path.exists(tree)                          # tree deleted
+    assert not os.path.exists(tree) and not os.path.exists(os.path.dirname(tree))   # work dir deleted
     assert res1.findings_path == f"{run_dir}/findings.json"  # findings kept in the run dir
     assert os.path.exists(res1.findings_path)
     assert res3.findings_path == str(tmp_path / "eval/runs/plain-gpt/r1/c1/_/1.a2/findings.json")
@@ -79,7 +83,7 @@ def test_build_launcher_deletes_tree_on_failure(tmp_path, monkeypatch):
     launcher = _launcher(tmp_path, _plain=boom, _export=fake_export)
     with pytest.raises(RuntimeError):
         launcher("plain-opus5", _meta("c1", case_id="k"), "opus", lambda l: None, effort="", on_start=None)
-    assert not os.path.exists(tmp_path / "trees/plain-opus5/r1/c1/k/1/tree")
+    assert not os.path.exists(os.path.dirname(_tree(tmp_path, "plain-opus5", _meta("c1", case_id="k"))))
 
 
 @pytest.mark.parametrize("arm", ["orion-lm", "orion-lm-base"])
@@ -104,7 +108,7 @@ def test_orion_lm_arms_dispatch_to_the_in_process_arm(tmp_path, monkeypatch, arm
     assert (seen["run_no"], seen["case_id"], seen["repo_id"], seen["commit_sha"]) == (3, "k", "r1", "c1")
     assert seen["on_start"] is marker
     assert seen["json_out"] == str(tmp_path / f"eval/runs/{arm}/r1/c1/k/3/findings.json")
-    assert not os.path.exists(tmp_path / f"trees/{arm}/r1/c1/k/3/tree")   # tree still cleaned up
+    assert not os.path.exists(os.path.dirname(_tree(tmp_path, arm, _meta("c1", run_no=3, case_id="k"))))
 
 
 def test_unknown_orion_arm_is_refused(tmp_path, monkeypatch):
@@ -165,7 +169,7 @@ def test_lm_seam_receives_tree_and_graph_cache(tmp_path, monkeypatch):
     res = launcher("orion-lm", _meta("c1"), "m", lambda l: None, effort="", on_start=None)
     assert res.status == "ok"
     assert seen["arm"] == "orion-lm" and seen["graph_cache"] is cache
-    assert seen["repo_dir"] == str(tmp_path / "trees/orion-lm/r1/c1/_/1/tree")
+    assert seen["repo_dir"] == _tree(tmp_path, "orion-lm", _meta("c1"))
     assert seen["json_out"] == str(tmp_path / "eval/runs/orion-lm/r1/c1/_/1/findings.json")
 
 
@@ -245,3 +249,36 @@ def test_launcher_calls_strip_right_after_the_export(tmp_path, monkeypatch):
     launcher = _launcher(tmp_path, _plain=arm_fn, _export=export, _strip=strip)
     launcher("plain-gpt", _owasp_meta(), "m", lambda l: None, effort="", on_start=None)
     assert order == ["export", "strip", "arm"]
+
+
+# ---- I6: the tree path is an opaque token ---------------------------------------------------------
+
+def test_tree_path_names_no_arm_row_commit_or_eval(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    seen = []
+
+    def fake_plain(**kw):
+        seen.append(kw["repo_dir"])
+        return ArmResult(status="ok", findings_path=None, usage=[])
+    launcher = run.build_launcher(base_env={}, shim_dir="/s", graph_cache={}, _plain=fake_plain,
+                                  _export=lambda *a, **k: os.makedirs(a[2]), tree_root=str(tmp_path / "ws"))
+    meta = _meta("deadbeefcafe", id="CVE-2026-12345", case_id="BenchmarkTest00007")
+    launcher("plain-opus5", meta, "m", lambda l: None, effort="", on_start=None)
+    launcher("plain-opus5", dict(meta, run_no=2), "m", lambda l: None, effort="", on_start=None)
+    launcher("plain-gpt", meta, "m", lambda l: None, effort="", on_start=None)
+    launcher("plain-opus5", dict(meta, attempt_no=2), "m", lambda l: None, effort="", on_start=None)
+    for tree in seen:
+        rel = os.path.relpath(tree, tmp_path / "ws")
+        token, leaf = rel.split(os.sep)
+        assert leaf == "tree" and len(token) == 16 and int(token, 16) >= 0
+        for leak in ("plain", "opus", "gpt", "CVE", "12345", "deadbeef", "Benchmark", "eval", "orion"):
+            assert leak not in rel
+    assert len(set(seen)) == 4            # unique per arm, run and attempt (scan_id derives from it)
+
+
+def test_default_tree_root_is_neutral():
+    import tempfile
+    assert run.TREE_ROOT_NAME == "workspaces"
+    root = os.path.join(tempfile.gettempdir(), run.TREE_ROOT_NAME)
+    tok = run.work_dir_for("orion-lm", _meta("c1"), root)
+    assert os.path.dirname(tok) == root and "orion" not in os.path.relpath(tok, tempfile.gettempdir())

@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -201,6 +202,19 @@ def run_dir_for(arm, repo_meta, root=os.path.join("eval", "runs")):
                         repo_meta.get("case_id") or "_", run_seg)
 
 
+# Default parent of the per-run work dirs: a neutral name (it names no arm, CVE or evaluation).
+TREE_ROOT_NAME = "workspaces"
+
+
+def work_dir_for(arm, repo_meta, tree_root):
+    """The run's private work dir, <tree_root>/<sha256(run key)[:16]>, which holds `tree` (and, for
+    the in-process arm, its build scratch). OPAQUE: a plain agent's cwd names no arm, row id (CVE),
+    commit or "eval". The run key is the run dir's relative path (arm/row/commit/case/run[.aN]), so
+    the token is unique per attempt, and so is the scan_id Orion derives from the tree path."""
+    key = run_dir_for(arm, repo_meta, root="")
+    return os.path.join(tree_root, hashlib.sha256(key.encode("utf-8")).hexdigest()[:16])
+
+
 def _leak_guard(tree):
     d = os.path.dirname(tree)
     while True:
@@ -216,16 +230,17 @@ def _leak_guard(tree):
 
 def build_launcher(*, base_env, shim_dir, graph_cache, _plain=_default_plain, _lm=_default_lm,
                    _export=repo.export_tree, _strip=owasp.strip_answers, tree_root=None):
-    """The launcher run_one calls: export the commit to a fresh tree (no .git), run the arm, delete the
-    tree. An OWASP item (repo_meta["case"] set, Task F2) has its answer files stripped right after the
+    """The launcher run_one calls: export the commit to a fresh tree (no .git) at
+    <tree_root>/<opaque token>/tree (work_dir_for), run the arm, delete the work dir. An OWASP item (repo_meta["case"] set, Task F2) has its answer files stripped right after the
     export, for every arm, and its case passed to the arm (plain: CASE_PROMPT; orion-lm: the case's
     flows); a manifest item has case None."""
-    tree_root = tree_root or os.path.join(tempfile.gettempdir(), "orion-eval-trees")
+    tree_root = tree_root or os.path.join(tempfile.gettempdir(), TREE_ROOT_NAME)
 
     def launcher(arm, repo_meta, model_tag, on_line, *, effort, on_start):
         sha = repo_meta["commit_sha"]
         run_dir = os.path.abspath(run_dir_for(arm, repo_meta))
-        tree = os.path.abspath(os.path.join(run_dir_for(arm, repo_meta, tree_root), "tree"))
+        work = os.path.abspath(work_dir_for(arm, repo_meta, tree_root))
+        tree = os.path.join(work, "tree")
         _leak_guard(tree)
         usage_log = os.path.join(run_dir, "usage.jsonl")
         json_out = os.path.join(run_dir, "findings.json")
@@ -252,7 +267,7 @@ def build_launcher(*, base_env, shim_dir, graph_cache, _plain=_default_plain, _l
                 # the arm copies its findings.json out of the tree before it is deleted
                 res = _plain(shim_dir=shim_dir, **common)
         finally:
-            shutil.rmtree(tree, ignore_errors=True)
+            shutil.rmtree(work, ignore_errors=True)   # the tree and anything an arm left next to it
         return res
     return launcher
 
@@ -279,7 +294,8 @@ def main(argv=None, sleep=time.sleep):
                     help="runs per arm per OWASP case (spec 5.4: R = 1); --runs is for manifest rows")
     ap.add_argument("--db", default="eval/runs.db")
     ap.add_argument("--runs", type=int, default=3)
-    ap.add_argument("--tree-root", default=os.path.join(tempfile.gettempdir(), "orion-eval-trees"))
+    ap.add_argument("--tree-root", default=os.path.join(tempfile.gettempdir(), TREE_ROOT_NAME),
+                    help="parent of the per-run work dirs (<root>/<opaque token>/tree); outside any repo")
     ap.add_argument("--mirror-root", default="eval/mirrors/")
     ap.add_argument("--resume-wait", type=int, default=900,
                     help="seconds to sleep after a usage-limit abort before re-planning")
