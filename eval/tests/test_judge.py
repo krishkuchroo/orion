@@ -40,15 +40,15 @@ def test_prompt_hash_and_model_recorded():
 
 
 def test_calibrate_reports_kappa_and_ac1():
-    out = judge.calibrate(["a", "a", "b"], ["a", "b", "b"])
+    out = judge.calibrate(["real_other_bug", "real_other_bug", "false_alarm"], ["real_other_bug", "false_alarm", "false_alarm"])
     assert "kappa" in out and "ac1" in out
     assert abs(out["kappa"] - 0.4) < 1e-9
     assert out["min_n_met"] is False
 
 
 def test_calibrate_perfect_agreement_single_class_is_none():
-    out = judge.calibrate(["a", "a"], ["a", "a"])
-    assert out["agreement"] == 1.0 and out["kappa"] is None and out["ac1"] is None
+    out = judge.calibrate(["real_other_bug", "real_other_bug"], ["real_other_bug", "real_other_bug"])
+    assert out["agreement"] == 1.0 and out["kappa"] is None and out["ac1"] == 1.0
 
 
 def test_calibrate_empty_is_none():
@@ -57,22 +57,43 @@ def test_calibrate_empty_is_none():
 
 
 def test_calibrate_perfect_two_class():
-    out = judge.calibrate(["a", "b", "a", "b"], ["a", "b", "a", "b"])
+    out = judge.calibrate(["real_other_bug", "false_alarm", "real_other_bug", "false_alarm"], ["real_other_bug", "false_alarm", "real_other_bug", "false_alarm"])
     assert out["kappa"] == 1.0 and out["ac1"] == 1.0
 
 
 def test_calibrate_per_arm():
-    out = judge.calibrate(["a", "a", "b", "b"], ["a", "a", "b", "a"], arms=["x", "x", "y", "y"])
+    out = judge.calibrate(["real_other_bug", "real_other_bug", "false_alarm", "false_alarm"], ["real_other_bug", "real_other_bug", "false_alarm", "real_other_bug"], arms=["x", "x", "y", "y"])
     assert out["per_arm"]["x"]["agreement"] == 1.0
     assert out["per_arm"]["y"]["agreement"] == 0.5 and out["per_arm"]["y"]["n"] == 2
+
+
+def test_ac1_uses_fixed_q_across_arms():
+    # arm x sees 2 categories, arm y only 1; both use q=3 from the label scale.
+    j = ["real_other_bug", "false_alarm", "real_other_bug", "false_alarm", "real_other_bug", "real_other_bug"]
+    h = ["real_other_bug", "false_alarm", "real_other_bug", "false_alarm", "real_other_bug", "real_other_bug"]
+    out = judge.calibrate(j, h, arms=["x"] * 4 + ["y"] * 2)
+    assert out["per_arm"]["y"]["ac1"] == 1.0 and out["per_arm"]["y"]["kappa"] is None
+    assert out["per_arm"]["x"]["ac1"] == 1.0
+    # q matters: same data, q=2 vs q=3 gives different chance agreement
+    j2, h2 = ["real_other_bug", "real_other_bug", "false_alarm", "real_other_bug"], ["real_other_bug", "false_alarm", "false_alarm", "real_other_bug"]
+    q3 = judge.calibrate(j2, h2)["ac1"]
+    q2 = judge.calibrate(j2, h2, categories=("real_other_bug", "false_alarm"))["ac1"]
+    # hand-computed: po=.75, sum p(1-p)=.46875; q=3 -> .515625/.765625, q=2 -> .28125/.53125
+    assert abs(q3 - 0.515625 / 0.765625) < 1e-9 and abs(q2 - 0.28125 / 0.53125) < 1e-9
+
+
+def test_calibrate_rejects_labels_outside_categories():
+    import pytest
+    with pytest.raises(ValueError):
+        judge.calibrate(["a"], ["a"])
 
 
 def test_calibrate_length_mismatch_raises():
     import pytest
     with pytest.raises(ValueError):
-        judge.calibrate(["a"], ["a", "b"])
+        judge.calibrate(["real_other_bug"], ["real_other_bug", "false_alarm"])
     with pytest.raises(ValueError):
-        judge.calibrate(["a"], ["a"], arms=["x", "y"])
+        judge.calibrate(["real_other_bug"], ["real_other_bug"], arms=["x", "y"])
 
 
 def test_ppi_perfect_judge_matches_classical():

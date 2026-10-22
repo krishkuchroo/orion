@@ -67,7 +67,7 @@ def classify(finding: dict, *, ask) -> dict:
     return {"label": label or "unsure", "raw_reply": reply, "parsed": label is not None}
 
 
-def _agreement(a, b) -> dict:
+def _agreement(a, b, categories) -> dict:
     n = len(a)
     if n == 0:
         return {"n": 0, "agreement": None, "kappa": None, "ac1": None}
@@ -77,21 +77,28 @@ def _agreement(a, b) -> dict:
     pe_k = sum((ca[k] / n) * (cb[k] / n) for k in cats)
     kappa = None if pe_k >= 1 else (po - pe_k) / (1 - pe_k)
     ac1 = None
-    if len(cats) >= 2:
+    q = len(categories)  # fixed label-scale size, not the number observed (comparable across arms)
+    if q >= 2:
         pi = {k: (ca[k] + cb[k]) / (2 * n) for k in cats}
-        pe_g = sum(p * (1 - p) for p in pi.values()) / (len(cats) - 1)
+        pe_g = sum(p * (1 - p) for p in pi.values()) / (q - 1)
         ac1 = None if pe_g >= 1 else (po - pe_g) / (1 - pe_g)
     return {"n": n, "agreement": po, "kappa": kappa, "ac1": ac1}
 
 
-def calibrate(judge_labels, human_labels, arms=None) -> dict:
+def calibrate(judge_labels, human_labels, arms=None, categories=LABELS) -> dict:
     """Cohen's kappa and Gwet's AC1 between judge and human labels (>=100 blinded findings in the real
     run; `min_n_met` says whether that holds). `arms`, if given, is aligned with the labels and adds a
-    `per_arm` breakdown (self-preference check). Undefined values are None."""
+    `per_arm` breakdown (self-preference check). AC1 uses q = len(categories) (default: the three judge
+    labels), fixed across arms; a label outside `categories` raises ValueError. kappa is None when
+    expected agreement is 1 (genuinely undefined). Undefined values are None."""
+    categories = tuple(dict.fromkeys(categories))
     j, h = list(judge_labels), list(human_labels)
+    bad = (set(j) | set(h)) - set(categories)
+    if bad:
+        raise ValueError(f"labels outside categories: {sorted(map(str, bad))}")
     if len(j) != len(h):
         raise ValueError(f"label length mismatch: {len(j)} judge vs {len(h)} human")
-    out = _agreement(j, h)
+    out = _agreement(j, h, categories)
     out["min_n_met"] = out["n"] >= 100
     if arms is not None:
         arms = list(arms)
@@ -100,7 +107,7 @@ def calibrate(judge_labels, human_labels, arms=None) -> dict:
         per = {}
         for arm in sorted(set(arms), key=str):
             idx = [i for i, x in enumerate(arms) if x == arm]
-            per[arm] = _agreement([j[i] for i in idx], [h[i] for i in idx])
+            per[arm] = _agreement([j[i] for i in idx], [h[i] for i in idx], categories)
         out["per_arm"] = per
     return out
 
