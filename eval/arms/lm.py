@@ -27,8 +27,15 @@ psutil RSS does NOT include MLX's Metal allocations (a 1 GiB mx array left RSS f
 mx.get_active_memory() read 1024 MB). The model's memory is therefore reported separately, as an
 event line with MLX's own peak (`mx.get_peak_memory`), when MLX is the backend.
 
+OWASP case mode (Task F2): given an OWASP `case`, discovery judges only that case. The arm reads the
+scan's CandidateFlows whose path touches the case's file (`eval.owasp.case_flows`) after the build and
+before the model loads, and passes them as `discover_lm(..., flows=...)`. No flow touches the file ->
+flows [] -> a genuine "nothing flagged" (ok, `[]`); a failed read of those flows is "crashed", like a
+failed flow read inside discover_lm.
+
 Seams (tests replace them; nothing in the tests touches Neo4j, Joern, MLX or a model):
-`_build_graph`, `_scan_problem`, `_pathfind_error`, `_load_model`, `_discover`, `_free_model_memory`.
+`_build_graph`, `_scan_problem`, `_pathfind_error`, `_case_flows`, `_load_model`, `_discover`,
+`_free_model_memory`.
 """
 import gc
 import os
@@ -106,10 +113,16 @@ def _free_model_memory() -> None:
         mx.clear_cache()
 
 
-def _flows_for(case_id):
-    """Task F2 hook: the OWASP case mode turns `case_id` into slice-shaped flows. Until then every
-    run reads the scan's own CandidateFlows (None)."""
-    return None
+def _case_flows(scan_id: str, case: dict) -> list:
+    """OWASP case mode: the scan's CandidateFlows whose path touches `case['file']`, slice-shaped
+    (eval.owasp.case_flows over a GraphDB opened and closed here). Raises on a graph error."""
+    from orion.graphdb import GraphDB
+    from eval import owasp
+    db = GraphDB()
+    try:
+        return owasp.case_flows(db, scan_id, case)
+    finally:
+        db.close()
 
 
 # ---- helpers ------------------------------------------------------------------------------------
@@ -242,7 +255,7 @@ def _write_findings(json_out: str, leads, on_line):
 # ---- the arm ------------------------------------------------------------------------------------
 
 def orion_lm_arm(*, arm, repo_dir, model_tag, json_out, on_line, on_start, graph_cache, run_no,
-                 repo_id, commit_sha, case_id=None, hung_seconds=DEFAULT_HUNG_SECONDS,
+                 repo_id, commit_sha, case_id=None, case=None, hung_seconds=DEFAULT_HUNG_SECONDS,
                  **_ignored) -> ArmResult:
     """Run one orion-lm / orion-lm-base attempt in-process and return its ArmResult.
 
@@ -256,14 +269,17 @@ def orion_lm_arm(*, arm, repo_dir, model_tag, json_out, on_line, on_start, graph
                  all run numbers of one commit reuse one graph
     run_no       the run number; it is the model's sampling seed (spec §6)
     repo_id, commit_sha  the cache key
-    case_id      accepted and passed to the F2 case hook (`_flows_for`); flows stay None for now
+    case_id      the run's OWASP case id ("" / None for a manifest row); recorded by run_one
+    case         an OWASP case (eval/dataset/owasp_sample.json) or None: judge only its flows
+                 (`_case_flows`); None works the scan's own top CandidateFlows
     hung_seconds watchdog limit: that long with no step or event sets `stop` -> status "hung"
     _ignored     effort / usage_log / base_env from the shared launcher kwargs (unused here)
 
     Status: "ok" (some batches may have failed: a summary line says how many); "hung" (watchdog
     fired; the forced final's leads are still written); "crashed" (discovery raised -- traceback head
     to on_line -- or, read from its events, the flow read failed or every batch failed -- or the scan
-    record says pathfind failed at build; no findings file in any of these). A missing model path
+    record says pathfind failed at build -- or the case's flows could not be read; no findings file in
+    any of these). A missing model path
     raises ValueError before anything runs; a build or model-load failure propagates to run_one.
     """
     if not model_tag or not os.path.exists(model_tag):
@@ -304,6 +320,15 @@ def orion_lm_arm(*, arm, repo_dir, model_tag, json_out, on_line, on_start, graph
                 f"({flow_error}); rebuild it or run "
                 f"`orion reanalyze --scan-id {scan_id} --engine lm`")
         return ArmResult(status="crashed", findings_path=None, usage=[], steps=[])
+    flows = None   # None: discover_lm reads the scan's top CandidateFlows itself
+    if case is not None:
+        try:
+            flows = _case_flows(scan_id, case)
+        except Exception as exc:
+            on_line(f"orion-lm: discovery crashed: loading the flows of case {case.get('case_id')} "
+                    f"failed ({exc.__class__.__name__}: {exc})"[:2000])
+            return ArmResult(status="crashed", findings_path=None, usage=[], steps=[])
+        on_line(f"orion-lm: case {case.get('case_id')}: {len(flows)} CandidateFlow(s) touch {case['file']}")
 
     # 2. model: loaded only now, after Joern is gone; seed = run number.
     on_line(f"orion-lm: loading model {model_tag} (seed {run_no})")
@@ -329,7 +354,7 @@ def orion_lm_arm(*, arm, repo_dir, model_tag, json_out, on_line, on_start, graph
         with _Watchdog(hung_seconds, stop) as watchdog:
             try:
                 leads = _discover(scan_id, repo_dir, on_event, model=model, on_step=on_step,
-                                  stop=stop, flows=_flows_for(case_id))
+                                  stop=stop, flows=flows)
             except Exception as exc:
                 status = "crashed"
                 on_line(f"orion-lm: discovery crashed ({exc.__class__.__name__}: {exc}); "

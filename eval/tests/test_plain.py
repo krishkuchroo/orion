@@ -91,3 +91,30 @@ def test_config_home_is_per_cli():
     assert plain.config_home("plain-opus5", "/c") == "/c/claude"
     assert plain.config_home("plain-sonnet5", "/c") == "/c/claude"
     assert plain.CONFIG_ROOT.endswith(os.path.join("eval", ".config"))
+
+
+CASE = {"case_id": "BenchmarkTest00001", "category": "sqli", "real": False, "cwe": "CWE-89",
+        "file": "testcode/BenchmarkTest00001.py",
+        "entry": "POST /benchmark/sqli-00/BenchmarkTest00001 -> BenchmarkTest00001_post"}
+
+
+def _cmd_for(tmp_path, arm, model_tag, **kw):
+    cap = {}
+
+    def fake_popen(cmd, **k):
+        cap["cmd"] = cmd
+        return FakePopen()
+    plain.plain_arm(arm=arm, repo_dir=str(tmp_path / "repo"), model_tag=model_tag, effort="xhigh",
+                    json_out=str(tmp_path / "o/findings.json"), usage_log=str(tmp_path / "u.jsonl"),
+                    shim_dir="/shim", base_env={"PATH": "/bin"}, on_line=lambda l: None,
+                    popen=fake_popen, config_root=str(tmp_path / "cfg"), **kw)
+    return cap["cmd"]
+
+
+def test_plain_arms_use_the_case_prompt_when_the_item_has_a_case(tmp_path):
+    from eval.arms.prompt import case_prompt
+    for arm, tag in (("plain-opus5", "claude-opus-5"), ("plain-gpt", "gpt-5.6-sol")):
+        cmd = _cmd_for(tmp_path, arm, tag, case=CASE)
+        assert case_prompt(CASE) in cmd and plain.TASK_PROMPT not in cmd
+        cmd = _cmd_for(tmp_path, arm, tag)                  # no case: the whole-repo task
+        assert plain.TASK_PROMPT in cmd

@@ -275,3 +275,108 @@ def test_main_refuses_invalid_manifest_before_mirroring(tmp_path, monkeypatch, c
     assert run.main(argv) == 2
     assert mirrored == [] and calls == []
     assert "patched_commit" in capsys.readouterr().out
+
+
+# ---- OWASP items (Task F2) ---------------------------------------------------------------------
+
+def _owasp_case(n, cat="sqli", real=True, lang="python"):
+    file = (f"testcode/BenchmarkTest{n:05d}.py" if lang == "python"
+            else f"src/main/java/org/owasp/benchmark/testcode/BenchmarkTest{n:05d}.java")
+    return {"case_id": f"BenchmarkTest{n:05d}", "category": cat, "real": real, "cwe": "CWE-89",
+            "file": file, "entry": f"POST /{cat}-00/BenchmarkTest{n:05d} -> h"}
+
+
+def _owasp_file(tmp_path, **over):
+    import json
+    data = {"version": 1, "seed": 0, "n_per_lang": 2, "benchmarks": [
+        {"id": "owasp-java", "language": "java", "benchmark_version": "1.2",
+         "repo_url": "https://github.com/OWASP-Benchmark/BenchmarkJava", "pinned_sha": "a" * 40,
+         "cases": [_owasp_case(1, lang="java"), _owasp_case(7, real=False, lang="java")]},
+        {"id": "owasp-python", "language": "python", "benchmark_version": "0.1",
+         "repo_url": "https://github.com/OWASP-Benchmark/BenchmarkPython", "pinned_sha": "b" * 40,
+         "cases": [_owasp_case(1), _owasp_case(3, real=False)]}]}
+    data.update(over)
+    p = tmp_path / "owasp_sample.json"
+    p.write_text(json.dumps(data))
+    return str(p)
+
+
+def _spy_main(monkeypatch, tmp_path):
+    from eval import manifest, preflight, shim_setup
+    seen, mirrored = [], []
+    monkeypatch.setattr(manifest, "split_repos", lambda *a, **k: set())
+    monkeypatch.setattr(run.repo, "mirror", lambda url, d, **k: mirrored.append((url, d)))
+    monkeypatch.setattr(preflight, "check", lambda: [])
+    monkeypatch.setattr(shim_setup, "shim_dir", lambda: str(tmp_path))
+    monkeypatch.setattr(run, "build_launcher", lambda **k: None)
+    monkeypatch.setattr(run, "git_head", lambda *a: "c")
+
+    def fake_run_one(conn, *, arm, repo_meta, run_no, **kw):
+        seen.append((arm, repo_meta, run_no))
+        a = db.next_attempt(conn, arm=arm, repo=repo_meta["id"], commit_sha=repo_meta["commit_sha"],
+                            case_id=repo_meta["case_id"], run_no=run_no)
+        rid = db.start_run(conn, arm=arm, repo=repo_meta["id"], tier=repo_meta["tier"], run_no=run_no,
+                           model_tag="m", cli_versions="", orion_commit="c",
+                           commit_sha=repo_meta["commit_sha"], case_id=repo_meta["case_id"], attempt_no=a)
+        db.finish_run(conn, rid, "ok")
+        return "ok"
+    monkeypatch.setattr(run, "run_one", fake_run_one)
+    return seen, mirrored
+
+
+def test_main_queues_owasp_items_with_distinct_case_ids(tmp_path, monkeypatch):
+    seen, mirrored = _spy_main(monkeypatch, tmp_path)
+    argv = ["--arm", "plain-opus5", "--runs", "3", "--manifest", "", "--owasp", _owasp_file(tmp_path),
+            "--db", str(tmp_path / "t.db"), "--mirror-root", str(tmp_path / "mirrors")]
+    assert run.main(argv) == 0
+    # one mirror per benchmark repo, not one per case
+    assert mirrored == [("https://github.com/OWASP-Benchmark/BenchmarkJava", str(tmp_path / "mirrors/owasp-java")),
+                        ("https://github.com/OWASP-Benchmark/BenchmarkPython", str(tmp_path / "mirrors/owasp-python"))]
+    keys = [(m["id"], m["commit_sha"], m["case_id"], n) for _, m, n in seen]
+    assert keys == [("owasp-java", "a" * 40, "BenchmarkTest00001", 1), ("owasp-java", "a" * 40, "BenchmarkTest00007", 1),
+                    ("owasp-python", "b" * 40, "BenchmarkTest00001", 1), ("owasp-python", "b" * 40, "BenchmarkTest00003", 1)]
+    assert len(set(keys)) == 4                                  # each case is its own queue item, R = 1
+    for _, m, _ in seen:
+        assert (m["tier"], m["commit_kind"]) == ("owasp", "owasp")
+        assert m["case"]["case_id"] == m["case_id"] and m["case"]["file"]
+        assert m["mirror_dir"] == str(tmp_path / "mirrors" / m["id"])
+    conn = db.connect(str(tmp_path / "t.db"))
+    assert sorted(conn.execute("SELECT repo, case_id FROM runs").fetchall()) == \
+        [("owasp-java", "BenchmarkTest00001"), ("owasp-java", "BenchmarkTest00007"),
+         ("owasp-python", "BenchmarkTest00001"), ("owasp-python", "BenchmarkTest00003")]
+    assert run.main(argv) == 0 and len(seen) == 4               # all terminal: nothing requeued
+
+
+def test_main_runs_manifest_rows_and_owasp_items_in_one_invocation(tmp_path, monkeypatch):
+    seen, _ = _spy_main(monkeypatch, tmp_path)
+    import json
+    m = tmp_path / "m.json"
+    m.write_text(json.dumps({"repos": [{"id": "r1", "repo_url": "u", "tier": "headline",
+                                        "vulnerable_commit": "v1", "patched_commit": "p1",
+                                        "cwe": "CWE-89", "fix_sites": [],
+                                        "accepted_entry_points": [], "labelers": ["k"]}]}))
+    argv = ["--arm", "plain-opus5", "--runs", "2", "--manifest", str(m), "--owasp", _owasp_file(tmp_path),
+            "--owasp-runs", "1", "--db", str(tmp_path / "t.db")]
+    assert run.main(argv) == 0
+    kinds = [(meta["commit_kind"], n) for _, meta, n in seen]
+    assert kinds.count(("vulnerable", 1)) == kinds.count(("vulnerable", 2)) == 1
+    assert kinds.count(("patched", 1)) == kinds.count(("patched", 2)) == 1
+    assert kinds.count(("owasp", 1)) == 4 and ("owasp", 2) not in kinds
+
+
+@pytest.mark.parametrize("bad", ["duplicate", "no_sha"])
+def test_main_refuses_an_invalid_owasp_sample_before_mirroring(tmp_path, monkeypatch, capsys, bad):
+    import json
+    seen, mirrored = _spy_main(monkeypatch, tmp_path)
+    path = _owasp_file(tmp_path)
+    data = json.loads(open(path).read())
+    if bad == "duplicate":
+        data["benchmarks"][1]["cases"].append(_owasp_case(3))
+    else:
+        data["benchmarks"][0]["pinned_sha"] = ""
+    open(path, "w").write(json.dumps(data))
+    argv = ["--arm", "plain-opus5", "--manifest", "", "--owasp", path, "--db", str(tmp_path / "t.db")]
+    assert run.main(argv) == 2
+    assert mirrored == [] and seen == []
+    out = capsys.readouterr().out
+    assert ("duplicate case_id" in out) if bad == "duplicate" else ("pinned_sha" in out)

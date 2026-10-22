@@ -8,7 +8,7 @@ from . import ArmResult
 from ..usage import normalize_usage
 from .env import codex_env, ensure_codex_home, plain_claude_env
 from .launch import stream_subprocess
-from .prompt import TASK_PROMPT, validate_findings
+from .prompt import TASK_PROMPT, case_prompt, validate_findings
 
 # The event type that carries a model-call usage summary, per CLI.
 _USAGE_EVENT = {"codex": "turn.completed", "claude": "result"}
@@ -36,9 +36,11 @@ CLAUDE_DISALLOWED = ["WebFetch", "WebSearch", "Task", "Agent", "ListAgents", "Se
                      "EnterWorktree", "ExitWorktree", "ReportFindings", "Skill", "ToolSearch"]
 
 
-def _build_cmd(arm: str, repo_dir: str, model_tag: str, effort: str) -> list[str]:
+def _build_cmd(arm: str, repo_dir: str, model_tag: str, effort: str,
+               prompt: str = TASK_PROMPT) -> list[str]:
     """The frontier arm's command line. Flags verified on claude 2.1.302 / codex-cli 0.155.1
-    and smoke-tested for the network lockout on 2026-10-18 (eval/README.md)."""
+    and smoke-tested for the network lockout on 2026-10-18 (eval/README.md). `prompt` is
+    TASK_PROMPT (whole repo) or an OWASP case's CASE_PROMPT (one file, Task F2)."""
     if arm == "plain-gpt":
         # Codex: non-interactive, JSON events (carry token usage), cwd = repo.
         # workspace-write + network_access=false: the agent can write findings.json into the
@@ -54,12 +56,12 @@ def _build_cmd(arm: str, repo_dir: str, model_tag: str, effort: str) -> list[str
                 "--disable", "plugins", "--disable", "remote_plugin", "--disable", "apps",
                 "-c", "web_search=disabled",
                 "-c", "approval_policy=never",  # non-interactive: nothing can wait on a prompt
-                "--skip-git-repo-check", "--cd", repo_dir, TASK_PROMPT]
+                "--skip-git-repo-check", "--cd", repo_dir, prompt]
         return cmd
     # Claude Code arms (plain-sonnet5 / plain-opus5): pinned model + effort; no user/project/
     # local settings, no MCP servers, no web tools; Bash sandboxed with an empty network
     # allowlist (claude_settings.json).
-    cmd = ["claude", "-p", TASK_PROMPT, "--output-format", "stream-json", "--verbose",
+    cmd = ["claude", "-p", prompt, "--output-format", "stream-json", "--verbose",
            "--model", model_tag]
     if effort:
         cmd += ["--effort", effort]
@@ -132,10 +134,14 @@ def _capture_findings(repo_dir: str, json_out: str, on_line) -> "str | None":
 
 
 def plain_arm(*, arm, repo_dir, model_tag, effort, json_out, usage_log, shim_dir, base_env,
-              on_line, popen=subprocess.Popen, on_start=None, config_root=CONFIG_ROOT) -> ArmResult:
+              on_line, popen=subprocess.Popen, on_start=None, config_root=CONFIG_ROOT,
+              case=None) -> ArmResult:
+    """One frontier-arm run. `case` (an OWASP case from eval/dataset/owasp_sample.json) switches the
+    task to CASE_PROMPT for that case's file/entry/category; None is the whole-repo TASK_PROMPT."""
     os.makedirs(os.path.dirname(json_out), exist_ok=True)
     source = _usage_source(arm)
-    cmd = _build_cmd(arm, repo_dir, model_tag, effort)
+    prompt = case_prompt(case) if case else TASK_PROMPT
+    cmd = _build_cmd(arm, repo_dir, model_tag, effort, prompt)
     home = config_home(arm, config_root)
     log = None
     try:

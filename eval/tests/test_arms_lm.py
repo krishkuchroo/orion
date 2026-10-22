@@ -434,3 +434,83 @@ def test_recorded_pathfind_summary_lets_the_run_proceed(tmp_path, monkeypatch):
     _record(monkeypatch, PATHFIND_OK)
     assert _arm(tmp_path).status == "ok"
     assert rec["order"] == ["build", "load", "discover", "release"]
+
+
+# ---- OWASP case mode (Task F2): only the case's CandidateFlows are judged ----------------------
+
+OWASP_CASE = {"case_id": "BenchmarkTest00001", "category": "sqli", "real": True, "cwe": "CWE-89",
+              "file": "app.py", "entry": "POST /sqli-00/BenchmarkTest00001 -> handler"}
+_REAL_CASE_FLOWS = lm._case_flows
+
+
+def test_case_mode_passes_the_cases_flows_to_discover(tmp_path, monkeypatch):
+    flow = {"flow_id": "F3", "rank": 3, "nodes": [{"file": "app.py", "line": 3}]}
+    seen = {}
+
+    def fake_discover(scan_id, repo, on_event, **kw):
+        seen.update(kw)
+        return []
+    rec = _seams(monkeypatch, discover=fake_discover)
+
+    def case_flows(scan_id, case):
+        rec["order"].append("case_flows")
+        seen["asked"] = (scan_id, case)
+        return [flow]
+    monkeypatch.setattr(lm, "_case_flows", case_flows)
+    lines = []
+    res = _arm(tmp_path, case_id="BenchmarkTest00001", case=OWASP_CASE, on_line=lines.append)
+    assert res.status == "ok"
+    assert seen["flows"] == [flow] and seen["asked"] == ("s1", OWASP_CASE)
+    assert rec["order"] == ["build", "case_flows", "load", "discover", "release"]
+    assert any("1 CandidateFlow(s) touch app.py" in l for l in lines)
+
+
+def test_case_with_zero_flows_is_a_genuine_nothing_flagged(tmp_path, monkeypatch):
+    """The real discover_lm with flows=[]: no batch runs, status ok, findings [] (not a crash)."""
+    monkeypatch.setattr(lm, "_case_flows", lambda scan_id, case: [])
+    model = _Model(fail_calls=())
+    import orion.graphdb
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    monkeypatch.setattr(lm, "_build_graph", lambda repo_dir, on_event: "s1")
+    monkeypatch.setattr(lm, "_load_model", lambda path, **kw: model)
+    monkeypatch.setattr(orion.graphdb, "GraphDB", lambda: _GraphStub(n=2))
+    monkeypatch.setattr(lm, "_pathfind_error", lambda sid: None)
+    lines = []
+    res = _arm(tmp_path, repo_dir=str(tree), on_line=lines.append, case=OWASP_CASE)
+    assert res.status == "ok" and json.loads(open(res.findings_path).read()) == []
+    assert model.calls == 0 and res.steps == []          # the scan's 2 other flows were never judged
+    assert not any("crashed" in l for l in lines)
+
+
+def test_case_flow_load_failure_is_crashed_before_the_model_loads(tmp_path, monkeypatch):
+    rec = _seams(monkeypatch)
+
+    def boom(scan_id, case):
+        raise RuntimeError("ServiceUnavailable: Neo4j is down")
+    monkeypatch.setattr(lm, "_case_flows", boom)
+    lines = []
+    res = _arm(tmp_path, case=OWASP_CASE, on_line=lines.append)
+    assert res.status == "crashed" and res.findings_path is None
+    assert "load" not in rec["order"]
+    assert any("crashed" in l and "Neo4j is down" in l for l in lines)
+
+
+def test_default_case_flows_filters_the_scans_flows_by_the_case_file(monkeypatch):
+    import orion.graphdb
+
+    class Stub(_GraphStub):
+        closed = False
+
+        def run_cypher(self, scan_id, query, *, limit=None, **kw):
+            res = super().run_cypher(scan_id, query, limit=limit, **kw)
+            if "CpgCall" in query and "rows" in res:   # flow c1 in the case's file, flow c0 elsewhere
+                for r in res["rows"]:
+                    r["file"] = "app.py" if r["uid"] == "c1" else "lib/other.py"
+            return res
+
+        def close(self):
+            Stub.closed = True
+    monkeypatch.setattr(orion.graphdb, "GraphDB", lambda: Stub(n=2))
+    flows = _REAL_CASE_FLOWS("s1", OWASP_CASE)
+    assert [f["flow_id"] for f in flows] == ["F1"] and Stub.closed

@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 import time
 
-from . import db, queue, repo
+from . import db, owasp, queue, repo
 from .resources import PhaseSampler
 
 # The five study arms (design 2026-10-18 §5.4). orion-lm* run in-process (eval/arms/lm.py);
@@ -215,7 +215,11 @@ def _leak_guard(tree):
 
 
 def build_launcher(*, base_env, shim_dir, graph_cache, _plain=_default_plain, _lm=_default_lm,
-                   _export=repo.export_tree, tree_root=None):
+                   _export=repo.export_tree, _strip=owasp.strip_answers, tree_root=None):
+    """The launcher run_one calls: export the commit to a fresh tree (no .git), run the arm, delete the
+    tree. An OWASP item (repo_meta["case"] set, Task F2) has its answer files stripped right after the
+    export, for every arm, and its case passed to the arm (plain: CASE_PROMPT; orion-lm: the case's
+    flows); a manifest item has case None."""
     tree_root = tree_root or os.path.join(tempfile.gettempdir(), "orion-eval-trees")
 
     def launcher(arm, repo_meta, model_tag, on_line, *, effort, on_start):
@@ -228,9 +232,14 @@ def build_launcher(*, base_env, shim_dir, graph_cache, _plain=_default_plain, _l
         try:
             os.makedirs(run_dir, exist_ok=True)
             _export(repo_meta["mirror_dir"], sha, tree)
+            case = repo_meta.get("case")
+            if case is not None:   # OWASP ships its answers next to the code
+                removed = _strip(tree)
+                on_line(f"owasp: stripped {len(removed)} answer file(s) from the tree: "
+                        + ", ".join(removed[:20]) + (" ..." if len(removed) > 20 else ""))
             common = dict(arm=arm, repo_dir=tree, model_tag=model_tag, effort=effort,
                           json_out=json_out, usage_log=usage_log, base_env=base_env,
-                          on_line=on_line, on_start=on_start)
+                          on_line=on_line, on_start=on_start, case=case)
             if arm in LM_MODEL_FLAGS:
                 # in-process orion-lm arms: model_tag is the local model path
                 res = _lm(graph_cache=graph_cache, run_no=repo_meta.get("run_no", 1),
@@ -253,7 +262,13 @@ def main(argv=None, sleep=time.sleep):
     from .shim_setup import shim_dir as _shim_dir
     ap = argparse.ArgumentParser()
     ap.add_argument("--arm", action="append", choices=ARMS)
-    ap.add_argument("--manifest", default="eval/dataset/manifest.json")
+    ap.add_argument("--manifest", default="eval/dataset/manifest.json",
+                    help="manifest v2 (vulnerable + patched commit per row); '' runs no manifest rows")
+    ap.add_argument("--owasp", metavar="PATH",
+                    help="OWASP sample (eval/dataset/owasp_sample.json): add one single-commit item per "
+                         "case, under repo id owasp-java / owasp-python, tier 'owasp'")
+    ap.add_argument("--owasp-runs", type=int, default=1,
+                    help="runs per arm per OWASP case (spec 5.4: R = 1); --runs is for manifest rows")
     ap.add_argument("--db", default="eval/runs.db")
     ap.add_argument("--runs", type=int, default=3)
     ap.add_argument("--tree-root", default=os.path.join(tempfile.gettempdir(), "orion-eval-trees"))
@@ -279,13 +294,25 @@ def main(argv=None, sleep=time.sleep):
             print(f"arm {arm} needs {flag} PATH (the local model): {why}", flush=True)
             return 2
         model_tags[arm] = os.path.abspath(path)
-    data = manifest.load(args.manifest)
-    errors = manifest.validate(data, split_repos=manifest.split_repos())
+    data = manifest.load(args.manifest) if args.manifest else {"repos": []}
+    errors = manifest.validate(data, split_repos=manifest.split_repos()) if data["repos"] else []
     if errors:  # the test set must be clean to run: refuse before mirroring anything
         print(f"manifest {args.manifest} is invalid ({len(errors)} error(s)):", flush=True)
         for e in errors:
             print(f"  {e}", flush=True)
         return 2
+    benchmarks = []
+    if args.owasp:  # validated before anything is mirrored, like the manifest
+        sample = owasp.load_sample(args.owasp)
+        errors = owasp.validate_sample(sample)
+        clash = sorted({b.get("id") for b in sample["benchmarks"]} & {r.get("id") for r in data["repos"]})
+        errors += [f"benchmark id {c} is also a manifest row id" for c in clash]
+        if errors:
+            print(f"OWASP sample {args.owasp} is invalid ({len(errors)} error(s)):", flush=True)
+            for e in errors:
+                print(f"  {e}", flush=True)
+            return 2
+        benchmarks = sample["benchmarks"]
     repos = data["repos"]  # [{id, repo_url, tier, ...}]
     good = []
     for r in repos:  # mirror once per repo, then pin the commit to check out
@@ -310,6 +337,20 @@ def main(argv=None, sleep=time.sleep):
         for sha, kind in r["commits"]:
             items.setdefault(r["id"], []).append((sha, kind, case))
             meta_by_key[(r["id"], sha, case)] = dict(r, commit_sha=sha, commit_kind=kind, case_id=case)
+    owasp_items = {}
+    for b in benchmarks:  # one mirror per benchmark repo; every case is a single-commit item on its pin
+        mirror_dir = os.path.join(args.mirror_root, b["id"])
+        try:
+            repo.mirror(b["repo_url"], mirror_dir)
+        except Exception as e:
+            print(f"SKIPPING OWASP benchmark {b['id']}: {e}", flush=True)
+            continue
+        sha = b["pinned_sha"]
+        for c in b["cases"]:
+            owasp_items.setdefault(b["id"], []).append((sha, "owasp", c["case_id"]))
+            meta_by_key[(b["id"], sha, c["case_id"])] = {
+                "id": b["id"], "repo_url": b["repo_url"], "tier": "owasp", "mirror_dir": mirror_dir,
+                "commit_sha": sha, "commit_kind": "owasp", "case_id": c["case_id"], "case": dict(c)}
     conn = db.connect(args.db)
     versions = "; ".join(f"{r['tool']}={r['detail']}" for r in preflight.check())
     orion_commit = git_head()
@@ -317,7 +358,8 @@ def main(argv=None, sleep=time.sleep):
     launcher = build_launcher(base_env=dict(os.environ), shim_dir=_shim_dir(),
                               graph_cache=graph_cache, tree_root=args.tree_root)
     while True:  # a usage-limit abort pauses, then re-plans: the key comes back as a new attempt
-        todo = queue.pending(conn, queue.plan(arms, items, args.runs))
+        todo = queue.pending(conn, queue.plan(arms, items, args.runs)
+                             + queue.plan(arms, owasp_items, args.owasp_runs))
         if not todo:
             break
         for arm, repo_id, sha, case, n in todo:

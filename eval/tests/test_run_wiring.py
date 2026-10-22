@@ -178,3 +178,70 @@ def test_leak_guard_rejects_tree_under_repo_marker(tmp_path):
     launcher = _launcher(tmp_path, tree_root=str(tmp_path / "t"), _export=lambda *a, **k: None)
     with pytest.raises(RuntimeError, match="CLAUDE.md"):
         launcher("plain-opus5", _meta("c1"), "opus", lambda l: None, effort="", on_start=None)
+
+
+# ---- OWASP items (Task F2): answers stripped right after the export, for every arm -------------
+
+OWASP_CASE = {"case_id": "BenchmarkTest00001", "category": "sqli", "real": True, "cwe": "CWE-89",
+              "file": "testcode/BenchmarkTest00001.py",
+              "entry": "POST /benchmark/sqli-00/BenchmarkTest00001 -> BenchmarkTest00001_post"}
+
+
+def _owasp_meta(**kw):
+    return _meta("pin1", id="owasp-python", commit_kind="owasp", tier="owasp",
+                 case_id="BenchmarkTest00001", case=OWASP_CASE, **kw)
+
+
+def _export_with_answers(mirror, sha, dest, **kw):
+    os.makedirs(os.path.join(dest, "testcode"))
+    open(os.path.join(dest, "expectedresults-0.1.csv"), "w").write("BenchmarkTest00001,sqli,true,89\n")
+    open(os.path.join(dest, "testcode", "BenchmarkTest00001.py"), "w").write("x")
+
+
+@pytest.mark.parametrize("arm", ["plain-opus5", "plain-sonnet5", "plain-gpt", "orion-lm", "orion-lm-base"])
+def test_launcher_strips_answers_for_owasp_items_for_every_arm(tmp_path, monkeypatch, arm):
+    monkeypatch.chdir(tmp_path)
+    seen, lines = {}, []
+
+    def arm_fn(**kw):
+        tree = kw["repo_dir"]
+        seen.update(kw, files=sorted(os.listdir(tree)))
+        return ArmResult(status="ok", findings_path=None, usage=[])
+    launcher = _launcher(tmp_path, _plain=arm_fn, _lm=arm_fn, _export=_export_with_answers)
+    launcher(arm, _owasp_meta(), "m", lines.append, effort="", on_start=None)
+    assert seen["files"] == ["testcode"]                     # the answer file is gone before the arm runs
+    assert seen["case"] == OWASP_CASE                        # the case's fields reach the arm
+    assert any("expectedresults-0.1.csv" in l for l in lines)
+
+
+def test_launcher_never_strips_a_manifest_item(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    seen = {}
+
+    def arm_fn(**kw):
+        seen.update(kw, files=sorted(os.listdir(kw["repo_dir"])))
+        return ArmResult(status="ok", findings_path=None, usage=[])
+    launcher = _launcher(tmp_path, _plain=arm_fn, _export=_export_with_answers,
+                         _strip=lambda tree: pytest.fail("stripped a manifest item"))
+    launcher("plain-opus5", _meta("c1"), "m", lambda l: None, effort="", on_start=None)
+    assert "expectedresults-0.1.csv" in seen["files"] and seen["case"] is None
+
+
+def test_launcher_calls_strip_right_after_the_export(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    order = []
+
+    def export(*a, **k):
+        order.append("export")
+        os.makedirs(a[2])
+
+    def strip(tree):
+        order.append("strip")
+        return []
+
+    def arm_fn(**kw):
+        order.append("arm")
+        return ArmResult(status="ok", findings_path=None, usage=[])
+    launcher = _launcher(tmp_path, _plain=arm_fn, _export=export, _strip=strip)
+    launcher("plain-gpt", _owasp_meta(), "m", lambda l: None, effort="", on_start=None)
+    assert order == ["export", "strip", "arm"]
