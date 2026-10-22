@@ -126,7 +126,8 @@ def test_path_levels_partial():
 
 
 def test_match_run_path_level_json():
-    f = [{"file": "app.js", "function": "handler", "line": 100, "cwe": "CWE-89",
+    # a key with fix_sites is matched against its sites (db.js:20), not the legacy range
+    f = [{"file": "db.js", "function": "query", "line": 22, "cwe": "CWE-89",
           "path": [{"file": "app.js", "function": "handler", "line": 100, "role": "source"}]}]
     out = match.match_run(f, [PAK])
     assert out[0]["vuln_id"] == "v1"
@@ -235,3 +236,33 @@ def test_fix_traversal_honours_end_line():
     beyond = {"path": [{"file": "db.js", "function": "q", "line": 51}]}
     assert match.path_levels(inside, key)["fix_traversal"] is True
     assert match.path_levels(beyond, key)["fix_traversal"] is False
+
+
+# ---- I3: a manifest row's key = ANY fix site; patched runs use the patched-side sites ------------
+
+def test_l1_fix_site_honours_end_line():
+    fs = {"file": "app.js", "line": 50, "end_line": 70, "function": "sanitize"}
+    assert match.l1_fix_site({"file": "app.js", "function": "x", "line": 80}, fs)      # 70 + 10
+    assert not match.l1_fix_site({"file": "app.js", "function": "x", "line": 81}, fs)
+    assert match.l1_fix_site({"file": "app.js", "function": "x", "line": 40}, fs)      # 50 - 10
+    assert not match.l1_fix_site({"file": "app.js", "function": "x", "line": 39}, fs)
+    assert match.l1_fix_site({"file": "app.js", "function": "x", "line": 60}, {**fs, "end_line": None})
+
+
+MULTI = {"id": "CVE-1", "cwe": "CWE-89", "fix_sites": [
+    {"file": "a.js", "line": 10, "end_line": 12, "function": "f"},
+    {"file": "lib/b.js", "line": 300, "end_line": 330, "function": "g"}]}
+
+
+def test_l1_credits_any_fix_site():
+    assert match.l1({"file": "a.js", "function": None, "line": 22}, MULTI)
+    assert match.l1({"file": "lib/b.js", "function": None, "line": 340}, MULTI)
+    assert match.l1({"file": "lib/b.js", "function": "g", "line": None}, MULTI)
+    assert not match.l1({"file": "lib/b.js", "function": "f", "line": 100}, MULTI)   # f lives in a.js
+    assert not match.l1({"file": "c.js", "function": "f", "line": 11}, MULTI)
+    assert not match.l1({"file": "a.js", "function": None, "line": 11}, {**MULTI, "fix_sites": []})
+
+
+def test_l2_with_a_site_key():
+    assert match.l2({"file": "a.js", "line": 11, "cwe": "CWE-89"}, MULTI)
+    assert not match.l2({"file": "a.js", "line": 11, "cwe": "CWE-79"}, MULTI)

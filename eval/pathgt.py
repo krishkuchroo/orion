@@ -4,7 +4,9 @@ Humans confirm this; F1's manifest stores it. Nothing here is a label until `lab
 
 Method (all graph logic is reused from `train.fixmap`, nothing is re-implemented):
 
-1. fix sites on the VULNERABLE scan (`fixmap.fix_sites`, side="vulnerable").
+1. fix sites on the VULNERABLE scan (`fixmap.fix_sites`, side="vulnerable"), and the same hunks on the
+   PATCHED scan (`fixmap.fix_sites(side="patched")`: `fix_sites_patched`, the patched commit's line
+   numbers, which a patched (false-alarm) run is matched against).
 2. flows through a fix site = vulnerable CandidateFlows whose `path_uids` contain a fix-site call uid.
 3. "gone on patched" = `fixmap.pair_yield`'s `flows_gone_on_patched` (cross-scan matcher on
    (file, diff-mapped line, call name); uids hash the scan_id so they are never compared across scans).
@@ -39,16 +41,19 @@ _Q_ENTRIES = ("MATCH (e:EntryPoint {scan_id:$scan_id})-[:ENTERS_AT]->(m:CpgMetho
 
 
 def _empty(error=None, reason=None) -> dict:
-    return {"fix_sites": [], "flows_through_fix": [], "flows_gone_on_patched": [], "flows_unresolved": [],
+    return {"fix_sites": [], "fix_sites_patched": [], "flows_through_fix": [],
+            "flows_gone_on_patched": [], "flows_unresolved": [],
             "sink_uid": None, "sink": None, "accepted_entry_points": [],
             "graph_missed": True, "reason": reason, "error": error}
 
 
 def candidate_paths(db, vuln_scan: str, patched_scan: str, hunks: list[dict], *, root: str | None = None) -> dict:
     """Propose the path answer key for one pair. Returns
-    {fix_sites: [fixmap site records], flows_through_fix: [flow uid], flows_gone_on_patched: [flow uid],
+    {fix_sites: [fixmap site records], fix_sites_patched: [fixmap site records, side "patched"],
+     flows_through_fix: [flow uid], flows_gone_on_patched: [flow uid],
      flows_unresolved: [flow uid], sink_uid, sink: {sink_uid, sink_category, file, line, name} | None,
-     accepted_entry_points: [{uid, kind, method_full_name, file, evidence}], graph_missed, reason, error}.
+     accepted_entry_points: [{uid, kind, method_full_name, file, line, evidence}], graph_missed, reason,
+     error}.
     `hunks` use fixmap's shape (file, old_file?, old_start, old_end, new_start, new_end). Never raises."""
     try:
         return _candidate_paths(db, vuln_scan, patched_scan, hunks, root)
@@ -61,6 +66,7 @@ def _candidate_paths(db, vuln_scan, patched_scan, hunks, root) -> dict:
     sites = fixmap._fix_sites(vidx, hunks, "vulnerable", root, 3)
     cp = _empty()
     cp["fix_sites"] = sites
+    cp["fix_sites_patched"] = fixmap.fix_sites(db, patched_scan, hunks, side="patched", root=root)
     if not fixmap._site_uids(sites):
         cp["reason"] = "no_site_nodes"
         return cp
@@ -114,21 +120,26 @@ def _candidate_paths(db, vuln_scan, patched_scan, hunks, root) -> dict:
     return cp
 
 
+def _sites(records) -> list[dict]:
+    return [{"file": s["file"], "line": s["line"], "end_line": s["end"],
+             "function": function_name(s.get("method_full_name")),
+             "method_full_name": s.get("method_full_name")}
+            for s in records or []]
+
+
 def to_manifest_fields(cp: dict) -> dict:
     """The manifest-v2 subset (all JSON-serialisable), for the labelers to confirm or correct:
     fix_sites: [{file, line, end_line, function, method_full_name}] (function =
       eval.names.function_name(method_full_name): None at module level; the shape eval.match reads);
-      sink_or_protected_operation: {sink_uid, sink_category, file, line, name} | None;
-      accepted_entry_points: [{uid, kind, method_full_name, file, line}] (line = the method's
+    fix_sites_patched: the same shape on the patched commit (a patched run's L1 key);
+    sink_or_protected_operation: {sink_uid, sink_category, file, line, name} | None;
+    accepted_entry_points: [{uid, kind, method_full_name, file, line}] (line = the method's
       declaration line on the vulnerable scan, which orion-lm's file+line path metrics need);
     entry_evidence: str (one line per entry point, '' if none); labelers: always [] (a human signs);
     graph_missed: bool (True -> the human adds the path by hand)."""
-    sites = [{"file": s["file"], "line": s["line"], "end_line": s["end"],
-              "function": function_name(s.get("method_full_name")),
-              "method_full_name": s.get("method_full_name")}
-             for s in cp.get("fix_sites") or []]
     eps = cp.get("accepted_entry_points") or []
-    return {"fix_sites": sites,
+    return {"fix_sites": _sites(cp.get("fix_sites")),
+            "fix_sites_patched": _sites(cp.get("fix_sites_patched")),
             "sink_or_protected_operation": cp.get("sink"),
             "accepted_entry_points": [{k: e.get(k) for k in ("uid", "kind", "method_full_name", "file", "line")}
                                       for e in eps],

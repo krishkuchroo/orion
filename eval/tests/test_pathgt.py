@@ -94,8 +94,8 @@ def test_graph_error_returns_record_with_error():
 
 def test_to_manifest_fields():
     mf = pathgt.to_manifest_fields(pathgt.candidate_paths(_db(), V, P, [HUNK]))
-    assert set(mf) == {"fix_sites", "sink_or_protected_operation", "accepted_entry_points",
-                       "entry_evidence", "labelers", "graph_missed"}
+    assert set(mf) == {"fix_sites", "fix_sites_patched", "sink_or_protected_operation",
+                       "accepted_entry_points", "entry_evidence", "labelers", "graph_missed"}
     assert mf["labelers"] == [] and mf["graph_missed"] is False
     assert mf["fix_sites"][0]["function"] == "sinkfn" and mf["fix_sites"][0]["line"] == 10
     assert mf["sink_or_protected_operation"]["sink_uid"] == "u2"
@@ -182,3 +182,32 @@ def test_survived_plus_unresolved_is_still_no_flow_gone_on_patched():
     bad = {**FLOW, "uid": "fl2", "source_uid": "nope"}
     cp = pathgt.candidate_paths(_db(vflows=(FLOW, bad), pflows=(PFLOW,)), V, P, [HUNK])
     assert cp["flows_unresolved"] == ["fl2"] and cp["reason"] == "no_flow_gone_on_patched"
+
+
+
+# ---- I3: the patched side's fix sites (fixmap.fix_sites(side="patched")) --------------------------
+
+def test_patched_side_sites_use_the_patched_commits_lines():
+    cp = pathgt.candidate_paths(_db(), V, P, [HUNK])
+    (ps,) = cp["fix_sites_patched"]
+    assert (ps["file"], ps["side"], ps["start"], ps["end"]) == ("a.js", "patched", 10, 11)
+    assert ps["call_uids"] == ["pu2"]                          # the PATCHED scan's call
+    mf = pathgt.to_manifest_fields(cp)
+    assert mf["fix_sites_patched"] == [{"file": "a.js", "line": 10, "end_line": 11, "function": "sinkfn",
+                                        "method_full_name": "sinkfn"}]
+    assert mf["fix_sites"][0]["end_line"] == 10                 # the vulnerable side: old lines
+
+
+def test_patched_sites_are_proposed_even_when_the_graph_missed_the_flow():
+    cp = pathgt.candidate_paths(_db(vflows=()), V, P, [HUNK])
+    assert cp["graph_missed"] is True and cp["fix_sites_patched"]
+
+
+def test_a_patched_only_read_error_is_query_error():
+    class PatchedDown(DB):
+        def run_cypher(self, scan_id, query, limit=50):
+            if scan_id == P:
+                return {"error": "ServiceUnavailable: down"}
+            return super().run_cypher(scan_id, query, limit)
+    cp = pathgt.candidate_paths(PatchedDown({V: [FLOW]}, {V: V_CALLS, P: P_CALLS}, [ENTRY]), V, P, [HUNK])
+    assert cp["reason"] == "query_error" and cp["fix_sites_patched"] == []

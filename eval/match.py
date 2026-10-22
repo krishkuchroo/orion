@@ -2,6 +2,15 @@
 
 L1 (frozen 2026-09-17, CLAUDE.md): same file AND (function-name match OR a reported line within the
 patched range +/-10). Path metrics never change an L1 result.
+
+Answer keys. A manifest row's key comes from eval.manifest.answer_keys(row, side): it carries the
+row's fix sites for that side (`fix_sites` for a run on the vulnerable commit, `fix_sites_patched`
+for a run on the patched commit, whose line numbers differ), and L1 credits it when ANY one site
+matches: same file AND (function match OR line in [line - 10, end_line + 10]) for that site
+(l1_fix_site). "Any site" is a MATCHING-RULE EXTENSION (a fix with several sites, n_files up to 10):
+log it in eval/CHANGELOG.md at the tag (orion-lm-prereg-v1) with the other extensions. A key without
+`fix_sites` is the older single-range shape {file, function, line_start, line_end}.
+Each run is matched against its OWN row's key (vuln_id = row id); one-to-one as below.
 """
 import json
 
@@ -60,14 +69,20 @@ def _loc(finding, key_file, key_fn, lo, hi) -> bool:
 
 
 def l1(finding: dict, answer_key: dict) -> bool:
+    """L1 against an answer key: ANY of its `fix_sites` (manifest keys, see the module doc), else the
+    single {file, function, line_start, line_end} range."""
+    if "fix_sites" in answer_key:
+        return any(l1_fix_site(finding, s) for s in answer_key.get("fix_sites") or ()
+                   if isinstance(s, dict))
     return _loc(finding, answer_key.get("file"), answer_key.get("function"),
                 answer_key.get("line_start"), answer_key.get("line_end"))
 
 
 def l1_fix_site(lead: dict, fix_site: dict) -> bool:
-    """The L1 rule against a single {file, line, function} fix site."""
-    ln = fix_site.get("line")
-    return _loc(lead, fix_site.get("file"), fix_site.get("function"), ln, ln)
+    """The L1 rule against a single {file, line, end_line, function} fix site: same file AND
+    (function match OR line in [line - 10, end_line + 10]); no end_line = the single line."""
+    return _loc(lead, fix_site.get("file"), fix_site.get("function"), fix_site.get("line"),
+                fix_site.get("end_line", fix_site.get("line")))
 
 
 def l2(finding: dict, answer_key: dict) -> bool:
