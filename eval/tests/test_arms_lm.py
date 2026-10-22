@@ -210,11 +210,12 @@ def test_missing_model_path_raises_before_any_build(tmp_path, monkeypatch, model
     assert rec["order"] == []
 
 
-def test_on_start_gets_this_process_before_the_build(tmp_path, monkeypatch):
+def test_on_start_gets_this_process_right_after_the_build(tmp_path, monkeypatch):
+    """I8: run_one's `run` sampler (attached by on_start) covers post-build work only."""
     rec = _seams(monkeypatch)
     pids = []
     _arm(tmp_path, on_start=lambda p: (pids.append(p.pid), rec["order"].append("on_start")))
-    assert pids == [os.getpid()] and rec["order"][:2] == ["on_start", "build"]
+    assert pids == [os.getpid()] and rec["order"][:3] == ["build", "on_start", "load"]
 
 
 def test_events_reach_on_line_as_readable_text(tmp_path, monkeypatch):
@@ -263,9 +264,10 @@ def test_mlx_backend_cache_is_cleared_and_its_peak_reported(tmp_path, monkeypatc
     monkeypatch.setattr(lm, "_free_model_memory", _REAL_FREE)
     monkeypatch.setattr(lm, "_load_model", lambda path, **kw: type("M", (), {"backend": "mlx"})())
     lines = []
-    _arm(tmp_path, on_line=lines.append)
+    res = _arm(tmp_path, on_line=lines.append)
     assert calls == ["reset", "clear"]          # peak reset before the load, cache cleared after
     assert any("mlx peak memory 512.0 MB" in l for l in lines)
+    assert res.mlx_peak_mb == 512.0             # machine-readable too (-> resources.mlx_peak_mb)
     assert any("backend mlx" in l for l in lines)
     assert rec["order"] == ["build", "discover"]   # load is the stand-in above; release is real
 
@@ -273,8 +275,8 @@ def test_mlx_backend_cache_is_cleared_and_its_peak_reported(tmp_path, monkeypatc
 def test_non_mlx_backend_reports_no_mlx_peak(tmp_path, monkeypatch):
     _seams(monkeypatch)
     lines = []
-    _arm(tmp_path, on_line=lines.append)
-    assert not any("mlx peak" in l for l in lines)
+    res = _arm(tmp_path, on_line=lines.append)
+    assert not any("mlx peak" in l for l in lines) and res.mlx_peak_mb is None
 
 
 # ---- the REAL orion.lm.engine.discover_lm (no _discover fake): it never raises for a graph or model
@@ -691,3 +693,43 @@ def test_real_engine_batches_failing_on_neo4j_are_aborted(tmp_path, monkeypatch)
     res, lines = _real_engine(monkeypatch, tmp_path, db=_GraphStub(n=2), model=NeoModel())
     assert res.status == "aborted" and res.findings_path is None
     assert sum("[discover/error]" in l for l in lines) == 2
+
+
+# ---- I8: the graph build is its own measured phase ------------------------------------------------
+
+def test_a_fresh_build_is_returned_as_a_measured_build_phase(tmp_path, monkeypatch):
+    _seams(monkeypatch)
+    (ph,) = _arm(tmp_path).phases
+    assert ph["phase"] == "build" and ph["wall_seconds"] >= 0
+    assert ph["peak_rss_mb"] is None or ph["peak_rss_mb"] > 0   # measured, or missing: never a guessed 0
+
+
+def test_a_cache_hit_has_no_build_phase_but_still_starts_the_run_phase(tmp_path, monkeypatch):
+    rec = _seams(monkeypatch)
+    started = []
+    res = _arm(tmp_path, graph_cache={("r", "v"): "s1"}, on_start=started.append)
+    assert res.phases == [] and rec["builds"] == [] and len(started) == 1
+
+
+def test_a_failed_build_carries_its_phase_on_the_exception(tmp_path, monkeypatch):
+    from eval.arms import PHASES_ATTR
+    _seams(monkeypatch)
+    started = []
+
+    def build(repo_dir, on_event):
+        raise RuntimeError("joern-parse failed (rc=1)")
+    monkeypatch.setattr(lm, "_build_graph", build)
+    with pytest.raises(RuntimeError) as ei:
+        _arm(tmp_path, on_start=started.append)
+    (ph,) = getattr(ei.value, PHASES_ATTR)
+    assert ph["phase"] == "build" and started == []            # the run phase never began
+
+
+def test_an_abort_at_build_returns_the_build_phase(tmp_path, monkeypatch):
+    _seams(monkeypatch)
+
+    def build(repo_dir, on_event):
+        raise infra.InfraError("Joern binaries not found")
+    monkeypatch.setattr(lm, "_build_graph", build)
+    res = _arm(tmp_path)
+    assert res.status == "aborted" and [p["phase"] for p in res.phases] == ["build"]

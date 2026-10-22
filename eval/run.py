@@ -9,6 +9,7 @@ import tempfile
 import time
 
 from . import db, infra, owasp, queue, repo
+from .arms import PHASES_ATTR
 from .resources import PhaseSampler
 
 # The five study arms (design 2026-10-18 §5.4). orion-lm* run in-process (eval/arms/lm.py);
@@ -135,7 +136,8 @@ def run_one(conn, *, arm, repo_meta, run_no, model_tags, base_env,
         db.finish_run(conn, rid, "aborted")
         raise
     except Exception as e:
-        _log_resource(conn, rid, sampler["s"], t0)
+        _log_phases(conn, rid, getattr(e, PHASES_ATTR, None) or [])
+        _log_resource(conn, rid, sampler["s"], t0, phases=getattr(e, PHASES_ATTR, None) or [])
         if infra.is_infra(e):   # the machine failed (Neo4j, Joern), not the arm: not scored, resumed
             db.log_event(conn, rid, stage="run", level="warn",
                          message=f"machine failure ({e.__class__.__name__}: {e}); not scored, "
@@ -148,7 +150,9 @@ def run_one(conn, *, arm, repo_meta, run_no, model_tags, base_env,
     # the run must never be left 'running': a failure while recording what the arm returned
     # becomes an error event + status "error", not a dangling row
     try:
-        _log_resource(conn, rid, sampler["s"], t0)
+        _log_phases(conn, rid, res.phases or [])
+        _log_resource(conn, rid, sampler["s"], t0, phases=res.phases or [],
+                      mlx_peak_mb=getattr(res, "mlx_peak_mb", None))
         for block in res.usage:
             db.log_agent_call(conn, rid, session_id=None, stage="run",
                               input_tokens=block.get("uncached_in"), output_tokens=block.get("out"),
@@ -178,20 +182,35 @@ def run_one(conn, *, arm, repo_meta, run_no, model_tags, base_env,
     return final
 
 
-def _log_resource(conn, rid, sampler, t0):
+def _log_phases(conn, rid, phases):
+    """One resources row per phase the arm measured itself before its run phase (the in-process arm's
+    graph build: ArmResult.phases, or `arm_phases` on the exception it raised). Never invented: a
+    field the arm did not measure is stored as NULL."""
+    for ph in phases:
+        db.log_resource(conn, rid, phase=ph["phase"], wall_seconds=ph.get("wall_seconds"),
+                        peak_rss_mb=ph.get("peak_rss_mb"), graph_nodes=ph.get("graph_nodes"),
+                        graph_edges=ph.get("graph_edges"), loc=ph.get("loc"))
+
+
+def _log_resource(conn, rid, sampler, t0, *, phases=(), mlx_peak_mb=None):
     """One resources row for the run phase. Peak RSS comes only from a sampler that was
     attached to a live process; otherwise it is recorded as missing (None), never 0.
     wall_seconds has two sources: with a sampler it is the arm's process lifetime as seen by
     the sampler (spawn -> launcher return, so it includes the findings copy and the tree
     rmtree); without one (no process was ever spawned) it is run_one's own clock around the
-    launcher call."""
+    launcher call. The in-process arm attaches its sampler (on_start) only after its graph
+    build, which it measures as its own phase: when the arm measured phases but never started the
+    run phase (its build failed or aborted), there is no run phase to record and no row is written
+    (run_one's clock would only repeat the build). mlx_peak_mb is the arm's MLX peak (or None)."""
     if sampler is not None:
         sampler.__exit__(None, None, None)
         wall, rss = sampler.wall_seconds, sampler.peak_rss_mb
+    elif phases:
+        return
     else:
         wall, rss = time.monotonic() - t0, None
     db.log_resource(conn, rid, phase="run", wall_seconds=wall, peak_rss_mb=rss,
-                    graph_nodes=None, graph_edges=None, loc=None)
+                    graph_nodes=None, graph_edges=None, loc=None, mlx_peak_mb=mlx_peak_mb)
 
 
 def _default_plain(**kw):

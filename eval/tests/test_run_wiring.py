@@ -150,8 +150,9 @@ def test_run_one_logs_an_lm_step_exactly_once(tmp_path, monkeypatch):
         == [(rid, 1, 50, 20)]
     assert conn.execute("SELECT input_tokens, cache_read, cache_write, output_tokens FROM agent_calls"
                         ).fetchall() == [(30, 20, 0, 5)]
-    rss = conn.execute("SELECT peak_rss_mb FROM resources").fetchone()[0]
-    assert rss is None or rss > 0       # sampled on this process (on_start), never a guessed 0
+    rows = conn.execute("SELECT phase, peak_rss_mb FROM resources ORDER BY id").fetchall()
+    assert [p for p, _ in rows] == ["build", "run"]       # I8: the build is its own phase
+    assert all(r is None or r > 0 for _, r in rows)       # sampled on this process, never a guessed 0
     findings = tmp_path / "eval/runs/orion-lm/r1/c1/_/2/findings.json"
     assert findings.read_text().strip() == "[]"
 
@@ -282,3 +283,63 @@ def test_default_tree_root_is_neutral():
     root = os.path.join(tempfile.gettempdir(), run.TREE_ROOT_NAME)
     tok = run.work_dir_for("orion-lm", _meta("c1"), root)
     assert os.path.dirname(tok) == root and "orion" not in os.path.relpath(tok, tempfile.gettempdir())
+
+
+# ---- I8: run_one logs the arm's own build phase and its MLX peak ----------------------------------
+
+def _lm_chain(tmp_path, monkeypatch, *, mlx_peak=None, cache=None):
+    from eval import db
+    from eval.arms import lm
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(lm, "_build_graph", lambda repo_dir, on_event: "s1")
+    monkeypatch.setattr(lm, "_load_model",
+                        lambda path, **kw: type("M", (), {"backend": "mlx" if mlx_peak else "stub"})())
+    monkeypatch.setattr(lm, "_discover", lambda *a, **k: [])
+    monkeypatch.setattr(lm, "_pathfind_error", lambda sid: None)
+    monkeypatch.setattr(lm, "_scan_problem", lambda sid, repo_dir: None)
+    monkeypatch.setattr(lm, "_mlx_peak_mb", lambda: mlx_peak)
+    (tmp_path / "model").mkdir(exist_ok=True)
+    conn = db.connect(str(tmp_path / "t.db"))
+    launcher = _launcher(tmp_path, graph_cache=cache if cache is not None else {},
+                         _export=lambda *a, **k: os.makedirs(a[2]))
+    return conn, launcher
+
+
+def _resources(conn):
+    return conn.execute("SELECT phase, wall_seconds, peak_rss_mb, mlx_peak_mb FROM resources ORDER BY id").fetchall()
+
+
+def test_run_one_logs_a_build_row_and_the_mlx_peak_on_the_run_row(tmp_path, monkeypatch):
+    from eval import report
+    conn, launcher = _lm_chain(tmp_path, monkeypatch, mlx_peak=640.0)
+    run.run_one(conn, arm="orion-lm", repo_meta=_meta("c1"), run_no=1,
+                model_tags={"orion-lm": str(tmp_path / "model")}, base_env={}, orion_commit="c",
+                cli_versions="", launcher=launcher)
+    (b, r) = _resources(conn)
+    assert b[0] == "build" and b[1] >= 0 and b[3] is None
+    assert r[0] == "run" and r[3] == 640.0
+    gb = report.secondary(conn)["arms"]["orion-lm"]["graph_build"]
+    assert gb["n"] == 1 and gb["wall_seconds_total"] is not None    # report.graph_build has data now
+    assert report.secondary(conn)["arms"]["orion-lm"]["mlx_peak_mb"]["max"] == 640.0
+
+
+def test_a_cache_hit_logs_no_build_row(tmp_path, monkeypatch):
+    conn, launcher = _lm_chain(tmp_path, monkeypatch, cache={("r1", "c1"): "s1"})
+    run.run_one(conn, arm="orion-lm", repo_meta=_meta("c1"), run_no=2,
+                model_tags={"orion-lm": str(tmp_path / "model")}, base_env={}, orion_commit="c",
+                cli_versions="", launcher=launcher)
+    assert [p for p, *_ in _resources(conn)] == ["run"]
+
+
+def test_a_failed_build_logs_its_build_row_and_no_run_row(tmp_path, monkeypatch):
+    from eval.arms import lm
+    conn, launcher = _lm_chain(tmp_path, monkeypatch)
+
+    def build(repo_dir, on_event):
+        raise RuntimeError("joern-parse failed (rc=1)")
+    monkeypatch.setattr(lm, "_build_graph", build)
+    status = run.run_one(conn, arm="orion-lm", repo_meta=_meta("c1"), run_no=1,
+                         model_tags={"orion-lm": str(tmp_path / "model")}, base_env={},
+                         orion_commit="c", cli_versions="", launcher=launcher)
+    assert status == "error"
+    assert [p for p, *_ in _resources(conn)] == ["build"]       # the run phase never began

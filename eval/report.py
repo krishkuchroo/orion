@@ -343,21 +343,26 @@ def _mean(xs):
 # ---- secondary metrics ---------------------------------------------------------------------------
 
 def _resource_stats(conn, run_ids):
-    walls, rss = [], []
+    """wall time, psutil peak RSS and MLX peak (resources.mlx_peak_mb, Metal buffers psutil does not
+    see) of the given runs' non-build rows; each {mean, median, max, n, n_missing}."""
+    walls, rss, mlx = [], [], []
     for rid in run_ids:
-        rows = conn.execute("SELECT wall_seconds, peak_rss_mb FROM resources WHERE run_id=? AND phase!='build'",
-                            (rid,)).fetchall()
-        w = [x for x, _ in rows if x is not None]
-        r = [x for _, x in rows if x is not None]
+        rows = conn.execute("SELECT wall_seconds, peak_rss_mb, mlx_peak_mb FROM resources"
+                            " WHERE run_id=? AND phase!='build'", (rid,)).fetchall()
+        w = [x for x, _, _ in rows if x is not None]
+        r = [x for _, x, _ in rows if x is not None]
+        m = [x for _, _, x in rows if x is not None]
         if w:
             walls.append(sum(w))
         if r:
             rss.append(max(r))
+        if m:
+            mlx.append(max(m))
 
     def stats(xs):
         return {"mean": _mean(xs), "median": statistics.median(xs) if xs else None,
                 "max": max(xs) if xs else None, "n": len(xs), "n_missing": len(run_ids) - len(xs)}
-    return stats(walls), stats(rss)
+    return stats(walls), stats(rss), stats(mlx)
 
 
 def _graph_build(conn, run_ids):
@@ -446,7 +451,7 @@ def _arm_secondary(conn, arm, *, k, prices, pairs):
     per_vuln = list(vulns.values())
     pc = pair_correct(conn, arm, pairs) if pairs is not None else None
     tok_fields = ({key: sum(f[key] for f in fields) for key in fields[0]} if fields else None)
-    walls, rss = _resource_stats(conn, [r["id"] for r in vruns + pruns])
+    walls, rss, mlx = _resource_stats(conn, [r["id"] for r in vruns + pruns])
     return {
         "efficiency": efficiency_detail(conn, arm),
         "far": far_detail(conn, arm),
@@ -459,7 +464,7 @@ def _arm_secondary(conn, arm, *, k, prices, pairs):
         f"pass_pow_{k}": _mean([pass_pow_k([x["l1"] for x in rs], k) for rs in per_vuln]),
         "n_vulns_under_k_runs": sum(1 for rs in per_vuln if len(rs) < k),
         "path_levels": _path_levels(paths),
-        "wall_seconds": walls, "peak_rss_mb": rss,
+        "wall_seconds": walls, "peak_rss_mb": rss, "mlx_peak_mb": mlx,
         "graph_build": _graph_build(conn, [r["id"] for r in vruns + pruns]),
         "tokens": tok_fields, "n_no_token_data": no_tok,
         "dollars": _dollars(tok_fields, (prices or {}).get(arm)),

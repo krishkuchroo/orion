@@ -24,13 +24,18 @@ Rules this module is built around:
     Such a run is "aborted": not scored, and eval.run re-attempts it after --resume-wait. A genuine
     build or model-load failure still propagates to run_one ("error"), as before.
 
-Resources: the arm is in-process, so `on_start` gets THIS process (pid = os.getpid()). PhaseSampler
-sums the process and its children, so Joern (joern-parse, a child process) is counted, but the peak RSS
-also includes the runner's own baseline (Python, imported modules, anything a previous run left
-allocated), and Neo4j (Docker) is not in it. Measured 2026-10-22 on M4 / mlx 0.32.4 / psutil 7.2.2:
-psutil RSS does NOT include MLX's Metal allocations (a 1 GiB mx array left RSS flat while
-mx.get_active_memory() read 1024 MB). The model's memory is therefore reported separately, as an
-event line with MLX's own peak (`mx.get_peak_memory`), when MLX is the backend.
+Resources: two phases, each with its own resources row. The graph BUILD is timed and sampled by the
+arm itself (PhaseSampler on this process) and handed back as ArmResult.phases ({"phase": "build"}); a
+cached graph has no build phase. `on_start` -- run_one's `run` sampler -- is called only AFTER the graph
+step (build or cache hit), so the `run` row covers post-build work only (scan-record check, case flows,
+model load, discovery, findings). The arm is in-process, so both samplers watch THIS process (pid =
+os.getpid()) and its children: Joern (a child) is counted in the build, but each peak also includes the
+runner's own baseline (Python, imported modules, anything a previous run left allocated), and Neo4j
+(Docker) is in neither. Measured 2026-10-22 on M4 / mlx 0.32.4 / psutil 7.2.2: psutil RSS does NOT
+include MLX's Metal allocations (a 1 GiB mx array left RSS flat while mx.get_active_memory() read
+1024 MB). The model's memory is therefore stored separately, machine-readably: MLX's own peak
+(`mx.get_peak_memory`) as ArmResult.mlx_peak_mb -> resources.mlx_peak_mb of the run row, when MLX is
+the backend (also printed as an event line). A build that raises carries its phase as `arm_phases`.
 
 OWASP case mode (Task F2): given an OWASP `case`, discovery judges only that case. The arm reads the
 scan's CandidateFlows whose path touches the case's file (`eval.owasp.case_flows`) after the build and
@@ -61,8 +66,9 @@ from orion.cli import lm_verdicts, write_verdicts_json   # stdlib-only module; h
 from orion.monitor import _format_event as _event_line   # the line `orion scan` prints per event
 
 from eval import infra
+from eval.resources import PhaseSampler
 
-from . import ArmResult
+from . import PHASES_ATTR, ArmResult
 
 DEFAULT_HUNG_SECONDS = 3600   # 60 min with no step or event (protocol: a run is `hung`, not killed)
 
@@ -310,7 +316,8 @@ def orion_lm_arm(*, arm, repo_dir, model_tag, json_out, on_line, on_start, graph
     model_tag    the local model path (run.main's --lm-model / --lm-base-model); must exist
     json_out     where findings.json goes (the run dir)
     on_line      progress sink (run_one turns each line into an event)
-    on_start     called once with an object whose .pid is this process, before the build
+    on_start     called once with an object whose .pid is this process, right AFTER the graph step
+                 (build or cache hit): run_one's `run` sampler covers only post-build work
     graph_cache  {(repo_id, commit_sha): scan_id}, shared across the runner's runs, so both arms and
                  all run numbers of one commit reuse one graph
     run_no       the run number; it is the model's sampling seed (spec §6)
@@ -333,12 +340,11 @@ def orion_lm_arm(*, arm, repo_dir, model_tag, json_out, on_line, on_start, graph
     if not model_tag or not os.path.exists(model_tag):
         raise ValueError(f"{arm}: model path {model_tag!r} does not exist "
                          "(pass --lm-model / --lm-base-model to eval.run)")
-    if on_start is not None:
-        on_start(types.SimpleNamespace(pid=os.getpid()))
 
     watchdog = None
     health = _DiscoveryHealth()
     steps: list = []
+    phases: list = []   # the build phase, measured here (a cache hit has none)
 
     def on_event(ev) -> None:
         if watchdog is not None:
@@ -350,7 +356,7 @@ def orion_lm_arm(*, arm, repo_dir, model_tag, json_out, on_line, on_start, graph
         on_line(f"orion-lm: aborted, machine failure (not the model's miss; not scored, re-attempted "
                 f"after --resume-wait): {why}"[:2000])
         return ArmResult(status="aborted", findings_path=None,
-                         usage=[_usage_block(s) for s in steps], steps=steps)
+                         usage=[_usage_block(s) for s in steps], steps=steps, phases=phases)
 
     def what(exc) -> str:
         return f"{exc.__class__.__name__}: {exc}"
@@ -368,13 +374,22 @@ def orion_lm_arm(*, arm, repo_dir, model_tag, json_out, on_line, on_start, graph
                 on_line(f"orion-lm: reusing graph scan_id {scan_id} for {repo_id}@{commit_sha}")
         if scan_id is None:
             on_line(f"orion-lm: building graph for {repo_id}@{commit_sha} (lm sink profile)")
-            scan_id = _build_graph(repo_dir, on_event)
+            sampler = PhaseSampler(os.getpid()).__enter__()
+            try:
+                scan_id = _build_graph(repo_dir, on_event)
+            finally:
+                sampler.__exit__(None, None, None)
+                phases.append({"phase": "build", "wall_seconds": sampler.wall_seconds,
+                               "peak_rss_mb": sampler.peak_rss_mb})
             graph_cache[key] = scan_id
-            on_line(f"orion-lm: graph built, scan_id {scan_id}")
+            on_line(f"orion-lm: graph built, scan_id {scan_id} in {sampler.wall_seconds:.1f}s")
     except Exception as exc:
         if infra.is_infra(exc):
             return aborted(f"graph build: {what(exc)}")
+        setattr(exc, PHASES_ATTR, list(phases))   # run_one still logs the failed build's phase
         raise   # a genuine build failure: run_one records "error"
+    if on_start is not None:   # the `run` phase starts here: post-build work only
+        on_start(types.SimpleNamespace(pid=os.getpid()))
     # A graph whose pathfind failed holds no CandidateFlows: discovery would report a clean "found
     # nothing". Crashed instead, before the model is loaded (fresh build and cached reuse alike).
     try:
@@ -387,7 +402,7 @@ def orion_lm_arm(*, arm, repo_dir, model_tag, json_out, on_line, on_start, graph
         on_line(f"orion-lm: discovery crashed: scan {scan_id} has no usable CandidateFlows "
                 f"({flow_error}); rebuild it or run "
                 f"`orion reanalyze --scan-id {scan_id} --engine lm`")
-        return ArmResult(status="crashed", findings_path=None, usage=[], steps=[])
+        return ArmResult(status="crashed", findings_path=None, usage=[], steps=[], phases=phases)
     flows = None   # None: discover_lm reads the scan's top CandidateFlows itself
     if case is not None:
         try:
@@ -400,7 +415,7 @@ def orion_lm_arm(*, arm, repo_dir, model_tag, json_out, on_line, on_start, graph
                 return aborted(f"loading the flows of case {case.get('case_id')}: {what(exc)}")
             on_line(f"orion-lm: discovery crashed: loading the flows of case {case.get('case_id')} "
                     f"failed ({what(exc)})"[:2000])
-            return ArmResult(status="crashed", findings_path=None, usage=[], steps=[])
+            return ArmResult(status="crashed", findings_path=None, usage=[], steps=[], phases=phases)
         on_line(f"orion-lm: case {case.get('case_id')}: {n_flows} CandidateFlow(s) touch {case['file']}; "
                 f"mode {mode}" + (f" (judged code-only at {flows[0]['nodes'][0]['function']})"
                                   if mode == "entry_only" else ""))
@@ -412,7 +427,11 @@ def orion_lm_arm(*, arm, repo_dir, model_tag, json_out, on_line, on_start, graph
     mx = sys.modules.get("mlx.core")
     if mx is not None and hasattr(mx, "reset_peak_memory"):
         mx.reset_peak_memory()
-    model = _load_model(model_tag, seed=run_no)
+    try:
+        model = _load_model(model_tag, seed=run_no)
+    except Exception as exc:
+        setattr(exc, PHASES_ATTR, list(phases))
+        raise   # a genuine model-load failure: run_one records "error"
     backend = getattr(model, "backend", None)
     on_line(f"orion-lm: model loaded (backend {backend or 'unknown'})")
 
@@ -449,16 +468,20 @@ def orion_lm_arm(*, arm, repo_dir, model_tag, json_out, on_line, on_start, graph
     finally:
         model = None
         _free_model_memory()
+    peak = _mlx_peak_mb() if backend == "mlx" else None
+    if peak is not None:
+        on_line(f"orion-lm: mlx peak memory {peak:.1f} MB (Metal buffers: resources.mlx_peak_mb, "
+                "not in peak_rss_mb)")
     if machine:   # Neo4j went away under discovery: whatever it returned is not the model's result
-        return aborted(machine)
+        res = aborted(machine)
+        res.mlx_peak_mb = peak
+        return res
     partial = health.partial_summary() if status != "crashed" else None
     if partial:
         on_line(f"orion-lm: {partial}")
-    peak = _mlx_peak_mb() if backend == "mlx" else None
-    if peak is not None:
-        on_line(f"orion-lm: mlx peak memory {peak:.1f} MB (Metal buffers; not in resources.peak_rss_mb)")
 
     # 4. findings: none for a crash (no trustworthy result), else every lead -- possibly [] -- as --json.
     findings_path = None if status == "crashed" else _write_findings(json_out, list(leads or []), on_line)
     return ArmResult(status=status, findings_path=findings_path,
-                     usage=[_usage_block(s) for s in steps], steps=steps)
+                     usage=[_usage_block(s) for s in steps], steps=steps, phases=phases,
+                     mlx_peak_mb=peak)
