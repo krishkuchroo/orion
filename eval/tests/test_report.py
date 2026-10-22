@@ -1,5 +1,6 @@
 import json
 import math
+import os
 
 from eval import db, report
 
@@ -146,7 +147,9 @@ def test_far_excludes_owasp_case_rows_and_aborted(tmp_path):
     ab = _run(conn, "orion-lm", "r3", "p3", kind="patched", status="aborted")
     _match(conn, ab, "r3")
     assert report.far(conn, "orion-lm") == 0.5
-    assert report.far_detail(conn, "orion-lm") == {"FAR": 0.5, "false_alarms": 1, "n_runs": 2}
+    d = report.far_detail(conn, "orion-lm")
+    assert (d["FAR"], d["false_alarms"], d["n_runs"]) == (0.5, 1, 2)
+    assert d["status_counts"] == {"ok": 2, "hung": 0, "crashed": 0, "error": 0, "aborted": 1}
 
 
 def test_far_is_none_without_patched_runs(tmp_path):
@@ -263,25 +266,48 @@ def test_only_highest_attempt_is_scored(tmp_path):
 
 def test_pair_correct_scores_each_cve_against_its_own_patched_commit(tmp_path):
     conn = db.connect(str(tmp_path / "t.db"))
-    # one repo, two CVEs A and B, one run each; both caught; only B's patched run has a false alarm
-    va = _run(conn, "orion-lm", "repo", "va")
-    vb = _run(conn, "orion-lm", "repo", "vb")
+    # two CVE rows A and B of one repo (runs.repo = the row id), one run each; both caught; only B's
+    # patched run has a false alarm
+    va = _run(conn, "orion-lm", "A", "va")
+    vb = _run(conn, "orion-lm", "B", "vb")
     _match(conn, va, "A")
     _match(conn, vb, "B")
-    _run(conn, "orion-lm", "repo", "pa", kind="patched")
-    pb = _run(conn, "orion-lm", "repo", "pb", kind="patched")
+    _run(conn, "orion-lm", "A", "pa", kind="patched")
+    pb = _run(conn, "orion-lm", "B", "pb", kind="patched")
     _match(conn, pb, "B")
     pairs = [("A", "va", "pa"), ("B", "vb", "pb")]
     pc = report.pair_correct(conn, "orion-lm", pairs)
     assert pc == {"pair_correct": 0.5, "n_vulns": 2, "n_pairs": 2, "n_unpaired": 0, "n_vulns_without_runs": 0}
-    # a catch credited to the wrong vuln_id on the vulnerable run is not a catch for this pair
-    assert report.pair_correct(conn, "orion-lm", [("A", "vb", "pa")])["pair_correct"] == 0.0
+    # a pair naming ANOTHER row's commit finds no run of this row there: unpaired, never a catch
+    assert report.pair_correct(conn, "orion-lm", [("A", "vb", "pa")]) == {
+        "pair_correct": None, "n_vulns": 0, "n_pairs": 0, "n_unpaired": 1, "n_vulns_without_runs": 0}
     # missing side -> unpaired, never 0; unknown pair -> no runs
     pc = report.pair_correct(conn, "orion-lm", [("A", "va", "nope"), ("Z", "zz", "zz")])
     assert pc["pair_correct"] is None and pc["n_unpaired"] == 1 and pc["n_vulns_without_runs"] == 1
     sec = report.secondary(conn, pairs=pairs)["arms"]["orion-lm"]
     assert sec["pair_correct"] == 0.5 and sec["pair_correct_detail"]["n_pairs"] == 2
     assert report.secondary(conn)["arms"]["orion-lm"]["pair_correct"] is None     # no pairs -> None, not 0
+
+
+def test_pair_correct_keys_runs_by_row_and_sha_for_a_shared_commit(tmp_path):
+    """m8: two rows share a vulnerable commit (netflix/lemur) and a chain shares a commit between one
+    row's patched and another's vulnerable side. Each row is scored on ITS runs, never last-write-wins."""
+    conn = db.connect(str(tmp_path / "t.db"))
+    c = _run(conn, "orion-lm", "C", "shared")          # row C on the shared vulnerable commit: caught
+    _match(conn, c, "C")
+    _run(conn, "orion-lm", "D", "shared")              # row D on the SAME commit: missed
+    _run(conn, "orion-lm", "C", "pc", kind="patched")
+    _run(conn, "orion-lm", "D", "pd", kind="patched")
+    e = _run(conn, "orion-lm", "E", "ve")               # chain: E's patched commit is F's vulnerable one
+    _match(conn, e, "E")
+    _run(conn, "orion-lm", "E", "chain", kind="patched")
+    f = _run(conn, "orion-lm", "F", "chain")
+    _match(conn, f, "F")
+    pf = _run(conn, "orion-lm", "F", "pf", kind="patched")
+    _match(conn, pf, "F")
+    pairs = [("C", "shared", "pc"), ("D", "shared", "pd"), ("E", "ve", "chain"), ("F", "chain", "pf")]
+    pc = report.pair_correct(conn, "orion-lm", pairs)
+    assert (pc["pair_correct"], pc["n_vulns"], pc["n_pairs"]) == (0.5, 4, 4)   # C 1, D 0, E 1, F 0 (its FA)
 
 
 def test_open_readonly_never_creates_a_db(tmp_path):
@@ -338,17 +364,17 @@ def test_secondary_metrics(tmp_path):
     for r in (1, 2, 3):
         rid = _run(conn, "orion-lm", "r1", "v1", run_no=r)
         if r == 1:
-            _match(conn, rid, "v1", "L2", pl)
+            _match(conn, rid, "r1", "L2", pl)
         if r == 2:
-            _match(conn, rid, "v1", "L1")
+            _match(conn, rid, "r1", "L1")
         prid = _run(conn, "orion-lm", "r1", "p1", kind="patched", run_no=r)
         if r == 2:
-            _match(conn, prid, "v1", "L1")
+            _match(conn, prid, "r1", "L1")
         db.log_resource(conn, rid, phase="run", wall_seconds=10.0 * r, peak_rss_mb=100.0 * r,
                         graph_nodes=None, graph_edges=None, loc=None)
     db.log_resource(conn, rid, phase="build", wall_seconds=99.0, peak_rss_mb=900.0,
                     graph_nodes=1, graph_edges=1, loc=1)
-    sec = report.secondary(conn, pairs=[("v1", "v1", "p1")])
+    sec = report.secondary(conn, pairs=[("r1", "v1", "p1")])
     s = sec["arms"]["orion-lm"]
     assert abs(s["recall_l1"] - 2 / 3) < 1e-12
     assert abs(s["recall_l2"] - 1 / 3) < 1e-12
@@ -396,3 +422,126 @@ def test_pareto_table_and_svg(tmp_path):
 def test_mde_is_an_honest_stub():
     assert report.mde() is None
     assert "Miller" in report.mde.__doc__
+
+
+# ---- I1: clusters are repos (from the manifest), not row ids --------------------------------------
+
+def _man(*rows):
+    base = {"repo_url": "u", "tier": "headline", "kind": "dataflow", "vulnerable_commit": "v",
+            "patched_commit": "p", "cwe": "CWE-89"}
+    return {"repos": [dict(base, **r) for r in rows]}
+
+
+def test_two_rows_of_one_repo_are_one_bootstrap_cluster(tmp_path):
+    conn = db.connect(str(tmp_path / "t.db"))
+    # rows CVE-a1 and CVE-a2 are both in repo acme/a; CVE-b and CVE-c in their own repos
+    man = _man({"id": "CVE-a1", "repo": "Acme/A"}, {"id": "CVE-a2", "repo_canonical": "acme/a"},
+               {"id": "CVE-b", "repo_url": "https://github.com/acme/b"}, {"id": "CVE-c", "repo": "acme/c"})
+    for rid in ("CVE-a1", "CVE-a2", "CVE-b", "CVE-c"):
+        seed(conn, "orion-lm", rid, "v-" + rid, caught=True, tokens=500_000)
+        seed(conn, "plain-opus5", rid, "v-" + rid, caught=True, tokens=1_000_000)
+    with_m = report.paired_bootstrap(conn, "orion-lm", "plain-opus5", B=50, manifest=man)
+    without = report.paired_bootstrap(conn, "orion-lm", "plain-opus5", B=50)
+    assert with_m["n_repos"] == 3 and without["n_repos"] == 4       # repos, not CVEs
+    assert report.manifest_index(man)["CVE-a1"]["repo"] == report.manifest_index(man)["CVE-a2"]["repo"] == "acme/a"
+    d = report.efficiency_detail(conn, "orion-lm", manifest=man)
+    assert (d["n_repos"], d["n_rows"], d["n_runs"]) == (3, 4, 4)
+    seed(conn, "orion-lm", "CVE-x", "vx", caught=True, tokens=1)    # a row the manifest does not have
+    assert report.unknown_rows(conn, man) == ["CVE-x"]
+    assert report.efficiency_detail(conn, "orion-lm", manifest=man)["n_rows"] == 4   # in no table
+
+
+# ---- I2: partitions (headline dataflow primary; access-control and scale separate) + statuses -------
+
+def test_partitions_split_headline_access_control_and_scale(tmp_path):
+    conn = db.connect(str(tmp_path / "t.db"))
+    man = _man({"id": "H", "repo": "o/h"}, {"id": "AC", "repo": "o/ac", "kind": "access_control"},
+               {"id": "S", "repo": "o/s", "tier": "scale"}, {"id": "SAC", "repo": "o/s2", "tier": "scale",
+                                                              "kind": "access_control"})
+    assert [report.partition_of(r) for r in man["repos"]] == ["headline", "access_control", "scale", "scale"]
+    seed(conn, "orion-lm", "H", "vh", caught=True, tokens=1_000_000)
+    seed(conn, "orion-lm", "AC", "vac", caught=True, tokens=100)
+    seed(conn, "orion-lm", "S", "vs", caught=False, tokens=100)
+    _run(conn, "orion-lm", "S", "vs2", run_no=2, status="error")
+    _run(conn, "orion-lm", "H", "ph", kind="patched")
+    _match(conn, _run(conn, "orion-lm", "AC", "pac", kind="patched"), "AC")
+    _run(conn, "orion-lm", "S", "ps", kind="patched", status="crashed")
+    _run(conn, "orion-lm", "S", "ps2", kind="patched", run_no=2, status="aborted")
+    h = report.efficiency_detail(conn, "orion-lm", manifest=man)               # PRIMARY = headline
+    assert (h["caught"], h["tokens"], h["n_runs"]) == (1, 1_000_000, 1) and h["E"] == 1.0
+    assert report.far(conn, "orion-lm", manifest=man) == 0.0                  # the AC false alarm is not here
+    ac = report.far_detail(conn, "orion-lm", manifest=man, partition="access_control")
+    assert (ac["FAR"], ac["n_runs"]) == (1.0, 1)
+    sc = report.far_detail(conn, "orion-lm", manifest=man, partition="scale")
+    assert sc["n_runs"] == 1 and sc["status_counts"] == {"ok": 0, "hung": 0, "crashed": 1, "error": 0, "aborted": 1}
+    sv = report.efficiency_detail(conn, "orion-lm", manifest=man, partition="scale")
+    assert sv["status_counts"]["error"] == 1 and sv["status_counts"]["ok"] == 1 and sv["n_runs"] == 2
+    allr = report.efficiency_detail(conn, "orion-lm", manifest=man, partition=None)
+    assert allr["n_runs"] == 4
+    sec = report.secondary(conn, manifest=man)["arms"]["orion-lm"]
+    assert sec["status_counts"]["patched"]["ok"] == 1 and sec["n_vulns"] == 1
+    assert sec["pair_correct_detail"] is not None                             # pairs from the manifest
+
+
+def test_render_reports_partitions_separately_and_flags_a_missing_manifest(tmp_path):
+    conn = db.connect(str(tmp_path / "t.db"))
+    man = _man({"id": "H", "repo": "o/h"}, {"id": "AC", "repo": "o/ac", "kind": "access_control"},
+               {"id": "S", "repo": "o/s", "tier": "scale"})
+    for arm in ("orion-lm", "plain-opus5"):
+        for rid in ("H", "AC", "S"):
+            seed(conn, arm, rid, "v" + rid, caught=True, tokens=1000)
+    out = report.render(conn, "orion-lm", ["plain-opus5"], manifest=man, B=20)
+    assert "## Primary: headline dataflow rows" in out
+    assert "## Access-control rows (reported separately)" in out and "## Scale tier (reported separately)" in out
+    assert "ok 1 / hung 0 / crashed 0 / error 0 / aborted 0" in out
+    assert "headline 1 rows in 1 repos" in out
+    assert "NOT the pre-registered" in report.render(conn, "orion-lm", ["plain-opus5"], B=20)
+
+
+# ---- m12: Youden J from the OWASP runs' findings ------------------------------------------------------
+
+def _owasp_run(conn, tmp_path, arm, bench, case_id, findings, *, status="ok", write=True):
+    from eval.run import run_dir_for
+    rid = db.start_run(conn, arm=arm, repo=bench, tier="owasp", run_no=1, model_tag="m", cli_versions="",
+                       orion_commit="c", commit_kind="owasp", commit_sha="pin", case_id=case_id)
+    db.finish_run(conn, rid, status)
+    if write:
+        d = run_dir_for(arm, {"id": bench, "commit_sha": "pin", "case_id": case_id, "run_no": 1},
+                        root=str(tmp_path / "runs"))
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "findings.json"), "w") as f:
+            json.dump({"findings": findings}, f)
+
+
+def test_youden_j_is_wired_from_the_owasp_runs(tmp_path):
+    conn = db.connect(str(tmp_path / "t.db"))
+    case = lambda n, real: {"case_id": f"BenchmarkTest0000{n}", "category": "sqli", "real": real,
+                            "cwe": "CWE-89", "file": f"testcode/BenchmarkTest0000{n}.py", "entry": "x"}
+    sample = {"benchmarks": [{"id": "owasp-python", "cases": [case(1, True), case(2, True), case(3, False),
+                                                               case(4, False)]}]}
+    hit = lambda n: [{"file": f"testcode/BenchmarkTest0000{n}.py", "line_start": 3, "cwe": "CWE-89"}]
+    _owasp_run(conn, tmp_path, "plain-opus5", "owasp-python", "BenchmarkTest00001", hit(1))     # TP
+    _owasp_run(conn, tmp_path, "plain-opus5", "owasp-python", "BenchmarkTest00002", [])         # FN
+    _owasp_run(conn, tmp_path, "plain-opus5", "owasp-python", "BenchmarkTest00003", hit(3))     # FP
+    _owasp_run(conn, tmp_path, "plain-opus5", "owasp-python", "BenchmarkTest00004", [], status="crashed",
+               write=False)                                                                     # TN, no file
+    _owasp_run(conn, tmp_path, "plain-opus5", "owasp-python", "BenchmarkTest00009", hit(9))     # not in sample
+    y = report.youden_detail(conn, "plain-opus5", sample, runs_root=str(tmp_path / "runs"))
+    assert (y["tp"], y["fn"], y["fp"], y["tn"]) == (1, 1, 1, 1) and y["youden_j"] == 0.0
+    assert (y["tpr"], y["fpr"], y["n_cases"]) == (0.5, 0.5, 4)
+    assert y["n_no_findings_file"] == 1 and y["n_unknown_case"] == 1
+    assert y["status_counts"]["crashed"] == 1 and y["by_benchmark"]["owasp-python"]["n_cases"] == 4
+    sec = report.secondary(conn, owasp_sample=sample, runs_root=str(tmp_path / "runs"))
+    assert sec["arms"]["plain-opus5"]["youden_j"] == 0.0
+    assert report.secondary(conn)["arms"]["plain-opus5"]["youden_j"] is None       # no sample -> None
+    # the OWASP rows never enter efficiency / FAR
+    assert report.efficiency_detail(conn, "plain-opus5")["n_runs"] == 0
+
+
+def test_youden_j_is_none_when_undefined(tmp_path):
+    conn = db.connect(str(tmp_path / "t.db"))
+    sample = {"benchmarks": [{"id": "owasp-java", "cases": [
+        {"case_id": "BenchmarkTest00001", "real": True, "file": "A.java"}]}]}
+    _owasp_run(conn, tmp_path, "orion-lm", "owasp-java", "BenchmarkTest00001", [])
+    y = report.youden_detail(conn, "orion-lm", sample, runs_root=str(tmp_path / "runs"))
+    assert y["youden_j"] is None and y["fpr"] is None and y["n_cases"] == 1         # no trap case: undefined
