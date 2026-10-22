@@ -273,3 +273,102 @@ def test_non_mlx_backend_reports_no_mlx_peak(tmp_path, monkeypatch):
     lines = []
     _arm(tmp_path, on_line=lines.append)
     assert not any("mlx peak" in l for l in lines)
+
+
+# ---- the REAL orion.lm.engine.discover_lm (no _discover fake): it never raises for a graph or model
+# failure, it turns each into an `error` event and returns. The arm must still tell those runs apart
+# from a genuine "found nothing".
+
+class _GraphStub:
+    """Stands in for orion.graphdb.GraphDB at the level discover_lm's real graph reads use
+    (tools.run_cypher: EXPLAIN, then the query): `n` CandidateFlows, each with one CpgCall node.
+    `fail` makes every query answer with an error, as GraphDB does when Neo4j is down."""
+
+    def __init__(self, n=2, fail=None):
+        self.n, self.fail = n, fail
+
+    def run_cypher(self, scan_id, query, *, limit=None, **kw):
+        if self.fail:
+            return {"error": self.fail}
+        if query.startswith("EXPLAIN"):
+            return {"query_type": "r"}
+        if "CandidateFlow" in query:
+            rows = [{"rank": i, "source_uid": f"s{i}", "sink_uid": f"k{i}", "sink_category": "sql",
+                     "path_uids": [f"c{i}"]} for i in range(self.n)]
+        else:   # one flow's CpgCall nodes
+            import re
+            rows = [{"uid": u, "file": "app.py", "function": "handler", "line": 3,
+                     "code": "db.execute(q)"} for u in re.findall(r"'(c\d+)'", query)]
+        return {"rows": rows, "row_count": len(rows)}
+
+    def close(self):
+        pass
+
+
+class _Model:
+    """generate() raises on the calls listed in `fail_calls` (1-based; "all" = every call), else
+    answers a final action with one lead on whatever flow the prompt names."""
+    backend = "stub"
+
+    def __init__(self, fail_calls="all"):
+        self.fail_calls, self.calls = fail_calls, 0
+
+    def generate(self, messages):
+        from orion.lm.model import GenResult
+        self.calls += 1
+        if self.fail_calls == "all" or self.calls in self.fail_calls:
+            raise RuntimeError("[metal::malloc] Resource limit exceeded")
+        flow = "F1" if "F1" in messages[-1]["content"] else "F0"
+        text = json.dumps({"action": "final", "leads": [{"flow_id": flow, "file": "app.py",
+                           "function": "handler", "line": 3, "cwe": "CWE-89", "confidence": "HIGH"}]})
+        return GenResult(text=text, prompt_tokens=120, completion_tokens=30, cached_tokens=0)
+
+
+def _real_engine(monkeypatch, tmp_path, *, db, model):
+    import orion.graphdb
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    (tree / "app.py").write_text("def handler(q):\n    x = q\n    db.execute(q)\n")
+    monkeypatch.setattr(lm, "_build_graph", lambda repo_dir, on_event: "s1")
+    monkeypatch.setattr(lm, "_load_model", lambda path, **kw: model)
+    monkeypatch.setattr(orion.graphdb, "GraphDB", lambda: db)   # discover_lm opens its own db
+    lines = []
+    res = _arm(tmp_path, repo_dir=str(tree), on_line=lines.append)
+    return res, lines
+
+
+def test_real_engine_every_batch_failing_is_crashed_with_no_findings(tmp_path, monkeypatch):
+    model = _Model(fail_calls="all")
+    res, lines = _real_engine(monkeypatch, tmp_path, db=_GraphStub(n=2), model=model)
+    assert model.calls == 2                                   # both batches really ran
+    assert res.status == "crashed" and res.findings_path is None
+    assert not os.path.exists(tmp_path / "run" / "findings.json")
+    assert sum("[discover/error]" in l for l in lines) == 2
+    assert any("crashed" in l and "all 2 batch" in l for l in lines)
+
+
+def test_real_engine_failed_flow_read_is_crashed_with_no_findings(tmp_path, monkeypatch):
+    model = _Model(fail_calls=())
+    res, lines = _real_engine(monkeypatch, tmp_path, model=model,
+                              db=_GraphStub(fail="ServiceUnavailable: Neo4j is down"))
+    assert model.calls == 0                                   # no batch could run
+    assert res.status == "crashed" and res.findings_path is None
+    assert not os.path.exists(tmp_path / "run" / "findings.json")
+    assert any("crashed" in l and "loading CandidateFlows failed" in l for l in lines)
+
+
+def test_real_engine_some_batches_failing_stays_ok_with_a_summary(tmp_path, monkeypatch):
+    model = _Model(fail_calls={1})                            # batch 1 (F0) fails, batch 2 (F1) answers
+    res, lines = _real_engine(monkeypatch, tmp_path, db=_GraphStub(n=2), model=model)
+    assert res.status == "ok" and res.findings_path == str(tmp_path / "run" / "findings.json")
+    (f,) = normalize.load_arm(res.findings_path, arm="orion-lm")
+    assert (f["file"], f["line"], f["cwe"]) == ("app.py", 3, "CWE-89")
+    assert [s["kind"] for s in res.steps] == ["final"]
+    assert any("1 of 2 batches failed" in l for l in lines)
+
+
+def test_real_engine_no_candidate_flows_is_a_genuine_empty_ok(tmp_path, monkeypatch):
+    model = _Model(fail_calls=())
+    res, lines = _real_engine(monkeypatch, tmp_path, db=_GraphStub(n=0), model=model)
+    assert res.status == "ok" and json.loads(open(res.findings_path).read()) == []
+    assert not any("batches failed" in l or "crashed" in l for l in lines)

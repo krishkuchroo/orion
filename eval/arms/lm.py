@@ -12,6 +12,9 @@ Rules this module is built around:
     ArmResult and `run.run_one` logs them (the one launcher contract).
   * Never fabricated: no leads -> `[]` in findings.json (a valid file, scored as a miss); a crash
     -> no findings file at all; a step without token counts -> None usage fields.
+  * `discover_lm` never raises for a graph or model failure (it emits an `error` event and returns),
+    so the arm reads those failures from its events (`_DiscoveryHealth`): a failed flow read, or every
+    batch failing, is "crashed" -- never an "ok" run that merely found nothing.
 
 Resources: the arm is in-process, so `on_start` gets THIS process (pid = os.getpid()). PhaseSampler
 sums the process and its children, so Joern (joern-parse, a child process) is counted, but the peak RSS
@@ -150,6 +153,58 @@ class _Watchdog:
         return False
 
 
+# The step kinds that end a prompter session normally: `run_session` records exactly one of them right
+# before it returns (orion/lm/prompter.py). A batch whose session raised records none.
+_SESSION_END_KINDS = frozenset({"final", "forced_final", "context_overflow"})
+
+
+class _DiscoveryHealth:
+    """What failed inside `discover_lm`, read from its events and steps. The engine turns a failed flow
+    read and every per-batch session exception into an `error` event and still returns (possibly no)
+    leads, so without this a run whose every batch failed would look like a clean "found nothing".
+
+    Relies on exactly these conventions (pinned by the real-engine tests in eval/tests/test_arms_lm.py):
+      * orion/lm/engine.py `error` event with turn=None -- "loading CandidateFlows failed: ..." (the
+        flow read failed; no batch ran). Any turn-less discover error is treated the same way.
+      * orion/lm/engine.py `error` event with turn=N -- "batch N (...) failed: ..." (that batch's
+        session raised, e.g. model.generate failed; it produced no leads).
+      * orion/lm/prompter.py: a session that returns normally records one `_SESSION_END_KINDS` step.
+    """
+
+    def __init__(self):
+        self.run_errors: list = []        # details of turn-less discover errors
+        self.failed_batches: set = set()  # turns of failed batches
+        self.finished_batches = 0         # sessions that returned normally
+
+    def see_event(self, ev) -> None:
+        if not isinstance(ev, dict) or ev.get("phase") != "discover" or ev.get("event") != "error":
+            return
+        if ev.get("turn") is None:
+            self.run_errors.append(ev.get("detail") or "")
+        else:
+            self.failed_batches.add(ev["turn"])
+
+    def see_step(self, step) -> None:
+        if isinstance(step, dict) and step.get("kind") in _SESSION_END_KINDS:
+            self.finished_batches += 1
+
+    def crash_reason(self):
+        """Why discovery must be recorded "crashed", or None."""
+        if self.run_errors:
+            return f"discovery failed before any batch ran: {self.run_errors[0]}"
+        if self.failed_batches and not self.finished_batches:
+            return f"all {len(self.failed_batches)} batch(es) failed; no session finished"
+        return None
+
+    def partial_summary(self):
+        """A line for a run where only some batches failed (it stays ok/hung), or None."""
+        if self.failed_batches and self.finished_batches:
+            n = len(self.failed_batches)
+            return (f"{n} of {n + self.finished_batches} batches failed "
+                    "(their flows produced no leads)")
+        return None
+
+
 def _write_findings(json_out: str, leads, on_line):
     """findings.json as `orion scan --engine lm --json` writes it; json_out, or None (a miss) if the
     write fails -- never raises, so the run's steps and tokens still reach run_one."""
@@ -184,9 +239,11 @@ def orion_lm_arm(*, arm, repo_dir, model_tag, json_out, on_line, on_start, graph
     hung_seconds watchdog limit: that long with no step or event sets `stop` -> status "hung"
     _ignored     effort / usage_log / base_env from the shared launcher kwargs (unused here)
 
-    Status: "ok"; "hung" (watchdog fired; the forced final's leads are still written); "crashed"
-    (discovery raised: traceback head to on_line, no findings file). A missing model path raises
-    ValueError before anything runs; a build or model-load failure propagates to run_one.
+    Status: "ok" (some batches may have failed: a summary line says how many); "hung" (watchdog
+    fired; the forced final's leads are still written); "crashed" (discovery raised -- traceback head
+    to on_line -- or, read from its events, the flow read failed or every batch failed; no findings
+    file either way). A missing model path raises ValueError before anything runs; a build or
+    model-load failure propagates to run_one.
     """
     if not model_tag or not os.path.exists(model_tag):
         raise ValueError(f"{arm}: model path {model_tag!r} does not exist "
@@ -195,10 +252,12 @@ def orion_lm_arm(*, arm, repo_dir, model_tag, json_out, on_line, on_start, graph
         on_start(types.SimpleNamespace(pid=os.getpid()))
 
     watchdog = None
+    health = _DiscoveryHealth()
 
     def on_event(ev) -> None:
         if watchdog is not None:
             watchdog.touch()
+        health.see_event(ev)
         on_line(_format_event(ev))
 
     # 1. graph: reuse this commit's scan when its record still says it is usable, else build it.
@@ -232,6 +291,7 @@ def orion_lm_arm(*, arm, repo_dir, model_tag, json_out, on_line, on_start, graph
     def on_step(step) -> None:
         if watchdog is not None:
             watchdog.touch()
+        health.see_step(step)
         steps.append(dict(step))
 
     stop = threading.Event()
@@ -245,6 +305,10 @@ def orion_lm_arm(*, arm, repo_dir, model_tag, json_out, on_line, on_start, graph
                 status = "crashed"
                 on_line(f"orion-lm: discovery crashed ({exc.__class__.__name__}: {exc}); "
                         f"{traceback.format_exc()}"[:2000])
+        reason = health.crash_reason() if status == "ok" else None
+        if reason:
+            status = "crashed"
+            on_line(f"orion-lm: discovery crashed: {reason}")
         if status == "ok" and watchdog.fired:
             status = "hung"
             on_line(f"orion-lm: hung: no step or event for {hung_seconds}s; stop was set and the "
@@ -252,11 +316,14 @@ def orion_lm_arm(*, arm, repo_dir, model_tag, json_out, on_line, on_start, graph
     finally:
         model = None
         _free_model_memory()
+    partial = health.partial_summary() if status != "crashed" else None
+    if partial:
+        on_line(f"orion-lm: {partial}")
     peak = _mlx_peak_mb() if backend == "mlx" else None
     if peak is not None:
         on_line(f"orion-lm: mlx peak memory {peak:.1f} MB (Metal buffers; not in resources.peak_rss_mb)")
 
-    # 4. findings: none for a crash (leads unknown), else every lead -- possibly [] -- as --json.
+    # 4. findings: none for a crash (no trustworthy result), else every lead -- possibly [] -- as --json.
     findings_path = None if status == "crashed" else _write_findings(json_out, list(leads or []), on_line)
     return ArmResult(status=status, findings_path=findings_path,
                      usage=[_usage_block(s) for s in steps], steps=steps)
