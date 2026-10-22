@@ -159,7 +159,11 @@ def _patch_main(monkeypatch, tmp_path, statuses, calls):
     from eval import preflight, shim_setup
     man = tmp_path / "m.json"
     man.write_text(json.dumps({"repos": [{"id": "r1", "repo_url": "u", "tier": "headline",
-                                          "vulnerable_commit": "v1", "patched_commit": "p1"}]}))
+                                          "vulnerable_commit": "v1", "patched_commit": "p1",
+                                          "cwe": "CWE-89", "fix_sites": [],
+                                          "accepted_entry_points": [], "labelers": ["k"]}]}))
+    from eval import manifest
+    monkeypatch.setattr(manifest, "split_repos", lambda *a, **k: set())
     monkeypatch.setattr(run.repo, "mirror", lambda *a, **k: None)
     monkeypatch.setattr(preflight, "check", lambda: [])
     monkeypatch.setattr(shim_setup, "shim_dir", lambda: str(tmp_path))
@@ -213,3 +217,19 @@ def test_run_one_keyboard_interrupt_finishes_aborted_and_reraises(tmp_path):
     with pytest.raises(KeyboardInterrupt):
         _run_one(conn, launcher)
     assert conn.execute("select status from runs").fetchone()[0] == "aborted"
+
+
+def test_main_refuses_invalid_manifest_before_mirroring(tmp_path, monkeypatch, capsys):
+    import json
+    from eval import manifest
+    calls = []
+    argv = _patch_main(monkeypatch, tmp_path, [], calls)
+    man = argv[argv.index("--manifest") + 1]
+    open(man, "w").write(json.dumps({"repos": [{"id": "r1", "repo_url": "u", "tier": "headline",
+                                                "vulnerable_commit": "v1"}]}))  # no patched_commit
+    mirrored = []
+    monkeypatch.setattr(run.repo, "mirror", lambda *a, **k: mirrored.append(a))
+    monkeypatch.setattr(manifest, "split_repos", lambda *a, **k: set())
+    assert run.main(argv) == 2
+    assert mirrored == [] and calls == []
+    assert "patched_commit" in capsys.readouterr().out

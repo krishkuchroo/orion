@@ -242,8 +242,7 @@ def build_launcher(*, base_env, shim_dir, graph_cache, _plain=_default_plain, _l
 
 
 def main(argv=None, sleep=time.sleep):
-    import json as _json
-    from . import preflight
+    from . import manifest, preflight
     from .shim_setup import shim_dir as _shim_dir
     ap = argparse.ArgumentParser()
     ap.add_argument("--arm", action="append", choices=ARMS)
@@ -256,7 +255,14 @@ def main(argv=None, sleep=time.sleep):
                     help="seconds to sleep after a usage-limit abort before re-planning")
     args = ap.parse_args(argv)
     arms = args.arm or ARMS
-    repos = _json.loads(open(args.manifest).read())["repos"]  # [{id, repo_url, tier, ...}]
+    data = manifest.load(args.manifest)
+    errors = manifest.validate(data, split_repos=manifest.split_repos())
+    if errors:  # the test set must be clean to run: refuse before mirroring anything
+        print(f"manifest {args.manifest} is invalid ({len(errors)} error(s)):", flush=True)
+        for e in errors:
+            print(f"  {e}", flush=True)
+        return 2
+    repos = data["repos"]  # [{id, repo_url, tier, ...}]
     good = []
     for r in repos:  # mirror once per repo, then pin the commit to check out
         try:
