@@ -134,3 +134,51 @@ def test_entry_points_carry_the_methods_declaration_line_from_a_real_js_scan_sha
     assert (ep["method_full_name"], ep["file"], ep["line"]) == (handler, "a.js", 1)
     mf = pathgt.to_manifest_fields(cp)
     assert mf["fix_sites"][0]["function"] == "sinkfn"
+
+
+# ---- E5 minors (final review): a read error is never "no flow"; all-unresolved has its own reason ---
+
+class FlakyFlowsDB(DB):
+    """The vulnerable scan's CandidateFlow read answers once, then fails (a dropped connection)."""
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.flow_reads = 0
+
+    def run_cypher(self, scan_id, query, limit=50):
+        if "CandidateFlow" in query and scan_id == V:
+            self.flow_reads += 1
+            if self.flow_reads > 1:
+                return {"error": "SessionExpired: connection dropped"}
+        return super().run_cypher(scan_id, query, limit)
+
+
+def test_a_flow_read_error_after_the_first_read_is_query_error_not_no_flow():
+    db = FlakyFlowsDB({V: [FLOW], P: []}, {V: V_CALLS, P: P_CALLS}, [ENTRY])
+    cp = pathgt.candidate_paths(db, V, P, [HUNK])
+    assert cp["reason"] == "query_error" and "connection dropped" in cp["error"]
+    assert cp["reason"] != "no_flow_through_site"
+
+
+def test_the_first_flow_read_failing_is_query_error():
+    class FailFlows(DB):
+        def run_cypher(self, scan_id, query, limit=50):
+            if "CandidateFlow" in query:
+                return {"error": "ServiceUnavailable: down"}
+            return super().run_cypher(scan_id, query, limit)
+    cp = pathgt.candidate_paths(FailFlows({V: [FLOW]}, {V: V_CALLS, P: P_CALLS}, [ENTRY]), V, P, [HUNK])
+    assert cp["reason"] == "query_error" and cp["graph_missed"] is True
+
+
+def test_every_through_flow_unresolved_has_its_own_reason():
+    bad = {**FLOW, "uid": "fl2", "source_uid": "nope"}
+    cp = pathgt.candidate_paths(_db(vflows=(bad,)), V, P, [HUNK])
+    assert cp["flows_through_fix"] == ["fl2"] and cp["flows_unresolved"] == ["fl2"]
+    assert cp["flows_gone_on_patched"] == [] and cp["reason"] == "all_flows_unresolved"
+    assert cp["accepted_entry_points"] == []
+
+
+def test_survived_plus_unresolved_is_still_no_flow_gone_on_patched():
+    bad = {**FLOW, "uid": "fl2", "source_uid": "nope"}
+    cp = pathgt.candidate_paths(_db(vflows=(FLOW, bad), pflows=(PFLOW,)), V, P, [HUNK])
+    assert cp["flows_unresolved"] == ["fl2"] and cp["reason"] == "no_flow_gone_on_patched"

@@ -21,8 +21,11 @@ test set survives one bad pair. `to_manifest_fields` of such a record is all-emp
 
 `graph_missed=True` means the human must add the path by hand; `reason` says why:
 `no_site_nodes` (no hunk maps to any call), `no_flow_through_site` (sites map, no CandidateFlow passes
-through), or `query_error`. When graph_missed is False, `reason` is None, or `no_flow_gone_on_patched`
-when flows pass through the fix but all survive on the patched scan (no entry points proposed).
+through), or `query_error` (any graph read failed, including the read of the flows themselves). When
+graph_missed is False, `reason` is None, or `no_flow_gone_on_patched` when flows pass through the fix
+and none is gone on the patched scan (some survive), or `all_flows_unresolved` when every flow through the
+fix has a source or sink that cannot be matched across the scans (nothing is known about the patched
+side). In both cases no entry points are proposed.
 """
 from __future__ import annotations
 
@@ -61,12 +64,13 @@ def _candidate_paths(db, vuln_scan, patched_scan, hunks, root) -> dict:
     if not fixmap._site_uids(sites):
         cp["reason"] = "no_site_nodes"
         return cp
+    # A read error here raises (-> query_error); it is never reported as "no flow through the site".
     through = fixmap._through(fixmap._flows(db, vuln_scan), fixmap._site_uids(sites))
     cp["flows_through_fix"] = [f["uid"] for f in through]
-    gold, _ = fixmap.gold_flow(db, vuln_scan, sites)
-    if not through or gold is None:
+    if not through:
         cp["reason"] = "no_flow_through_site"
         return cp
+    gold = through[0]   # fixmap.gold_flow's definition: the best-ranked flow through a fix site
     cp["graph_missed"] = False
     cp["sink_uid"] = gold["sink_uid"]
     k = vidx.by_uid.get(gold["sink_uid"])
@@ -81,7 +85,9 @@ def _candidate_paths(db, vuln_scan, patched_scan, hunks, root) -> dict:
     cp["flows_gone_on_patched"] = [f["uid"] for f in gone]
     cp["flows_unresolved"] = [f["uid"] for f in rec.get("flows_unresolved") or []]
     if not gone:
-        cp["reason"] = "no_flow_gone_on_patched"
+        # every through-fix flow unresolved: nothing is known about the patched side
+        unresolved_all = len(cp["flows_unresolved"]) == len(through)
+        cp["reason"] = "all_flows_unresolved" if unresolved_all else "no_flow_gone_on_patched"
         return cp
 
     by_flow = {f["uid"]: f for f in through}
