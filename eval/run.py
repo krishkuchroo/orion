@@ -332,7 +332,7 @@ def main(argv=None, sleep=time.sleep):
             return 2
         benchmarks = sample["benchmarks"]
     repos = data["repos"]  # [{id, repo_url, tier, ...}]
-    good = []
+    good, skipped = [], []   # skipped: (what, id, why) -- reported and exit 1 at the end
     for r in repos:  # mirror once per repo, then pin the commit to check out
         try:
             r["mirror_dir"] = os.path.join(args.mirror_root, r["id"])
@@ -349,6 +349,7 @@ def main(argv=None, sleep=time.sleep):
             good.append(r)
         except Exception as e:
             print(f"SKIPPING repo {r.get('id')}: {e}", flush=True)
+            skipped.append(("manifest row", r.get("id"), str(e)))
     items, meta_by_key = {}, {}
     for r in good:
         case = r.get("case_id", "")
@@ -362,6 +363,7 @@ def main(argv=None, sleep=time.sleep):
             repo.mirror(b["repo_url"], mirror_dir)
         except Exception as e:
             print(f"SKIPPING OWASP benchmark {b['id']}: {e}", flush=True)
+            skipped.append((f"OWASP benchmark ({len(b['cases'])} cases)", b["id"], str(e)))
             continue
         sha = b["pinned_sha"]
         for c in b["cases"]:
@@ -388,6 +390,12 @@ def main(argv=None, sleep=time.sleep):
                 print(f"usage limit hit; resuming in {args.resume_wait}s", flush=True)
                 sleep(args.resume_wait)
                 break
+    if skipped:   # what could run has run; the study is still short these items (a re-run requeues them)
+        print(f"INCOMPLETE: skipped {len(skipped)} item(s) whose mirror or commits could not be set up; "
+              "everything else ran. Re-run to queue them:", flush=True)
+        for what, ident, why in skipped:
+            print(f"  {what} {ident}: {why}"[:2000], flush=True)
+        return 1
     return 0
 
 

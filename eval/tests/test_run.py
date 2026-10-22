@@ -424,3 +424,36 @@ def test_labeled_manifest_runs_without_the_flag_or_a_warning(tmp_path, monkeypat
     argv = _patch_main(monkeypatch, tmp_path, ["ok", "ok"], calls)
     assert run.main(argv) == 0 and len(calls) == 2
     assert "WARNING" not in capsys.readouterr().out
+
+
+# ---- m14: a skipped row or benchmark is not a clean exit ------------------------------------------
+
+def test_a_skipped_row_runs_the_rest_then_exits_nonzero_with_a_summary(tmp_path, monkeypatch, capsys):
+    import json
+    seen, _ = _spy_main(monkeypatch, tmp_path)
+
+    def mirror(url, d, **k):
+        if url == "bad-url":
+            raise RuntimeError("clone failed: repository not found")
+    monkeypatch.setattr(run.repo, "mirror", mirror)
+    m = tmp_path / "m.json"
+    m.write_text(json.dumps({"repos": [LABELED, dict(LABELED, id="r2", repo_url="bad-url")]}))
+    argv = ["--arm", "plain-opus5", "--runs", "1", "--manifest", str(m), "--db", str(tmp_path / "t.db")]
+    assert run.main(argv) == 1
+    assert sorted(meta["id"] for _, meta, _ in seen) == ["r1", "r1"]        # r1 still ran, both commits
+    out = capsys.readouterr().out
+    assert "INCOMPLETE: skipped 1 item(s)" in out and "manifest row r2: clone failed" in out
+
+
+def test_a_skipped_benchmark_exits_nonzero(tmp_path, monkeypatch, capsys):
+    seen, _ = _spy_main(monkeypatch, tmp_path)
+
+    def mirror(url, d, **k):
+        if url.endswith("BenchmarkJava"):
+            raise RuntimeError("network down")
+    monkeypatch.setattr(run.repo, "mirror", mirror)
+    argv = ["--arm", "plain-opus5", "--manifest", "", "--owasp", _owasp_file(tmp_path),
+            "--db", str(tmp_path / "t.db")]
+    assert run.main(argv) == 1
+    assert {meta["id"] for _, meta, _ in seen} == {"owasp-python"}
+    assert "OWASP benchmark (2 cases) owasp-java: network down" in capsys.readouterr().out
