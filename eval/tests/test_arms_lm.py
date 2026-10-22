@@ -733,3 +733,70 @@ def test_an_abort_at_build_returns_the_build_phase(tmp_path, monkeypatch):
     monkeypatch.setattr(lm, "_build_graph", build)
     res = _arm(tmp_path)
     assert res.status == "aborted" and [p["phase"] for p in res.phases] == ["build"]
+
+
+# ---- m5: the in-process arm's import graph never reaches orion.claude_cli ------------------------
+
+_IMPORT_GUARD = r'''
+import json, os, re, sys, tempfile
+from eval import db, run
+from eval.arms import lm
+import orion.graphdb
+
+class G:
+    def run_cypher(self, scan_id, query, *, limit=None, **kw):
+        if query.startswith("EXPLAIN"):
+            return {"query_type": "r"}
+        if "CandidateFlow" in query:
+            return {"rows": [{"rank": 0, "source_uid": "s", "sink_uid": "k", "sink_category": "sql",
+                              "path_uids": ["c0"]}], "row_count": 1}
+        return {"rows": [{"uid": "c0", "file": "app.py", "function": "handler", "line": 3,
+                          "code": "db.execute(q)"}], "row_count": 1}
+    def close(self):
+        pass
+
+class M:
+    backend = "stub"
+    def generate(self, messages):
+        from orion.lm.model import GenResult
+        text = json.dumps({"action": "final", "leads": [{"flow_id": "F0", "file": "app.py",
+                           "function": "handler", "line": 3, "cwe": "CWE-89", "confidence": "HIGH"}]})
+        return GenResult(text=text, prompt_tokens=10, completion_tokens=2, cached_tokens=0)
+
+def export(mirror, sha, dest, **kw):
+    os.makedirs(dest)
+    open(os.path.join(dest, "app.py"), "w").write("def handler(q):\n    x = q\n    db.execute(q)\n")
+
+work = tempfile.mkdtemp()
+os.chdir(work)
+os.makedirs("model")
+lm._build_graph = lambda repo_dir, on_event: "s1"
+lm._pathfind_error = lambda sid: None
+lm._load_model = lambda path, **kw: M()
+orion.graphdb.GraphDB = lambda: G()
+conn = db.connect(os.path.join(work, "t.db"))
+launcher = run.build_launcher(base_env={}, shim_dir="/s", graph_cache={}, _export=export,
+                              tree_root=os.path.join(work, "ws"))
+st = run.run_one(conn, arm="orion-lm", repo_meta={"id": "r1", "commit_sha": "c1", "commit_kind": "vulnerable",
+                 "case_id": "", "mirror_dir": "/m"}, run_no=1, model_tags={"orion-lm": os.path.abspath("model")},
+                 base_env={}, orion_commit="c", cli_versions="", launcher=launcher)
+assert st == "ok", st
+assert conn.execute("SELECT count(*) FROM steps").fetchone()[0] == 1   # the real engine really ran
+bad = sorted(m for m in sys.modules if m == "orion.claude_cli" or m.split(".")[0] in ("anthropic", "openai")
+             or m in ("orion.discover", "orion.verify", "orion.agents"))
+print(json.dumps(bad))
+sys.exit(1 if bad else 0)
+'''
+
+
+def test_a_full_in_process_run_never_imports_claude_cli():
+    """Fresh interpreter (this test module's imports must not mask it): eval.run -> build_launcher ->
+    orion_lm_arm -> the REAL orion.lm.engine.discover_lm (graph and model stubbed) -> run_one; then no
+    orion.claude_cli (nor orion.discover / verify / agents, anthropic, openai) in sys.modules."""
+    import subprocess
+    import sys
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    r = subprocess.run([sys.executable, "-c", _IMPORT_GUARD], cwd=root, capture_output=True, text=True,
+                       env=dict(os.environ, PYTHONPATH=root))
+    assert r.returncode == 0, (r.stdout[-400:], r.stderr[-1500:])
+    assert r.stdout.strip().splitlines()[-1] == "[]"
