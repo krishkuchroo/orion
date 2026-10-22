@@ -82,15 +82,73 @@ def test_build_launcher_deletes_tree_on_failure(tmp_path, monkeypatch):
     assert not os.path.exists(tmp_path / "trees/plain-opus5/r1/c1/k/1/tree")
 
 
-def test_orion_arms_raise_until_task_f3(tmp_path, monkeypatch):
+@pytest.mark.parametrize("arm", ["orion-lm", "orion-lm-base"])
+def test_orion_lm_arms_dispatch_to_the_in_process_arm(tmp_path, monkeypatch, arm):
+    """The default _lm seam runs eval.arms.lm.orion_lm_arm in-process (no `orion scan`, no plain)."""
+    from eval.arms import lm
     monkeypatch.chdir(tmp_path)
+    cache, seen = {}, {}
 
-    def fake_export(mirror, sha, dest, **kw):
-        os.makedirs(dest)
-    launcher = _launcher(tmp_path, _export=fake_export, _plain=lambda **kw: pytest.fail("plain ran"))
-    with pytest.raises(NotImplementedError, match="F3"):
-        launcher("orion-lm", _meta("c1"), "m", lambda l: None, effort="", on_start=None)
-    assert not os.path.exists(tmp_path / "trees/orion-lm/r1/c1/_/1/tree")   # tree still cleaned up
+    def fake_arm(**kw):
+        seen.update(kw)
+        assert os.path.isdir(kw["repo_dir"])                 # the tree exists while the arm runs
+        return ArmResult(status="ok", findings_path=None, usage=[], steps=[])
+    monkeypatch.setattr(lm, "orion_lm_arm", fake_arm)
+    launcher = _launcher(tmp_path, graph_cache=cache, _export=lambda *a, **k: os.makedirs(a[2]),
+                         _plain=lambda **kw: pytest.fail("plain ran"))
+    marker = object()
+    res = launcher(arm, _meta("c1", run_no=3, case_id="k"), "/models/m", lambda l: None,
+                   effort="", on_start=marker)
+    assert res.status == "ok"
+    assert seen["arm"] == arm and seen["model_tag"] == "/models/m" and seen["graph_cache"] is cache
+    assert (seen["run_no"], seen["case_id"], seen["repo_id"], seen["commit_sha"]) == (3, "k", "r1", "c1")
+    assert seen["on_start"] is marker
+    assert seen["json_out"] == str(tmp_path / f"eval/runs/{arm}/r1/c1/k/3/findings.json")
+    assert not os.path.exists(tmp_path / f"trees/{arm}/r1/c1/k/3/tree")   # tree still cleaned up
+
+
+def test_unknown_orion_arm_is_refused(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    launcher = _launcher(tmp_path, _export=lambda *a, **k: os.makedirs(a[2]),
+                         _lm=lambda **kw: pytest.fail("lm ran"),
+                         _plain=lambda **kw: pytest.fail("plain ran"))
+    with pytest.raises(ValueError, match="orion-scan"):
+        launcher("orion-scan", _meta("c1"), "m", lambda l: None, effort="", on_start=None)
+
+
+def test_run_one_logs_an_lm_step_exactly_once(tmp_path, monkeypatch):
+    """Full chain: run_one -> build_launcher -> _default_lm -> orion_lm_arm (heavy seams stubbed).
+    The arm returns its steps; run_one is the only writer of the steps table."""
+    from eval import db
+    from eval.arms import lm
+    monkeypatch.chdir(tmp_path)
+    step = {"step_no": 1, "kind": "final", "query": None, "row_count": None, "prompt_tokens": 50,
+            "completion_tokens": 5, "cached_tokens": 20, "wall_seconds": 0.1, "error": None}
+
+    def fake_discover(scan_id, repo, on_event, **kw):
+        kw["on_step"](dict(step))
+        return []
+    monkeypatch.setattr(lm, "_build_graph", lambda repo_dir, on_event: "s1")
+    monkeypatch.setattr(lm, "_load_model", lambda path, **kw: object())
+    monkeypatch.setattr(lm, "_discover", fake_discover)
+    model = tmp_path / "model"
+    model.mkdir()
+    conn = db.connect(str(tmp_path / "t.db"))
+    launcher = _launcher(tmp_path, _export=lambda *a, **k: os.makedirs(a[2]))
+    status = run.run_one(conn, arm="orion-lm", repo_meta=_meta("c1"), run_no=2,
+                         model_tags={"orion-lm": str(model)}, base_env={}, orion_commit="c",
+                         cli_versions="", launcher=launcher)
+    assert status == "ok"
+    rid, model_tag = conn.execute("SELECT id, model_tag FROM runs").fetchone()
+    assert model_tag == str(model)
+    assert conn.execute("SELECT run_id, step_no, prompt_tokens, cached_tokens FROM steps").fetchall() \
+        == [(rid, 1, 50, 20)]
+    assert conn.execute("SELECT input_tokens, cache_read, cache_write, output_tokens FROM agent_calls"
+                        ).fetchall() == [(30, 20, 0, 5)]
+    rss = conn.execute("SELECT peak_rss_mb FROM resources").fetchone()[0]
+    assert rss is None or rss > 0       # sampled on this process (on_start), never a guessed 0
+    findings = tmp_path / "eval/runs/orion-lm/r1/c1/_/2/findings.json"
+    assert findings.read_text().strip() == "[]"
 
 
 def test_lm_seam_receives_tree_and_graph_cache(tmp_path, monkeypatch):

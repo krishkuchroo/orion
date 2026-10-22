@@ -10,14 +10,16 @@ import time
 from . import db, queue, repo
 from .resources import PhaseSampler
 
-# The five study arms (design 2026-10-18 §5.4). orion-lm* run in-process (Task F3 wires the
-# dispatch); plain-* are the frontier competitors (Claude Code / Codex CLI).
+# The five study arms (design 2026-10-18 §5.4). orion-lm* run in-process (eval/arms/lm.py);
+# plain-* are the frontier competitors (Claude Code / Codex CLI).
 ARMS = ["orion-lm", "orion-lm-base", "plain-sonnet5", "plain-opus5", "plain-gpt"]
+# In-process arm -> the main() flag naming its local model path (that path is its model_tag).
+LM_MODEL_FLAGS = {"orion-lm": "--lm-model", "orion-lm-base": "--lm-base-model"}
 
 # Exact model ids, verified against the installed CLIs on 2026-10-18 (claude 2.1.302,
 # codex-cli 0.155.1): `claude --model <id>` runs and reports the same id in its init/usage
 # events; `codex exec -m <id>` runs. Frozen at pre-registration (orion-lm-prereg-v1).
-# orion-lm* map to the local model path (set in Part F).
+# orion-lm* have no fixed tag: main() maps them to the --lm-model / --lm-base-model path.
 MODEL_TAGS = {
     "plain-sonnet5": "claude-sonnet-5",
     "plain-opus5": "claude-opus-5",
@@ -187,7 +189,8 @@ def _default_plain(**kw):
 
 
 def _default_lm(**kw):
-    raise NotImplementedError("orion-lm arms land in Task F3")
+    from .arms.lm import orion_lm_arm  # in-process: graph build -> model load -> discover_lm
+    return orion_lm_arm(**kw)
 
 
 def run_dir_for(arm, repo_meta, root=os.path.join("eval", "runs")):
@@ -228,10 +231,14 @@ def build_launcher(*, base_env, shim_dir, graph_cache, _plain=_default_plain, _l
             common = dict(arm=arm, repo_dir=tree, model_tag=model_tag, effort=effort,
                           json_out=json_out, usage_log=usage_log, base_env=base_env,
                           on_line=on_line, on_start=on_start)
-            if arm.startswith("orion-"):
-                # in-process orion-lm arms (Task F3); default seam refuses so nothing
-                # silently runs the deleted `orion scan` subprocess path
-                res = _lm(graph_cache=graph_cache, **common)
+            if arm in LM_MODEL_FLAGS:
+                # in-process orion-lm arms: model_tag is the local model path
+                res = _lm(graph_cache=graph_cache, run_no=repo_meta.get("run_no", 1),
+                          case_id=repo_meta.get("case_id", ""), repo_id=repo_meta["id"],
+                          commit_sha=sha, **common)
+            elif arm.startswith("orion-"):
+                # nothing may silently run the removed `orion scan` subprocess path
+                raise ValueError(f"no in-process arm for {arm!r} (known: {sorted(LM_MODEL_FLAGS)})")
             else:
                 # the arm copies its findings.json out of the tree before it is deleted
                 res = _plain(shim_dir=shim_dir, **common)
@@ -253,8 +260,25 @@ def main(argv=None, sleep=time.sleep):
     ap.add_argument("--mirror-root", default="eval/mirrors/")
     ap.add_argument("--resume-wait", type=int, default=900,
                     help="seconds to sleep after a usage-limit abort before re-planning")
+    ap.add_argument("--lm-model", metavar="PATH",
+                    help="local model path for the orion-lm arm (recorded as runs.model_tag)")
+    ap.add_argument("--lm-base-model", metavar="PATH",
+                    help="local model path for the orion-lm-base arm (recorded as runs.model_tag)")
     args = ap.parse_args(argv)
     arms = args.arm or ARMS
+    # A selected orion-lm* arm needs an existing model path. Refuse here, before any run row or
+    # mirror exists: a misconfiguration must never become a terminal, scored 'error' run.
+    model_tags = dict(MODEL_TAGS)
+    given = {"orion-lm": args.lm_model, "orion-lm-base": args.lm_base_model}
+    for arm, flag in LM_MODEL_FLAGS.items():
+        if arm not in arms:
+            continue
+        path = given[arm]
+        if not path or not os.path.exists(path):
+            why = "not given" if not path else f"{path!r} does not exist"
+            print(f"arm {arm} needs {flag} PATH (the local model): {why}", flush=True)
+            return 2
+        model_tags[arm] = os.path.abspath(path)
     data = manifest.load(args.manifest)
     errors = manifest.validate(data, split_repos=manifest.split_repos())
     if errors:  # the test set must be clean to run: refuse before mirroring anything
@@ -298,7 +322,7 @@ def main(argv=None, sleep=time.sleep):
             break
         for arm, repo_id, sha, case, n in todo:
             status = run_one(conn, arm=arm, repo_meta=meta_by_key[(repo_id, sha, case)], run_no=n,
-                             model_tags=MODEL_TAGS, base_env=dict(os.environ),
+                             model_tags=model_tags, base_env=dict(os.environ),
                              orion_commit=orion_commit, cli_versions=versions, launcher=launcher)
             if status == "aborted":
                 print(f"usage limit hit; resuming in {args.resume_wait}s", flush=True)

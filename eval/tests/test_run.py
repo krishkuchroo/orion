@@ -1,5 +1,7 @@
 import os
 
+import pytest
+
 from eval import db, run
 from eval.arms import ArmResult
 
@@ -217,6 +219,46 @@ def test_run_one_keyboard_interrupt_finishes_aborted_and_reraises(tmp_path):
     with pytest.raises(KeyboardInterrupt):
         _run_one(conn, launcher)
     assert conn.execute("select status from runs").fetchone()[0] == "aborted"
+
+
+@pytest.mark.parametrize("arm,flag", [("orion-lm", "--lm-model"), ("orion-lm-base", "--lm-base-model")])
+@pytest.mark.parametrize("given", [None, "missing"])
+def test_main_refuses_lm_arm_without_an_existing_model_path(tmp_path, monkeypatch, capsys, arm, flag,
+                                                            given):
+    """A misconfigured model path is a usage error (exit 2) before any run row or mirror exists,
+    never a terminal, scored 'error' run."""
+    calls, mirrored = [], []
+    argv = _patch_main(monkeypatch, tmp_path, [], calls)
+    monkeypatch.setattr(run.repo, "mirror", lambda *a, **k: mirrored.append(a))
+    argv[argv.index("plain-opus5")] = arm
+    if given:
+        argv += [flag, str(tmp_path / "no-such-model")]
+    assert run.main(argv) == 2
+    assert calls == [] and mirrored == []
+    assert not os.path.exists(tmp_path / "t.db")
+    assert flag in capsys.readouterr().out
+
+
+def test_main_passes_lm_model_paths_as_model_tags(tmp_path, monkeypatch):
+    seen = []
+    argv = _patch_main(monkeypatch, tmp_path, ["ok", "ok"], [])
+    inner = run.run_one
+
+    def spy(conn, **kw):
+        seen.append((kw["arm"], kw["model_tags"].get(kw["arm"])))
+        return inner(conn, **kw)
+    monkeypatch.setattr(run, "run_one", spy)
+    (tmp_path / "mdl").mkdir()
+    argv[argv.index("plain-opus5")] = "orion-lm"
+    monkeypatch.chdir(tmp_path)
+    assert run.main(argv + ["--lm-model", "mdl"]) == 0
+    assert seen == [("orion-lm", str(tmp_path / "mdl"))] * 2   # absolute path -> runs.model_tag
+
+
+def test_main_plain_arms_need_no_lm_model(tmp_path, monkeypatch):
+    calls = []
+    argv = _patch_main(monkeypatch, tmp_path, ["ok", "ok"], calls)
+    assert run.main(argv) == 0 and len(calls) == 2
 
 
 def test_main_refuses_invalid_manifest_before_mirroring(tmp_path, monkeypatch, capsys):

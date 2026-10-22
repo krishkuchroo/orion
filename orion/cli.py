@@ -62,6 +62,23 @@ def _run_dir(scan_id: str) -> str:
     return str(path)
 
 
+def lm_verdicts(leads: list) -> list:
+    """The lm engine's leads as verdicts. There is no independent verifier on this engine (yet), so
+    every lead is reported INCONCLUSIVE "unverified (engine=lm)" -- never an invented CONFIRM.
+    `report._ORDER` ranks INCONCLUSIVE, so the report and --json work unchanged. Shared with the eval
+    harness's in-process orion-lm arm (eval/arms/lm.py), whose findings.json must match --json."""
+    from .contracts import Verdict
+    return [Verdict(lead, "INCONCLUSIVE", "unverified (engine=lm)") for lead in leads]
+
+
+def write_verdicts_json(path, verdicts: list) -> int:
+    """Write `verdicts` as the `--json` payload (a JSON list of dataclasses.asdict(Verdict)) and
+    return how many were written."""
+    payload = [dataclasses.asdict(v) for v in verdicts]
+    Path(path).write_text(json.dumps(payload, indent=2, default=str))
+    return len(payload)
+
+
 def _load_lm_model(path: str):
     """Load the Orion-LM model wrapper for `path` (MLX-LM, llama-cpp fallback). A seam: tests replace
     it, and the MLX import stays inside the lm branch -- `orion.lm.model`'s top level is stdlib-only."""
@@ -234,7 +251,6 @@ def _run_scan(args: argparse.Namespace) -> int:
         # loaded HERE -- after the build -- so Joern and the model are never resident together
         # (16 GB machine). MLX is imported lazily by _load_lm_model; `orion.lm.engine` itself is
         # stdlib + graphdb only.
-        from .contracts import Verdict
         from .lm import engine as lm_engine_mod
 
         on_event(_event("discover", "start",
@@ -246,10 +262,9 @@ def _run_scan(args: argparse.Namespace) -> int:
         on_event(_event("discover", "done", detail=f"{len(leads)} candidate leads"))
 
         # No independent verifier on this engine (yet): say so loudly and report every lead as
-        # INCONCLUSIVE rather than inventing a CONFIRM. `report._ORDER` ranks INCONCLUSIVE, so the
-        # report and --json work unchanged.
+        # INCONCLUSIVE rather than inventing a CONFIRM (lm_verdicts).
         on_event(_event("verify", "done", detail="skipped (engine=lm)"))
-        return [Verdict(lead, "INCONCLUSIVE", "unverified (engine=lm)") for lead in leads]
+        return lm_verdicts(leads)
 
     if args.watch:
         stop = threading.Event()
@@ -284,9 +299,8 @@ def _run_scan(args: argparse.Namespace) -> int:
     print(text)
 
     if args.json:
-        payload = [dataclasses.asdict(v) for v in verdicts]
-        Path(args.json).write_text(json.dumps(payload, indent=2, default=str))
-        print(f"\nwrote {len(payload)} verdicts to {args.json}")
+        n = write_verdicts_json(args.json, verdicts)
+        print(f"\nwrote {n} verdicts to {args.json}")
 
     return 0
 

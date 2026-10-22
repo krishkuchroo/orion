@@ -1,0 +1,275 @@
+import gc
+import json
+import os
+import threading
+import time
+import weakref
+
+import pytest
+
+from eval import normalize, usage
+from eval.arms import ArmResult, lm
+from orion.contracts import Lead
+
+STEP = {"step_no": 0, "kind": "final", "query": None, "row_count": None, "prompt_tokens": 50,
+        "completion_tokens": 5, "cached_tokens": 0, "wall_seconds": 0.1, "error": None}
+
+
+_REAL_FREE = lm._free_model_memory   # before any test patches it
+
+
+class FakeModel:
+    pass
+
+
+def _seams(monkeypatch, *, discover=None, scan_id="s1", problem=None):
+    """Stand-ins for every heavy seam (Joern/Neo4j build, MLX load, discover_lm, MLX cache)."""
+    rec = {"order": [], "loaded": {}, "builds": [], "checked": []}
+
+    def build(repo_dir, on_event):
+        rec["order"].append("build")
+        rec["builds"].append(repo_dir)
+        on_event({"phase": "build", "event": "timing", "detail": "persist: 0.1s"})
+        return scan_id
+
+    def load(path, **kw):
+        rec["order"].append("load")
+        rec["loaded"].update(path=path, **kw)
+        return FakeModel()
+
+    def fake_discover(scan_id, repo, on_event, **kw):
+        rec["order"].append("discover")
+        return (discover or (lambda *a, **k: []))(scan_id, repo, on_event, **kw)
+
+    monkeypatch.setattr(lm, "_build_graph", build)
+    monkeypatch.setattr(lm, "_load_model", load)
+    monkeypatch.setattr(lm, "_discover", fake_discover)
+    monkeypatch.setattr(lm, "_scan_problem",
+                        lambda sid, repo_dir: rec["checked"].append(sid) or problem)
+    monkeypatch.setattr(lm, "_free_model_memory", lambda: rec["order"].append("release"))
+    return rec
+
+
+def _arm(tmp_path, **over):
+    model = tmp_path / "model"
+    model.mkdir(exist_ok=True)
+    kw = dict(arm="orion-lm", repo_dir=str(tmp_path / "tree"), model_tag=str(model),
+              json_out=str(tmp_path / "run" / "findings.json"), on_line=lambda l: None,
+              on_start=lambda p: None, graph_cache={}, run_no=2, repo_id="r", commit_sha="v")
+    kw.update(over)
+    return lm.orion_lm_arm(**kw)
+
+
+def test_orion_lm_arm_returns_armresult_with_steps_and_seeds_by_run_no(tmp_path, monkeypatch):
+    def fake_discover(scan_id, repo, on_event, **kw):
+        kw["on_step"](dict(STEP))
+        return []
+    rec = _seams(monkeypatch, discover=fake_discover)
+    res = _arm(tmp_path)
+    assert isinstance(res, ArmResult) and res.status == "ok"
+    assert rec["loaded"]["seed"] == 2 and rec["loaded"]["path"] == str(tmp_path / "model")
+    assert res.steps == [STEP]          # run_one logs these; the arm writes nothing to the DB
+
+
+def test_usage_is_one_block_per_step_with_the_frontier_T(tmp_path, monkeypatch):
+    steps = [dict(STEP, step_no=1, kind="run_cypher", prompt_tokens=100, cached_tokens=60,
+                  completion_tokens=10),
+             dict(STEP, step_no=2, prompt_tokens=180, cached_tokens=110, completion_tokens=7),
+             dict(STEP, step_no=3, kind="context_overflow", prompt_tokens=None,
+                  completion_tokens=None, cached_tokens=None, error="prompt is 9000 tokens")]
+
+    def fake_discover(scan_id, repo, on_event, **kw):
+        for s in steps:
+            kw["on_step"](s)
+        return []
+    _seams(monkeypatch, discover=fake_discover)
+    res = _arm(tmp_path)
+    assert res.usage[0] == {"uncached_in": 40, "cache_read": 60, "cache_write": 0, "out": 10,
+                            "reasoning": None}
+    assert res.usage[1] == {"uncached_in": 70, "cache_read": 110, "cache_write": 0, "out": 7,
+                            "reasoning": None}
+    # nothing measured -> nothing invented
+    assert res.usage[2] == {"uncached_in": None, "cache_read": None, "cache_write": None,
+                            "out": None, "reasoning": None}
+    # T = sum prompt (cached + uncached) + sum completion, as for the frontier arms
+    assert sum(usage.total(b) for b in res.usage) == (100 + 10) + (180 + 7)
+
+
+def test_no_leads_writes_an_empty_list(tmp_path, monkeypatch):
+    _seams(monkeypatch)
+    res = _arm(tmp_path)
+    assert res.status == "ok" and res.findings_path == str(tmp_path / "run" / "findings.json")
+    assert json.loads(open(res.findings_path).read()) == []
+    assert normalize.load_arm(res.findings_path, arm="orion-lm") == []
+
+
+def test_findings_are_orion_scan_json_and_normalize_reads_them(tmp_path, monkeypatch):
+    lead = Lead(index=0, shape="LM", text="CWE-89 at routes/a.js:3 in f", evidence="model lead",
+                confidence="HIGH", source_uid="u1", sink_uid="u2", file="routes/a.js",
+                function="f", line=3, cwe="CWE-89",
+                path=[{"file": "routes/a.js", "function": "f", "line": 3, "code": "q(x)",
+                       "role": "sink"}])
+    _seams(monkeypatch, discover=lambda *a, **k: [lead])
+    res = _arm(tmp_path, arm="orion-lm-base")
+    raw = json.loads(open(res.findings_path).read())
+    assert raw[0]["decision"] == "INCONCLUSIVE" and raw[0]["reason"] == "unverified (engine=lm)"
+    assert raw[0]["lead"]["shape"] == "LM"
+    (f,) = normalize.load_arm(res.findings_path, arm="orion-lm")
+    assert (f["file"], f["function"], f["line"], f["cwe"]) == ("routes/a.js", "f", 3, "CWE-89")
+    assert f["path"][0]["role"] == "sink"
+
+
+def test_graph_is_built_before_the_model_loads_and_the_model_is_released(tmp_path, monkeypatch):
+    refs = []
+
+    def fake_discover(scan_id, repo, on_event, **kw):
+        refs.append(weakref.ref(kw["model"]))
+        return []
+    rec = _seams(monkeypatch, discover=fake_discover)
+    _arm(tmp_path)
+    assert rec["order"] == ["build", "load", "discover", "release"]
+    gc.collect()
+    assert refs[0]() is None            # the arm keeps no reference to the model
+
+
+def test_graph_cache_reuses_a_scan_per_repo_and_commit(tmp_path, monkeypatch):
+    seen = []
+    rec = _seams(monkeypatch, discover=lambda sid, *a, **k: seen.append(sid) or [])
+    cache, lines = {}, []
+    _arm(tmp_path, graph_cache=cache)
+    _arm(tmp_path, graph_cache=cache, arm="orion-lm-base", repo_dir=str(tmp_path / "tree2"),
+         on_line=lines.append)
+    assert rec["builds"] == [str(tmp_path / "tree")]   # built once
+    assert seen == ["s1", "s1"] and cache == {("r", "v"): "s1"}
+    assert rec["checked"] == ["s1"]                    # the reused scan's record is re-checked
+    assert any("reusing" in l for l in lines)
+    _arm(tmp_path, graph_cache=cache, commit_sha="p")   # another commit is another graph
+    assert len(rec["builds"]) == 2 and cache[("r", "p")] == "s1"
+
+
+def test_unusable_cached_graph_is_rebuilt(tmp_path, monkeypatch):
+    rec = _seams(monkeypatch, problem="scan s1 is incomplete")
+    lines = []
+    _arm(tmp_path, graph_cache={("r", "v"): "s1"}, on_line=lines.append)
+    assert rec["builds"] == [str(tmp_path / "tree")]
+    assert any("scan s1 is incomplete" in l for l in lines)
+
+
+def test_watchdog_sets_stop_after_hung_seconds_and_marks_the_run_hung(tmp_path, monkeypatch):
+    lead = Lead(index=0, shape="LM", text="t", evidence="e", confidence="LOW", file="a.py", line=1)
+
+    def fake_discover(scan_id, repo, on_event, **kw):
+        assert kw["stop"].wait(5), "watchdog never set stop"
+        kw["on_step"](dict(STEP, kind="forced_final"))   # the prompter forces a final answer
+        return [lead]
+    _seams(monkeypatch, discover=fake_discover)
+    lines = []
+    res = _arm(tmp_path, hung_seconds=0.05, on_line=lines.append)
+    assert res.status == "hung"
+    assert res.steps[0]["kind"] == "forced_final"
+    assert len(json.loads(open(res.findings_path).read())) == 1   # the forced final's leads kept
+    assert any("hung" in l and "0.05" in l for l in lines)
+
+
+def test_steady_progress_keeps_the_watchdog_quiet(tmp_path, monkeypatch):
+    def fake_discover(scan_id, repo, on_event, **kw):
+        end = time.monotonic() + 0.6
+        while time.monotonic() < end:
+            on_event({"phase": "discover", "event": "query", "shape": "LM", "detail": "q"})
+            time.sleep(0.02)
+        assert not kw["stop"].is_set()
+        return []
+    _seams(monkeypatch, discover=fake_discover)
+    assert _arm(tmp_path, hung_seconds=0.3).status == "ok"
+
+
+def test_crash_in_discovery_is_crashed_keeps_steps_and_releases_model(tmp_path, monkeypatch):
+    def fake_discover(scan_id, repo, on_event, **kw):
+        kw["on_step"](dict(STEP))
+        raise RuntimeError("boom in session")
+    rec = _seams(monkeypatch, discover=fake_discover)
+    lines = []
+    res = _arm(tmp_path, on_line=lines.append)
+    assert res.status == "crashed" and res.findings_path is None
+    assert not os.path.exists(tmp_path / "run" / "findings.json")   # no leads invented
+    assert res.steps == [STEP] and res.usage[0]["uncached_in"] == 50
+    assert any("boom in session" in l and "Traceback" in l for l in lines)
+    assert rec["order"][-1] == "release"
+
+
+@pytest.mark.parametrize("model_tag", ["", None, "/no/such/model"])
+def test_missing_model_path_raises_before_any_build(tmp_path, monkeypatch, model_tag):
+    rec = _seams(monkeypatch)
+    with pytest.raises(ValueError, match="model"):
+        lm.orion_lm_arm(arm="orion-lm", repo_dir=str(tmp_path), model_tag=model_tag,
+                        json_out=str(tmp_path / "f.json"), on_line=lambda l: None,
+                        on_start=lambda p: None, graph_cache={}, run_no=1, repo_id="r",
+                        commit_sha="v")
+    assert rec["order"] == []
+
+
+def test_on_start_gets_this_process_before_the_build(tmp_path, monkeypatch):
+    rec = _seams(monkeypatch)
+    pids = []
+    _arm(tmp_path, on_start=lambda p: (pids.append(p.pid), rec["order"].append("on_start")))
+    assert pids == [os.getpid()] and rec["order"][:2] == ["on_start", "build"]
+
+
+def test_events_reach_on_line_as_readable_text(tmp_path, monkeypatch):
+    def fake_discover(scan_id, repo, on_event, **kw):
+        on_event({"phase": "discover", "event": "query", "shape": "LM", "turn": 1,
+                  "detail": "batch 1 step 1: run_cypher MATCH (n {scan_id:$scan_id})"})
+        return []
+    _seams(monkeypatch, discover=fake_discover)
+    lines = []
+    _arm(tmp_path, on_line=lines.append)
+    assert any(l.startswith("[build/timing]") for l in lines)
+    assert any(l.startswith("[discover/query] shape=LM turn=1 - batch 1 step 1") for l in lines)
+
+
+def test_case_id_is_accepted_and_flows_stay_none(tmp_path, monkeypatch):
+    seen = {}
+    _seams(monkeypatch, discover=lambda sid, repo, on_event, **kw: seen.update(kw) or [])
+    _arm(tmp_path, case_id="BenchmarkTest00001")
+    assert seen["flows"] is None and isinstance(seen["stop"], threading.Event)
+
+
+def test_findings_write_failure_is_a_miss_not_a_raise(tmp_path, monkeypatch):
+    def fake_discover(scan_id, repo, on_event, **kw):
+        kw["on_step"](dict(STEP))
+        return []
+    _seams(monkeypatch, discover=fake_discover)
+    (tmp_path / "blocker").write_text("a file where the run dir should be")
+    lines = []
+    res = _arm(tmp_path, json_out=str(tmp_path / "blocker" / "findings.json"), on_line=lines.append)
+    assert res.status == "ok" and res.findings_path is None
+    assert res.steps == [STEP]            # the run's tokens still reach run_one
+    assert any("findings.json" in l for l in lines)
+
+
+def test_mlx_backend_cache_is_cleared_and_its_peak_reported(tmp_path, monkeypatch):
+    """The real _free_model_memory clears MLX's cache; MLX's own peak goes to on_line because psutil
+    RSS does not see Metal buffers. A stand-in mlx.core module: no MLX is loaded in tests."""
+    import sys
+    calls = []
+    fake_mx = type(sys)("mlx.core")
+    fake_mx.clear_cache = lambda: calls.append("clear")
+    fake_mx.reset_peak_memory = lambda: calls.append("reset")
+    fake_mx.get_peak_memory = lambda: 512 * 1024 * 1024
+    monkeypatch.setitem(sys.modules, "mlx.core", fake_mx)
+    rec = _seams(monkeypatch)
+    monkeypatch.setattr(lm, "_free_model_memory", _REAL_FREE)
+    monkeypatch.setattr(lm, "_load_model", lambda path, **kw: type("M", (), {"backend": "mlx"})())
+    lines = []
+    _arm(tmp_path, on_line=lines.append)
+    assert calls == ["reset", "clear"]          # peak reset before the load, cache cleared after
+    assert any("mlx peak memory 512.0 MB" in l for l in lines)
+    assert any("backend mlx" in l for l in lines)
+    assert rec["order"] == ["build", "discover"]   # load is the stand-in above; release is real
+
+
+def test_non_mlx_backend_reports_no_mlx_peak(tmp_path, monkeypatch):
+    _seams(monkeypatch)
+    lines = []
+    _arm(tmp_path, on_line=lines.append)
+    assert not any("mlx peak" in l for l in lines)
