@@ -1,0 +1,130 @@
+"""Path ground truth proposed from the fix (plan Task E5, spec 5.4 "Path ground truth").
+
+Humans confirm this; F1's manifest stores it. Nothing here is a label until `labelers` is non-empty.
+
+Method (all graph logic is reused from `train.fixmap`, nothing is re-implemented):
+
+1. fix sites on the VULNERABLE scan (`fixmap.fix_sites`, side="vulnerable").
+2. flows through a fix site = vulnerable CandidateFlows whose `path_uids` contain a fix-site call uid.
+3. "gone on patched" = `fixmap.pair_yield`'s `flows_gone_on_patched` (cross-scan matcher on
+   (file, diff-mapped line, call name); uids hash the scan_id so they are never compared across scans).
+   Flows whose source/sink cannot be matched go to `flows_unresolved`, never to gone.
+4. accepted entry points = EntryPoints that `ENTERS_AT` the method containing the source call of a
+   gone flow (`(e:EntryPoint)-[:ENTERS_AT]->(m:CpgMethod)`, every node scoped by scan_id).
+
+Lead convention: the lead location is the FIX SITE. `sink_uid` / `sink_or_protected_operation` describe
+fixmap's gold flow (best-ranked flow through a fix site); `fix_sites` are the fix-site records.
+
+Error policy: `candidate_paths` never raises. A graph read failure (GraphReadError or any query error)
+returns a record with `error` set (string), `graph_missed=True` and empty lists, so a batch run over the
+test set survives one bad pair. `to_manifest_fields` of such a record is all-empty plus graph_missed=True.
+
+`graph_missed=True` means the human must add the path by hand; `reason` says why:
+`no_site_nodes` (no hunk maps to any call), `no_flow_through_site` (sites map, no CandidateFlow passes
+through), or `query_error`. When graph_missed is False, `reason` is None, or `no_flow_gone_on_patched`
+when flows pass through the fix but all survive on the patched scan (no entry points proposed).
+"""
+from __future__ import annotations
+
+from train import fixmap
+from train.fixmap import GraphReadError  # noqa: F401  -- re-exported for callers
+
+_Q_ENTRIES = ("MATCH (e:EntryPoint {scan_id:$scan_id})-[:ENTERS_AT]->(m:CpgMethod {scan_id:$scan_id}) "
+              "RETURN e.uid AS uid, e.kind AS kind, e.exposure AS exposure, "
+              "m.full_name AS method_full_name")
+
+
+def _empty(error=None, reason=None) -> dict:
+    return {"fix_sites": [], "flows_through_fix": [], "flows_gone_on_patched": [], "flows_unresolved": [],
+            "sink_uid": None, "sink": None, "accepted_entry_points": [],
+            "graph_missed": True, "reason": reason, "error": error}
+
+
+def candidate_paths(db, vuln_scan: str, patched_scan: str, hunks: list[dict], *, root: str | None = None) -> dict:
+    """Propose the path answer key for one pair. Returns
+    {fix_sites: [fixmap site records], flows_through_fix: [flow uid], flows_gone_on_patched: [flow uid],
+     flows_unresolved: [flow uid], sink_uid, sink: {sink_uid, sink_category, file, line, name} | None,
+     accepted_entry_points: [{uid, kind, method_full_name, file, evidence}], graph_missed, reason, error}.
+    `hunks` use fixmap's shape (file, old_file?, old_start, old_end, new_start, new_end). Never raises."""
+    try:
+        return _candidate_paths(db, vuln_scan, patched_scan, hunks, root)
+    except Exception as e:  # noqa: BLE001 -- includes GraphReadError; recorded, never fatal
+        return _empty(error=f"{type(e).__name__}: {e}", reason="query_error")
+
+
+def _candidate_paths(db, vuln_scan, patched_scan, hunks, root) -> dict:
+    vidx = fixmap._ScanIndex(db, vuln_scan, root)
+    sites = fixmap._fix_sites(vidx, hunks, "vulnerable", root, 3)
+    cp = _empty()
+    cp["fix_sites"] = sites
+    if not fixmap._site_uids(sites):
+        cp["reason"] = "no_site_nodes"
+        return cp
+    through = fixmap._through(fixmap._flows(db, vuln_scan), fixmap._site_uids(sites))
+    cp["flows_through_fix"] = [f["uid"] for f in through]
+    gold, _ = fixmap.gold_flow(db, vuln_scan, sites)
+    if not through or gold is None:
+        cp["reason"] = "no_flow_through_site"
+        return cp
+    cp["graph_missed"] = False
+    cp["sink_uid"] = gold["sink_uid"]
+    k = vidx.by_uid.get(gold["sink_uid"])
+    cp["sink"] = {"sink_uid": gold["sink_uid"], "sink_category": gold.get("sink_category"),
+                  "file": k[0] if k else None, "line": k[1] if k else None, "name": k[2] if k else None}
+
+    rec = fixmap.pair_yield(db, "pathgt", hunks, vulnerable_scan_id=vuln_scan,
+                            patched_scan_id=patched_scan, root=root)
+    if str(rec.get("reason") or "").startswith("query_error"):
+        raise GraphReadError(rec["reason"])
+    gone = rec.get("flows_gone_on_patched") or []
+    cp["flows_gone_on_patched"] = [f["uid"] for f in gone]
+    cp["flows_unresolved"] = [f["uid"] for f in rec.get("flows_unresolved") or []]
+    if not gone:
+        cp["reason"] = "no_flow_gone_on_patched"
+        return cp
+
+    by_flow = {f["uid"]: f for f in through}
+    method_file = {r["fn"]: fixmap.norm_path(r.get("f"), root) for r in fixmap._rows(db, vuln_scan, fixmap._Q_METHODS)}
+    entries: dict[str, list[dict]] = {}
+    for r in fixmap._rows(db, vuln_scan, _Q_ENTRIES):
+        entries.setdefault(r.get("method_full_name"), []).append(r)
+    accepted: dict[str, dict] = {}
+    for g in gone:
+        src = vidx.by_uid.get(by_flow[g["uid"]]["source_uid"])
+        method = vidx.method(src[0], src[1]) if src else None
+        for r in entries.get(method, []) if method else []:
+            ev = (f"ENTERS_AT {method}; contains source call at {src[0]}:{src[1]} of flow {g['uid']} "
+                  "(through the fix site, absent on patched)")
+            if r["uid"] in accepted:
+                accepted[r["uid"]]["evidence"] += f"; also flow {g['uid']}"
+            else:
+                accepted[r["uid"]] = {"uid": r["uid"], "kind": r.get("kind"), "method_full_name": method,
+                                      "file": method_file.get(method), "evidence": ev}
+    cp["accepted_entry_points"] = list(accepted.values())
+    return cp
+
+
+def to_manifest_fields(cp: dict) -> dict:
+    """The manifest-v2 subset (all JSON-serialisable), for the labelers to confirm or correct:
+    fix_sites: [{file, line, end_line, function, method_full_name}] (function = last name segment,
+      the shape eval.match.path_levels reads); sink_or_protected_operation: {sink_uid, sink_category,
+      file, line, name} | None; accepted_entry_points: [{uid, kind, method_full_name, file}];
+    entry_evidence: str (one line per entry point, '' if none); labelers: always [] (a human signs);
+    graph_missed: bool (True -> the human adds the path by hand)."""
+    sites = [{"file": s["file"], "line": s["line"], "end_line": s["end"],
+              "function": _last(s.get("method_full_name")), "method_full_name": s.get("method_full_name")}
+             for s in cp.get("fix_sites") or []]
+    eps = cp.get("accepted_entry_points") or []
+    return {"fix_sites": sites,
+            "sink_or_protected_operation": cp.get("sink"),
+            "accepted_entry_points": [{k: e.get(k) for k in ("uid", "kind", "method_full_name", "file")}
+                                      for e in eps],
+            "entry_evidence": "\n".join(f"{e['uid']}: {e.get('evidence')}" for e in eps),
+            "labelers": [],
+            "graph_missed": bool(cp.get("graph_missed"))}
+
+
+def _last(full: str | None) -> str | None:
+    if not full:
+        return None
+    return full.replace(":", ".").split(".")[-1] or full
