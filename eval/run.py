@@ -260,9 +260,10 @@ def _leak_guard(tree):
 def build_launcher(*, base_env, shim_dir, graph_cache, _plain=_default_plain, _lm=_default_lm,
                    _export=repo.export_tree, _strip=owasp.strip_answers, tree_root=None):
     """The launcher run_one calls: export the commit to a fresh tree (no .git) at
-    <tree_root>/<opaque token>/tree (work_dir_for), run the arm, delete the work dir. An OWASP item (repo_meta["case"] set, Task F2) has its answer files stripped right after the
-    export, for every arm, and its case passed to the arm (plain: CASE_PROMPT; orion-lm: the case's
-    flows); a manifest item has case None."""
+    <tree_root>/<opaque token>/tree (work_dir_for), run the arm, delete the work dir. An OWASP item
+    (repo_meta["case"] set, Task F2) has its answer files stripped right after the export, for every
+    arm, and its case passed to the arm (plain: CASE_PROMPT; orion-lm: the case's flows); a manifest
+    item has case None."""
     tree_root = tree_root or os.path.join(tempfile.gettempdir(), TREE_ROOT_NAME)
 
     def launcher(arm, repo_meta, model_tag, on_line, *, effort, on_start):
@@ -327,7 +328,8 @@ def main(argv=None, sleep=time.sleep):
                     help="parent of the per-run work dirs (<root>/<opaque token>/tree); outside any repo")
     ap.add_argument("--mirror-root", default="eval/mirrors/")
     ap.add_argument("--resume-wait", type=int, default=900,
-                    help="seconds to sleep after a usage-limit abort before re-planning")
+                    help="seconds to sleep after an aborted run (a usage limit, or a machine failure "
+                         "under an orion-lm run) before re-planning")
     ap.add_argument("--lm-model", metavar="PATH",
                     help="local model path for the orion-lm arm (recorded as runs.model_tag)")
     ap.add_argument("--lm-base-model", metavar="PATH",

@@ -167,6 +167,14 @@ def _usage_block(step: dict) -> dict:
     }
 
 
+def _carry_phases(exc, phases) -> None:
+    """Attach the phases measured so far to an exception that propagates to run_one (PHASES_ATTR)."""
+    try:
+        setattr(exc, PHASES_ATTR, list(phases))
+    except (AttributeError, TypeError):   # an exception type without attributes: the phase is lost, not invented
+        pass
+
+
 def _format_event(ev) -> str:
     return _event_line(ev) if isinstance(ev, dict) else str(ev)
 
@@ -386,7 +394,7 @@ def orion_lm_arm(*, arm, repo_dir, model_tag, json_out, on_line, on_start, graph
     except Exception as exc:
         if infra.is_infra(exc):
             return aborted(f"graph build: {what(exc)}")
-        setattr(exc, PHASES_ATTR, list(phases))   # run_one still logs the failed build's phase
+        _carry_phases(exc, phases)   # run_one still logs the failed build's phase
         raise   # a genuine build failure: run_one records "error"
     if on_start is not None:   # the `run` phase starts here: post-build work only
         on_start(types.SimpleNamespace(pid=os.getpid()))
@@ -430,7 +438,7 @@ def orion_lm_arm(*, arm, repo_dir, model_tag, json_out, on_line, on_start, graph
     try:
         model = _load_model(model_tag, seed=run_no)
     except Exception as exc:
-        setattr(exc, PHASES_ATTR, list(phases))
+        _carry_phases(exc, phases)
         raise   # a genuine model-load failure: run_one records "error"
     backend = getattr(model, "backend", None)
     on_line(f"orion-lm: model loaded (backend {backend or 'unknown'})")
