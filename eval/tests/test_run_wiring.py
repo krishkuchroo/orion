@@ -131,6 +131,7 @@ def test_run_one_logs_an_lm_step_exactly_once(tmp_path, monkeypatch):
     monkeypatch.setattr(lm, "_build_graph", lambda repo_dir, on_event: "s1")
     monkeypatch.setattr(lm, "_load_model", lambda path, **kw: object())
     monkeypatch.setattr(lm, "_discover", fake_discover)
+    monkeypatch.setattr(lm, "_pathfind_error", lambda sid: None)
     model = tmp_path / "model"
     model.mkdir()
     conn = db.connect(str(tmp_path / "t.db"))

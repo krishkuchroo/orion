@@ -16,6 +16,7 @@ STEP = {"step_no": 0, "kind": "final", "query": None, "row_count": None, "prompt
 
 
 _REAL_FREE = lm._free_model_memory   # before any test patches it
+_REAL_PATHFIND_ERROR = lm._pathfind_error
 
 
 class FakeModel:
@@ -47,6 +48,7 @@ def _seams(monkeypatch, *, discover=None, scan_id="s1", problem=None):
     monkeypatch.setattr(lm, "_scan_problem",
                         lambda sid, repo_dir: rec["checked"].append(sid) or problem)
     monkeypatch.setattr(lm, "_free_model_memory", lambda: rec["order"].append("release"))
+    monkeypatch.setattr(lm, "_pathfind_error", lambda sid: None)
     return rec
 
 
@@ -332,6 +334,7 @@ def _real_engine(monkeypatch, tmp_path, *, db, model):
     monkeypatch.setattr(lm, "_build_graph", lambda repo_dir, on_event: "s1")
     monkeypatch.setattr(lm, "_load_model", lambda path, **kw: model)
     monkeypatch.setattr(orion.graphdb, "GraphDB", lambda: db)   # discover_lm opens its own db
+    monkeypatch.setattr(lm, "_pathfind_error", lambda sid: None)
     lines = []
     res = _arm(tmp_path, repo_dir=str(tree), on_line=lines.append)
     return res, lines
@@ -372,3 +375,62 @@ def test_real_engine_no_candidate_flows_is_a_genuine_empty_ok(tmp_path, monkeypa
     res, lines = _real_engine(monkeypatch, tmp_path, db=_GraphStub(n=0), model=model)
     assert res.status == "ok" and json.loads(open(res.findings_path).read()) == []
     assert not any("batches failed" in l or "crashed" in l for l in lines)
+
+
+# ---- a pathfind failure at BUILD time: graph_build._precompute keeps {"error": ...} in the scan
+# record (counts.precompute.pathfind) and persists no CandidateFlows, so discovery would see zero
+# flows and report a clean empty result. The arm reads the record and calls that run crashed.
+
+PATHFIND_FAILED = {"scan_id": "s1", "status": "complete", "profile": "generic+lm",
+                   "counts": {"nodes": {}, "edges": {}, "mismatches": [],
+                              "precompute": {"reachability": {"reached_methods": 3},
+                                             "pathfind": {"error": "RecursionError: maximum recursion "
+                                                                   "depth exceeded"}}}}
+PATHFIND_OK = dict(PATHFIND_FAILED, counts=dict(PATHFIND_FAILED["counts"], precompute={
+    "pathfind": {"flows": 4, "sources": 2, "sinks": 3}}))
+
+
+def _record(monkeypatch, rec):
+    """The real _pathfind_error over a stand-in for the public scans.get_record (no Neo4j)."""
+    from orion.graph import scans
+    monkeypatch.setattr(lm, "_pathfind_error", _REAL_PATHFIND_ERROR)
+    monkeypatch.setattr(scans, "get_record", lambda sid: rec)
+
+
+def test_pathfind_error_reads_the_scan_record(monkeypatch):
+    _record(monkeypatch, PATHFIND_FAILED)
+    assert lm._pathfind_error("s1") == "RecursionError: maximum recursion depth exceeded"
+    _record(monkeypatch, PATHFIND_OK)
+    assert lm._pathfind_error("s1") is None
+    _record(monkeypatch, None)                     # no record: the flows cannot be confirmed
+    assert "no OrionScan record" in lm._pathfind_error("s1")
+
+
+def test_fresh_build_whose_pathfind_failed_is_crashed(tmp_path, monkeypatch):
+    rec = _seams(monkeypatch)
+    _record(monkeypatch, PATHFIND_FAILED)
+    lines = []
+    res = _arm(tmp_path, on_line=lines.append)
+    assert res.status == "crashed" and res.findings_path is None
+    assert not os.path.exists(tmp_path / "run" / "findings.json")
+    assert any("crashed" in l and "maximum recursion depth exceeded" in l for l in lines)
+    assert rec["order"] == ["build"]               # no model loaded, no discovery
+    assert res.steps == [] and res.usage == []
+
+
+def test_cached_scan_whose_pathfind_failed_is_crashed(tmp_path, monkeypatch):
+    rec = _seams(monkeypatch)                      # _scan_problem says the record is usable
+    _record(monkeypatch, PATHFIND_FAILED)
+    lines = []
+    res = _arm(tmp_path, graph_cache={("r", "v"): "s1"}, on_line=lines.append)
+    assert res.status == "crashed" and res.findings_path is None
+    assert not os.path.exists(tmp_path / "run" / "findings.json")
+    assert any("crashed" in l and "maximum recursion depth exceeded" in l for l in lines)
+    assert rec["builds"] == [] and rec["checked"] == ["s1"] and rec["order"] == []
+
+
+def test_recorded_pathfind_summary_lets_the_run_proceed(tmp_path, monkeypatch):
+    rec = _seams(monkeypatch)
+    _record(monkeypatch, PATHFIND_OK)
+    assert _arm(tmp_path).status == "ok"
+    assert rec["order"] == ["build", "load", "discover", "release"]

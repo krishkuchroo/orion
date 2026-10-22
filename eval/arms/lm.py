@@ -15,6 +15,9 @@ Rules this module is built around:
   * `discover_lm` never raises for a graph or model failure (it emits an `error` event and returns),
     so the arm reads those failures from its events (`_DiscoveryHealth`): a failed flow read, or every
     batch failing, is "crashed" -- never an "ok" run that merely found nothing.
+  * The same holds one step earlier: a pathfind failure at build time is kept in the scan's OrionScan
+    record and leaves the graph with no CandidateFlows. The arm reads the record for a fresh build
+    and for a cached reuse alike (`_pathfind_error`); such a run is "crashed" before the model loads.
 
 Resources: the arm is in-process, so `on_start` gets THIS process (pid = os.getpid()). PhaseSampler
 sums the process and its children, so Joern (joern-parse, a child process) is counted, but the peak RSS
@@ -25,7 +28,7 @@ mx.get_active_memory() read 1024 MB). The model's memory is therefore reported s
 event line with MLX's own peak (`mx.get_peak_memory`), when MLX is the backend.
 
 Seams (tests replace them; nothing in the tests touches Neo4j, Joern, MLX or a model):
-`_build_graph`, `_scan_problem`, `_load_model`, `_discover`, `_free_model_memory`.
+`_build_graph`, `_scan_problem`, `_pathfind_error`, `_load_model`, `_discover`, `_free_model_memory`.
 """
 import gc
 import os
@@ -64,6 +67,24 @@ def _scan_problem(scan_id: str, repo_dir: str):
     another profile), or None. Same gate as `orion scan --scan-id ... --engine lm`."""
     from orion.graph import scans
     return scans.check_usable(scan_id, engine="lm", repo=repo_dir)
+
+
+def _pathfind_error(scan_id: str):
+    """The error the build's pathfind step left in the scan's OrionScan record, or None when the
+    CandidateFlows were computed. graph_build._precompute turns a pathfind exception into
+    {"error": ...}, mark_complete stores it under counts.precompute.pathfind and no CandidateFlow is
+    persisted (`orion reanalyze` replaces the entry with a fresh summary). A scan with no record at all
+    cannot be confirmed, so that is reported as a problem too (fails closed)."""
+    from orion.graph import scans
+    rec = scans.get_record(scan_id)
+    if rec is None:
+        return f"scan {scan_id} has no {scans.RECORD} record; its CandidateFlows cannot be confirmed"
+    counts = rec.get("counts")
+    precompute = counts.get("precompute") if isinstance(counts, dict) else None
+    pathfind = precompute.get("pathfind") if isinstance(precompute, dict) else None
+    if isinstance(pathfind, dict) and pathfind.get("error"):
+        return str(pathfind["error"])
+    return None
 
 
 def _load_model(path: str, **sampling):
@@ -241,9 +262,9 @@ def orion_lm_arm(*, arm, repo_dir, model_tag, json_out, on_line, on_start, graph
 
     Status: "ok" (some batches may have failed: a summary line says how many); "hung" (watchdog
     fired; the forced final's leads are still written); "crashed" (discovery raised -- traceback head
-    to on_line -- or, read from its events, the flow read failed or every batch failed; no findings
-    file either way). A missing model path raises ValueError before anything runs; a build or
-    model-load failure propagates to run_one.
+    to on_line -- or, read from its events, the flow read failed or every batch failed -- or the scan
+    record says pathfind failed at build; no findings file in any of these). A missing model path
+    raises ValueError before anything runs; a build or model-load failure propagates to run_one.
     """
     if not model_tag or not os.path.exists(model_tag):
         raise ValueError(f"{arm}: model path {model_tag!r} does not exist "
@@ -275,6 +296,14 @@ def orion_lm_arm(*, arm, repo_dir, model_tag, json_out, on_line, on_start, graph
         scan_id = _build_graph(repo_dir, on_event)
         graph_cache[key] = scan_id
         on_line(f"orion-lm: graph built, scan_id {scan_id}")
+    # A graph whose pathfind failed holds no CandidateFlows: discovery would report a clean "found
+    # nothing". Crashed instead, before the model is loaded (fresh build and cached reuse alike).
+    flow_error = _pathfind_error(scan_id)
+    if flow_error:
+        on_line(f"orion-lm: discovery crashed: scan {scan_id} has no usable CandidateFlows "
+                f"({flow_error}); rebuild it or run "
+                f"`orion reanalyze --scan-id {scan_id} --engine lm`")
+        return ArmResult(status="crashed", findings_path=None, usage=[], steps=[])
 
     # 2. model: loaded only now, after Joern is gone; seed = run number.
     on_line(f"orion-lm: loading model {model_tag} (seed {run_no})")
