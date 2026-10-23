@@ -136,13 +136,50 @@ CVEs (vulnerable AND patched commits) + OWASP Benchmark as the false-alarm set.
   `agent_calls`/`resources`; Codex usage parsed from the wrong level; `MODEL_TAGS` says
   `gemma3:12b`; plain Claude arms pass no `--model`; frontier agents have web access (answer lookup).
   Fixed by plan Part A (A1–A6, done and reviewed). Scoring code exists (`eval/normalize.py`,
-  `eval/match.py`, `eval/report.py`; E1–E3); `eval/judge.py` (E4) is not built. Neither
-  `eval-prereg-v1` nor `orion-lm-prereg-v1` has been tagged.
+  `eval/match.py`, `eval/report.py`, `eval/judge.py`; E1–E4). Neither `eval-prereg-v1` nor
+  `orion-lm-prereg-v1` has been tagged.
+- **Harness finished (2026-10-22, branch `eval/orion-lm-finish`, NOT merged):** E4 judge, E5
+  `eval/pathgt.py`, F0 test-set miner, F1 `eval/manifest.py`, F3 in-process arm `eval/arms/lm.py`,
+  F2 `eval/owasp.py` + `eval/precheck.py`, plus the final-review fixes. Each task was reviewed. The
+  rulings and open items are in the gitignored ledger
+  `.superpowers/sdd/2026-10-18-orion-lm/progress.md`. The committed `-progress.md` stops at E3.
+  - Test set: `eval/dataset/manifest.json`, 208 dataflow + 50 access-control headline rows.
+    - Mined from the 2026-10-18 OSV zips, the SAME zips that built the training leak set. A fresher
+      export needs the leak set rebuilt first.
+    - Audit: `eval/dataset/testset_candidates.json`; funnel: `docs/notes/orion-lm-testset.md`.
+    - Path fields and labels are empty until `pathgt` runs and the labelers sign.
+  - `eval.run` refuses unlabeled manifest rows. `--unlabeled-ok` is for smoke runs only. Other
+    flags:
+    - `--lm-model` / `--lm-base-model` set the orion-lm* paths. There is no default, and main
+      refuses without them.
+    - `--owasp eval/dataset/owasp_sample.json` adds the 120 OWASP cases.
+  - `python -m eval.precheck --manifest … [--write]` checks both commits of each row and moves a
+    failing row to the scale tier. `python -m eval.pathgt --manifest … [--write]` writes the
+    proposed answer-key fields.
+    - Both need Neo4j + Joern and have NOT run for real.
+    - Without `--write` they write only a report. `--write` never touches labeled rows; never run
+      `pathgt --write` during labeling.
+  - Machine failures (Neo4j down, Joern missing) are `aborted` and retried, never scored (helper:
+    `eval/infra.py`). Joern full name → function name goes through the shared helper
+    `eval/names.py` (Java names carry a `:signature`).
+  - OWASP pins: BenchmarkJava `a0f07b8`, BenchmarkPython `f129148`. `strip_answers` removes the
+    answer CSV, the per-case XML and the scorecards, never build files.
+  - Krish decides before the tag or scored runs:
+    - confine frontier arms' file reads: mirrors, OWASP CSVs and the manifest are readable;
+    - the Java OWASP comments that hint the answer (17/30 traps);
+    - the test-set N (208 vs ≈60);
+    - whether error/crashed runs count in FAR;
+    - orion-lm path nodes carry callee names;
+    - the OWASP category is given only to the plain arms;
+    - the code index's bare-name context pulls other OWASP cases in;
+    - the 300-flow cap on OWASP Java.
 - **Research artifacts** (OSV counting scripts, OWASP CSVs, paper extracts):
   `~/Documents/OrionLutherLeo/orion-lm-research/` (outside the repo).
 - **Git (2026-10-20):** `main` on `krish` now holds the open-weight study (PRs #2/#3), Orion-LM
   (#4) and graph hardening (#5). Merge PRs with a merge commit, never squash: docs cite commit
   SHAs. Merging into `main` needs Krish (Claude Code's auto mode blocks merges without review).
+  `eval/orion-lm-finish` (cut from `main` at bde678e) holds the 2026-10-22 harness work, local and
+  unpushed.
 - Facts to remember: Unsloth pip can't train on Apple Silicon; Gemma 4 12B peaks ≈9.4 GB at 4k on
   M4 16 GB (too tight with Neo4j) → E4B / Granite 4.1 8B bake-off; base model must publish a
   training cutoff before 2026-05-31; ≈40% of repos with post-cutoff advisories also have pre-cutoff
@@ -282,7 +319,15 @@ FLOWS_TO 217 (NodeGoat) and 1075 (PyGoat), default `orion scan` output unchanged
   `tests/test_stream_build.py::test_stream_flows_parity` (217) as the tripwire.
 - The token-free suite is Orion's own `tests/` (`pytest -m "not slow"`; on `main` 2026-10-20:
   385 passed / 44 skipped with Neo4j down — live tests skip without Neo4j or their opt-in, see
-  `tests/conftest.py`; `train/tests` + `eval/tests`: 441 passed). Tests that read
+  `tests/conftest.py`; `train/tests` + `eval/tests`: 441 passed on `main`, 760 on
+  `eval/orion-lm-finish`).
+- The `orion-train` worktree has no `.venv`: symlink `../orion/.venv`, which is excluded via
+  `.git/info/exclude` and must never be committed. Run eval CLIs as `./.venv/bin/python -m eval.X`:
+  under `-I` the `eval` package does not import. Keep `-I` for scripts that read downloaded data.
+- The `orion-neo4j` container is often stopped (`docker ps`; bolt port 7688). Live builds, the
+  precheck and pathgt need it up.
+- psutil RSS does not see MLX (unified) memory, so the lm arm stores MLX's own peak in
+  `resources.mlx_peak_mb`. Tests that read
   `fixtures/NodeGoat` fail in a fresh worktree, because `fixtures/` is gitignored. `pyproject.toml`
   sets `testpaths = ["tests"]` so bare pytest does NOT recurse into the gitignored `fixtures/` scan
   targets (e.g. a Django authentik checkout with hundreds of `django`-importing test files whose own
