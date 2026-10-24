@@ -1,0 +1,8 @@
+Key: uid, but CpgMethod.full_name
+CpgCall: name code file_path line reachable_from_entry
+CpgMethod: name file_path line
+CpgFile: file_path
+CandidateFlow: rank sink_category source_uid sink_uid (= CpgCall.uid)
+(CpgMethod)-[:CONTAINS_CALL]->(CpgCall)-[:RESOLVES_TO]->(CpgMethod)-[:DEFINED_IN]->(CpgFile)
+(CpgCall)-[:FLOWS_TO]->(CpgCall); (EntryPoint)-[:ENTERS_AT]->(CpgMethod)
+Every labeled node pattern carries {scan_id:$scan_id}.

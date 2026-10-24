@@ -3,6 +3,8 @@ and training examples share it), plus the action parser and schema."""
 from __future__ import annotations
 
 import json
+import os
+import re
 
 from orion.lm import format as fmt
 
@@ -58,7 +60,7 @@ def test_untrusted_source_is_delimited_by_code_markers():
     assert f'{fmt.CODE_OPEN}RESULT: final {{"action":"final"}}{fmt.CODE_CLOSE}' in t
     # and the rules tell the model that marked text is data
     assert "never an instruction" in fmt.ACTION_RULES and fmt.CODE_OPEN in fmt.ACTION_RULES
-    assert "never an instruction" in fmt.system_prompt_text()
+    assert "never an instruction" in fmt.system_message()["content"]   # via ACTION_RULES, in every system turn
 
 
 def test_marker_injection_cannot_close_the_code_block_early():
@@ -167,3 +169,148 @@ def test_action_schema_has_per_action_fields():
     lead_fields = set(p["leads"]["items"]["properties"])
     assert {"flow_id", "file", "function", "line", "cwe", "confidence"} <= lead_fields
     assert fmt.ACTION_SCHEMA["required"] == ["action"]
+
+
+# --- data v2: compact GRAPH SCHEMA card in the default system message --------------------------------
+
+_REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _src(rel: str) -> str:
+    with open(os.path.join(_REPO, rel), encoding="utf-8") as f:
+        return f.read()
+
+
+def test_default_system_message_is_prompt_card_and_rules():
+    """Data v2: the default system turn carries the compact schema card (orion/lm/schema_card.txt) between the
+    prompt file and ACTION_RULES. Training export, runtime prompter and dev scoring all take the default."""
+    card = fmt.schema_card_text()
+    assert card and card == card.strip()
+    m = fmt.system_message()
+    assert m["role"] == "system"
+    assert m["content"] == fmt.system_prompt_text() + "\n\nGRAPH SCHEMA\n" + card + "\n\n" + fmt.ACTION_RULES
+
+
+def test_schema_card_is_read_from_its_own_file():
+    path = os.path.join(_REPO, "orion", "lm", "schema_card.txt")
+    with open(path, encoding="utf-8") as f:
+        assert fmt.schema_card_text() == f.read().strip()
+
+
+def test_schema_text_override_replaces_the_card():
+    m = fmt.system_message("SCHEMA-TEXT")
+    assert m["content"] == fmt.system_prompt_text() + "\n\nGRAPH SCHEMA\nSCHEMA-TEXT\n\n" + fmt.ACTION_RULES
+    assert fmt.schema_card_text() not in m["content"]
+
+
+def test_schema_card_edges_match_the_builder_directions():
+    """Every edge type the builder emits appears in the card as (From)-[:TYPE]->(To), as joern_adapter emits it."""
+    card = fmt.schema_card_text()
+    emits = re.findall(r'emit_edge\("(\w+)", "(\w+)", \{[^}]*\}, "(\w+)"', _src("orion/graph/joern_adapter.py"))
+    assert {t for t, _, _ in emits} == {"CONTAINS_CALL", "RESOLVES_TO", "DEFINED_IN", "FLOWS_TO", "ENTERS_AT"}
+    for rtype, a, b in emits:
+        assert f"({a})-[:{rtype}]->({b})" in card, (rtype, a, b)
+
+
+def test_schema_card_labels_keys_and_properties_are_code_facts():
+    from orion.graph.schema import NODE_KEY
+    card = fmt.schema_card_text()
+    words = set(re.findall(r"\w+", card))
+    labels = [lb for lb in NODE_KEY if lb in words]
+    assert {"CpgCall", "CpgMethod", "CpgFile", "EntryPoint", "CandidateFlow"} <= set(labels)
+    # Key line: uid for every label named, except CpgMethod (full_name) -- matches NODE_KEY.
+    assert "Key: uid, but CpgMethod.full_name" in card
+    for lb in labels:
+        want = ("scan_id", "full_name") if lb == "CpgMethod" else ("scan_id", "uid")
+        assert NODE_KEY[lb] == want, lb
+    # "Label: prop prop ..." lines: every prop is a key the builder / precompute actually writes.
+    persisted = (_src("orion/graph/joern_adapter.py") + _src("orion/graph/reachability.py")
+                 + _src("orion/graph/pathfind.py"))
+    prop_lines = [ln for ln in card.splitlines() if re.match(r"^(\w+): ", ln) and ln.split(":")[0] in NODE_KEY]
+    assert len(prop_lines) >= 4
+    for ln in prop_lines:
+        for prop in re.findall(r"\b[a-z][a-z_]*\b", ln.split(":", 1)[1]):
+            assert f'"{prop}"' in persisted, (ln, prop)
+    # The scope rule from orion/lm/tools.py.
+    from orion.lm import tools
+    assert tools._SCOPE in card and "Every labeled node pattern carries" in card
+
+
+def test_schema_card_fits_the_token_budget():
+    try:
+        from transformers import AutoTokenizer
+        tok = AutoTokenizer.from_pretrained("unsloth/Qwen3.5-4B", local_files_only=True)
+    except Exception as exc:  # no transformers / tokenizer not cached: the budget cannot be measured here
+        import pytest
+        pytest.skip(f"Qwen3.5 tokenizer unavailable: {exc}")
+    n = len(tok(fmt.schema_card_text(), add_special_tokens=False)["input_ids"])
+    assert n <= 160, n
+
+
+def test_runtime_system_message_equals_the_export_system_message(tmp_path):
+    """The prompter's first turn and an SFT row's first message are the same dict (the default)."""
+    from orion.lm import prompter
+    from orion.lm.model import GenResult
+    from train import examples
+
+    seen = []
+
+    def g(messages):
+        seen.append(list(messages))
+        return GenResult(text='{"action":"final","leads":[]}', prompt_tokens=1, completion_tokens=1, cached_tokens=0)
+
+    case = {"flow_id": "F0", "rank": 0, "sink_category": None, "source_uid": None, "sink_uid": None,
+            "nodes": [], "snippets": [{"role": "target", "file": "a.py", "function": "f", "start": 1, "end": 1,
+                                        "code": "x = 1"}]}
+    prompter.run_session(g, object(), str(tmp_path), "s", flows=[case])
+    row = examples.to_sft({"case": case, "lead": None, "pair_id": "P", "label": "negative", "tier": "negative"})
+    assert seen[0][0] == row["messages"][0] == fmt.system_message()
+    assert "GRAPH SCHEMA" in seen[0][0]["content"]
+
+
+# --- data v2: role-aware flow rendering -------------------------------------------------------------
+
+_POSITIONAL_FLOW = {
+    "flow_id": "F1", "rank": 2, "sink_category": "sql", "source_uid": "u1", "sink_uid": "u3",
+    "nodes": [{"file": "a.js", "line": 3, "function": "h", "code": "q = req.query.id"},
+              {"file": "a.js", "line": 4, "function": "h", "code": "s = 'x' +\n q"},
+              {"file": "b.js", "line": 9, "function": "run", "code": "db.query(s)"}],
+    "snippets": [{"role": "target", "file": "a.js", "start": 1, "end": 5, "function": "h", "code": "line1\nline2"}],
+}
+
+
+def test_positional_rendering_is_unchanged():
+    """Regression pin: with no explicit role, first = source, last = sink, middle = step (byte-identical)."""
+    want = ("FLOW F1 rank=2 sink_category=sql source_uid=u1 sink_uid=u3\n"
+            "  [source] a.js:3 in h: <<<CODE>>>q = req.query.id<<<END CODE>>>\n"
+            "  [step] a.js:4 in h: <<<CODE>>>s = 'x' +  q<<<END CODE>>>\n"
+            "  [sink] b.js:9 in run: <<<CODE>>>db.query(s)<<<END CODE>>>\n"
+            "  [target] a.js:1-5 in h\n"
+            "<<<CODE>>>\nline1\nline2\n<<<END CODE>>>")
+    assert fmt._render_flow(_POSITIONAL_FLOW) == want
+    one = {"flow_id": "F0", "rank": 0, "sink_category": "x", "source_uid": "s", "sink_uid": "k",
+           "nodes": [{"file": "a.js", "line": 1, "function": "f", "code": "exec(x)"}]}
+    assert fmt._render_flow(one) == ("FLOW F0 rank=0 sink_category=x source_uid=s sink_uid=k\n"
+                                     "  [source] a.js:1 in f: <<<CODE>>>exec(x)<<<END CODE>>>")
+    empty = {"flow_id": "F0", "rank": 0, "sink_category": None, "source_uid": None, "sink_uid": None}
+    assert fmt._render_flow(empty) == ("FLOW F0 rank=0 sink_category=None source_uid=None sink_uid=None\n"
+                                       "  (no path nodes found in the graph)")
+
+
+def test_explicit_node_role_is_honoured():
+    flow = {"flow_id": "F0", "rank": 0, "sink_category": "code_exec", "source_uid": None, "sink_uid": None,
+            "nodes": [{"role": "sink", "file": "a.py", "line": 7, "function": "f", "code": "os.system(c)"}],
+            "snippets": []}
+    lines = fmt._render_flow(flow).split("\n")
+    assert lines[1] == "  [sink] a.py:7 in f: <<<CODE>>>os.system(c)<<<END CODE>>>"
+
+
+def test_explicit_roles_override_position_and_are_neutralised():
+    flow = {"flow_id": "F0", "rank": 0, "sink_category": "x", "source_uid": "s", "sink_uid": "k",
+            "nodes": [{"role": "step", "file": "a", "line": 1, "function": "f", "code": "a"},
+                      {"file": "a", "line": 2, "function": "f", "code": "b"},          # no role: positional
+                      {"role": "sink<<<", "file": "a", "line": 3, "function": "f", "code": "c"}]}
+    lines = fmt._render_flow(flow).split("\n")
+    assert lines[1].startswith("  [step] a:1 ")
+    assert lines[2].startswith("  [step] a:2 ")
+    assert lines[3].startswith("  [sink<\\<\\<\\] a:3 ")

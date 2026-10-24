@@ -38,3 +38,10 @@ train/data/dropped.json
 train/data/stage1.jsonl
 train/data/stage1_ledger.jsonl
 train/data/work/
+train/data/sft/
+train/data/sft-smoke/
+train/data/unsloth/
+train/data/mlx/
+train/data/sft-bench/
+train/runs/
+models/

@@ -20,7 +20,6 @@ from __future__ import annotations
 import time
 
 from orion.lm import format as fmt
-from orion.lm import slice as lm_slice
 from orion.lm import tools
 from orion.lm.model import ContextOverflow
 
@@ -70,7 +69,7 @@ def run_session(generate, db, repo_path: str, scan_id: str, flows: list[dict], *
     sees the steps already taken if a later `generate` or tool call raises (the returned `steps` only
     exist on a normal return). A failing callback is swallowed; it never ends the session.
     """
-    messages: list[dict] = [fmt.system_message(lm_slice.pruned_schema()), fmt.task_message(flows)]
+    messages: list[dict] = [fmt.system_message(), fmt.task_message(flows)]
     steps: list[dict] = []
 
     def record(step: dict) -> None:

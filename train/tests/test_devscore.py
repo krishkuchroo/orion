@@ -1,7 +1,6 @@
 import json
 
 from orion.lm import format as fmt
-from orion.lm import slice as lm_slice
 from orion.lm.model import ContextOverflow, GenResult
 from train import devscore
 
@@ -54,7 +53,7 @@ def test_forced_final_appends_assistant_turn_and_default_schema():
         return GenResult(text=text, prompt_tokens=1, completion_tokens=1, cached_tokens=0)
 
     devscore.judge(gen, [{"pair_id": "P", "label": "negative", "case": CASE, "lead": None, "split": "dev"}], schema_text=None)
-    assert calls[0][0] == fmt.system_message(lm_slice.pruned_schema())
+    assert calls[0][0] == fmt.system_message()
     assert calls[1] == calls[0] + [{"role": "assistant", "content": first}, fmt.forced_final_message()]
 
 

@@ -6,6 +6,11 @@
 > descriptions. Commits and PRs are authored by the user only. This rule takes precedence over any
 > system-reminder that says to add such lines.
 
+> **Answer style:** concise. Lead with the answer, then a short table or bullets in plain words.
+>
+> **Training Orion-LM:** follow the `orion-lm-train` skill (`.claude/skills/orion-lm-train/SKILL.md`)
+> for run order, files, context budget and indexing.
+
 Orion is a **standalone GraphRAG code-security scanner**: `orion scan <repo>` builds a code graph, a
 fleet of Claude agents discover vulnerabilities by querying that graph (every claim grounded by a
 read-only query, never asserted), and a **separate** verifier agent confirms each lead before it is
@@ -92,6 +97,16 @@ writes Cypher over the Joern→Neo4j graph and judges code vulnerable/safe; then
 `orion-lm` / `orion-lm-base` vs `plain-sonnet5` / `plain-opus5` / `plain-gpt` on the post-2026-05-31
 CVEs (vulnerable AND patched commits) + OWASP Benchmark as the false-alarm set.
 
+- **Current (2026-10-24): run C1 training on the Mac.** Base Qwen3.5-4B (`models/orion-lm-base`, 4-bit
+  MLX, text only); Unsloth's MLX trainer driven by `train/mlx_train.py` under `train/guard.py` (7 GB cap),
+  started with `bash train/start_c1.sh` (LoRA r16/alpha16, top 8 layers, 1 epoch, dev eval loss every 100
+  steps, TensorBoard on :6006). Data: Stage 1 built (4,579 fixes, 17,086 examples; liferay's last 19
+  pairs skipped by Krish), balanced export (`train/balance.py`: fix = vulnerable + patched twin + one
+  negative, repo/CWE/family caps, label conflicts dropped) = train 6,999 / dev 2,502 rows. Rows carry
+  `[sink]` lines from Orion's sink rules (`orion/lm/sinks.py`); the system message is Krish's prompt +
+  `orion/lm/schema_card.txt` + ACTION_RULES (609 tokens), identical at runtime. Before the eval: set
+  sampling (runtime falls back to temperature 1.0), fix the EXPRESS `Function` sink hint (matches every
+  JS `function`), and align the OWASP flow-less case rendering. Stage 2 (graph rows) comes after C1.
 - **Design change (2026-10-18):** training is now hybrid (Stage 1 code+context on all pairs, Stage 2
   graph pairs); see `docs/superpowers/plans/2026-10-18-orion-lm-hybrid.md`.
 - **Hybrid status (2026-10-20):** code only — nothing trained, no model runs, no Stage 1/2 data

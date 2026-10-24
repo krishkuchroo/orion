@@ -40,7 +40,7 @@ packages = ["orion", "orion.graph", "orion.lm", "orion.runtime"]
 
 [tool.setuptools.package-data]
 # Krish's Orion-LM system prompt ships with the package (format.system_message reads it).
-"orion.lm" = ["system_prompt.txt"]
+"orion.lm" = ["system_prompt.txt", "schema_card.txt"]
 
 [tool.pytest.ini_options]
 # Scope bare `pytest` to Orion's own suite so it never recurses into the gitignored `fixtures/` scan

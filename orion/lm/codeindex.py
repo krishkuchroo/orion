@@ -13,6 +13,9 @@ from dataclasses import dataclass
 LANG_BY_EXT = {".js": "javascript", ".mjs": "javascript", ".cjs": "javascript", ".jsx": "javascript",
                ".ts": "typescript", ".tsx": "tsx", ".py": "python", ".java": "java"}
 MAX_FILE_BYTES = 1_000_000
+# A line this long means minified/bundled code (e.g. ace/src-min-noconflict/ace.js, one 370k-char line). Its
+# snippets would blow the context cap, so the file is skipped. Pilot 2026-10-23: hand-written code peaked at 439.
+MAX_LINE_CHARS = 2_000
 MODULE_WINDOW = 20
 SKIP_DIRS = ("node_modules", "vendor", "dist", "build", "target", ".git", "__pycache__", "venv", ".venv")
 MODULE = "<module>"
@@ -217,6 +220,9 @@ class RepoIndex:
                 self._ingest(rel, text)
 
     def _ingest(self, rel: str, text: str) -> None:
+        if any(len(line) > MAX_LINE_CHARS for line in text.splitlines()):
+            self.skipped[rel] = f"minified (a line over {MAX_LINE_CHARS} chars)"
+            return
         try:
             spans = parse_text(rel, text)
         except Exception as e:

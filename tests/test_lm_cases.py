@@ -1,4 +1,4 @@
-from orion.lm import cases, codeindex as ci, format as fmt
+from orion.lm import cases, codeindex as ci, format as fmt, sinks
 
 
 def test_case_from_flow_target_is_sink_function_with_source_and_path(tmp_path):
@@ -47,7 +47,8 @@ def test_function_case_shape_and_callers_callees_deduped(tmp_path):
     idx = ci.RepoIndex(str(tmp_path))
     c = cases.case_from_function(idx, "a.js", idx.enclosing("a.js", 4), anchor=4)
     assert (c["flow_id"], c["rank"], c["sink_category"], c["source_uid"], c["sink_uid"], c["nodes"]) == \
-        ("F0", 0, None, None, None, [])
+        ("F0", 0, "code_exec", None, None,
+         [{"role": "sink", "file": "a.js", "line": 4, "function": "run", "code": "exec(x)"}])
     roles = [(s["role"], s["function"]) for s in c["snippets"]]
     assert roles == [("target", "run"), ("caller", "top"), ("callee", "helper")]
     caller = c["snippets"][1]
@@ -86,3 +87,41 @@ def test_snippet_header_fields_neutralised():
 def test_path_only_flow_still_renders():
     f = {"flow_id": "F1", "rank": 1, "sink_category": "sql", "source_uid": "s", "sink_uid": "k", "nodes": []}
     assert "(no path nodes found in the graph)" in fmt.task_message([f])["content"]
+
+
+def test_function_case_is_annotated_with_orion_sink_rules(tmp_path):
+    """Code-only cases (Stage 1 rows, flow-less runtime cases) carry the same sink line annotate gives."""
+    (tmp_path / "a.py").write_text("import os\n\n\ndef run(p):\n    x = p\n    return pickle.loads(x)\n")
+    idx = ci.RepoIndex(str(tmp_path))
+    c = cases.case_from_function(idx, "a.py", idx.enclosing("a.py", 5), anchor=5)
+    assert c["sink_category"] == "deserialize"
+    assert c["nodes"] == [{"role": "sink", "file": "a.py", "line": 6, "function": "run",
+                           "code": "return pickle.loads(x)"}]
+    assert c == sinks.annotate(c)
+
+
+def test_function_case_sink_line_is_absolute_in_a_windowed_target(tmp_path):
+    (tmp_path / "a.js").write_text("function big(){\n" + "\n".join(
+        "  eval(q)" if i == 190 else f"  x{i}()" for i in range(300)) + "\n}\n")
+    idx = ci.RepoIndex(str(tmp_path))
+    c = cases.case_from_function(idx, "a.js", idx.enclosing("a.js", 200), anchor=200,
+                                 budget=cases.CaseBudget(max_target_lines=40))
+    assert c["snippets"][0]["start"] > 1
+    assert c["nodes"][0]["line"] == 192 and c["nodes"][0]["code"] == "eval(q)"
+
+
+def test_function_case_without_a_sink_has_no_nodes(tmp_path):
+    (tmp_path / "a.js").write_text("function add(a, b){\n  return a + b\n}\n")
+    idx = ci.RepoIndex(str(tmp_path))
+    c = cases.case_from_function(idx, "a.js", idx.enclosing("a.js", 2), anchor=2)
+    assert c["sink_category"] is None and c["nodes"] == [] and c["snippets"]
+
+
+def test_flow_case_is_not_annotated(tmp_path):
+    """case_from_flow keeps the graph's own sink_category (None stays None) and nodes."""
+    (tmp_path / "a.js").write_text("function run(x){\n  eval(x)\n}\n")
+    idx = ci.RepoIndex(str(tmp_path))
+    flow = {"flow_id": "F0", "rank": 0, "sink_category": None, "source_uid": None, "sink_uid": None,
+            "nodes": [{"file": "a.js", "line": 1, "function": "run", "code": "function run(x){"}]}
+    c = cases.case_from_flow(flow, idx)
+    assert c["sink_category"] is None and c["nodes"] == flow["nodes"]

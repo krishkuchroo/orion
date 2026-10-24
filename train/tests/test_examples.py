@@ -16,7 +16,8 @@ def test_to_sft_uses_runtime_formatter_and_canonical_target():
     s = examples.to_sft({"pair_id": "P", "label": "vulnerable", "tier": "single", "case": CASE, "lead": LEAD}, schema_text="S")
     assert s["messages"] == [fmt.system_message("S"), fmt.task_message([CASE])]
     assert s["target"] == fmt.dumps_action({"action": "final", "leads": [LEAD]})
-    assert s["meta"] == {"pair_id": "P", "label": "vulnerable", "tier": "single", "stage": 1}
+    assert s["meta"] == {"pair_id": "P", "label": "vulnerable", "tier": "single", "stage": 1, "language": None,
+                         "repo": None, "cwe": None, "cwe_class": None, "split": None}
     p = examples.to_sft({"pair_id": "P", "label": "patched", "tier": "single", "case": CASE, "lead": None, "stage": 2}, schema_text="S")
     assert p["target"] == fmt.dumps_action({"action": "final", "leads": []})
     assert p["meta"]["stage"] == 2
@@ -104,13 +105,12 @@ def test_export_rejects_pair_with_conflicting_splits(tmp_path):
     assert not (tmp_path / "o" / "train.jsonl").exists()
 
 
-def test_export_default_schema_is_runtime_pruned_schema(tmp_path):
-    from orion.lm import slice as lm_slice
+def test_export_default_is_the_runtime_compact_system_message(tmp_path):
     s1 = tmp_path / "s1.jsonl"
     _write(s1, [{"pair_id": "P", "label": "patched", "tier": "single", "case": CASE, "lead": None, "split": "train"}])
     examples.export(str(s1), None, None, out_dir=str(tmp_path / "o"), shares={"stage1": 1.0}, seed=0, allow_placeholder=True)
     row = json.loads((tmp_path / "o" / "train.jsonl").read_text().splitlines()[0])
-    assert row["messages"][0] == fmt.system_message(lm_slice.pruned_schema())
+    assert row["messages"][0] == fmt.system_message()
 
 
 def test_export_requires_pair_id_on_stage_rows_but_not_cypher(tmp_path):
@@ -172,3 +172,167 @@ def test_export_refuses_a_placeholder_prompt_and_records_the_system_hash(tmp_pat
     monkeypatch.setattr(fmt, "system_prompt_text", lambda: "You are Orion-LM.")    # a real prompt: no override
     c = examples.export(str(s1), None, None, out_dir=str(tmp_path / "c"), schema_text="S", shares={"stage1": 1.0}, seed=0)
     assert c["system_sha256"] == hashlib.sha256(fmt.system_message("S")["content"].encode("utf-8")).hexdigest() != want
+
+
+# ───────────────────────────── data v2: sink annotation, meta, balanced sampler ─────────────────────────────
+
+PAIR = {"id": "P", "language": "py", "repo_canonical": "Org/Repo", "cwe": ["CWE-20", "CWE-89"]}
+
+
+def fake_annotate(case, profile=None):
+    out = dict(case)
+    if case.get("nodes") or case.get("sink_category") is not None:
+        return out
+    t = case["snippets"][0]
+    if "SINK" in t["code"]:
+        out["sink_category"] = "sql"
+        out["nodes"] = [{"role": "sink", "file": t["file"], "line": t["start"], "function": t["function"], "code": "SINK"}]
+    return out
+
+
+def test_to_sft_annotates_the_case_with_orion_sinks(monkeypatch):
+    """Training rows carry the same sink node the runtime's code-only cases get (annotate is idempotent)."""
+    from orion.lm import sinks
+    monkeypatch.setattr(sinks, "annotate", fake_annotate)
+    case = {**CASE, "snippets": [{**CASE["snippets"][0], "code": "SINK"}]}
+    s = examples.to_sft({"pair_id": "P", "label": "negative", "tier": "negative", "case": case, "lead": None}, schema_text="S")
+    want = fake_annotate(case)
+    assert want["sink_category"] == "sql"
+    assert s["messages"][1] == fmt.task_message([want])
+    again = examples.to_sft({"pair_id": "P", "label": "negative", "tier": "negative", "case": want, "lead": None}, schema_text="S")
+    assert again["messages"] == s["messages"]
+
+
+def test_to_sft_uses_the_real_annotate_by_default():
+    from orion.lm import sinks
+    case = {**CASE, "snippets": [{**CASE["snippets"][0], "code": "cursor.execute(q)\nos.system(cmd)"}]}
+    s = examples.to_sft({"pair_id": "P", "label": "negative", "tier": "negative", "case": case, "lead": None}, schema_text="S")
+    assert s["messages"][1] == fmt.task_message([sinks.annotate(case)])
+
+
+def test_to_sft_meta_joins_pairs_json():
+    row = {"pair_id": "P", "label": "patched", "tier": "annotated", "cwe_class": "dataflow", "case": CASE,
+           "lead": None, "split": "train"}
+    m = examples.to_sft(row, schema_text="S", pair=PAIR)["meta"]
+    assert m == {"pair_id": "P", "label": "patched", "tier": "annotated", "stage": 1, "language": "py",
+                 "repo": "Org/Repo", "cwe": "CWE-89", "cwe_class": "dataflow", "split": "train"}
+
+
+def _code_case(code):
+    return {**CASE, "snippets": [{**CASE["snippets"][0], "code": code}]}
+
+
+def _v2_rows():
+    """Two train pairs (one twin each + a sink negative), one dev pair, one oldcve pair; every code unique."""
+    rows, pairs = [], {}
+    for pid, split, lang in (("A", "train", "py"), ("B", "train", "js"), ("D", "dev", "java"), ("O", "oldcve", "py")):
+        lead = {**LEAD, "cwe": "CWE-89"}
+        rows += [{"pair_id": pid, "label": "vulnerable", "tier": "annotated", "cwe_class": "dataflow", "case": _code_case(f"{pid}v"), "lead": lead, "split": split},
+                 {"pair_id": pid, "label": "patched", "tier": "annotated", "cwe_class": "dataflow", "case": _code_case(f"{pid}p"), "lead": None, "split": split},
+                 {"pair_id": pid, "label": "negative", "tier": "negative", "cwe_class": "dataflow", "case": _code_case(f"{pid}n"), "lead": None, "split": split},
+                 {"pair_id": pid, "label": "negative", "tier": "negative", "cwe_class": "dataflow",
+                  "case": _code_case(f"SINK {pid}"), "lead": None, "split": split}]
+        pairs[pid] = {"id": pid, "language": lang, "repo_canonical": f"o/{pid}", "cwe": ["CWE-89"]}
+    return rows, pairs
+
+
+def _v2_files(tmp_path):
+    rows, pairs = _v2_rows()
+    s1, pj = tmp_path / "s1.jsonl", tmp_path / "pairs.json"
+    _write(s1, rows)
+    pj.write_text(json.dumps(list(pairs.values())))
+    return s1, pj, rows, pairs
+
+
+def test_export_balanced_writes_sampler_order_report_and_annotated_dev(tmp_path, monkeypatch):
+    from orion.lm import sinks
+    from train import balance
+    monkeypatch.setattr(sinks, "annotate", fake_annotate)
+    s1, pj, rows, pairs = _v2_files(tmp_path)
+    out = tmp_path / "o"
+    c = examples.export(str(s1), None, None, out_dir=str(out), schema_text="S", shares={"stage1": 1.0}, seed=0,
+                        total=100, sampler="balanced", pairs_path=str(pj),
+                        balance_kwargs={"cwe_share": 1.0, "family_share": 1.0}, allow_placeholder=True)
+    want, rep = balance.select(rows, pairs, total=100, seed=0, cwe_share=1.0, family_share=1.0)
+    tr = [json.loads(l) for l in (out / "train.jsonl").read_text().splitlines()]
+    assert [examples.to_sft(r, schema_text="S", pair=pairs[r["pair_id"]]) for r in want] == tr   # sampler order kept
+    assert len(tr) == 6 and {r["meta"]["split"] for r in tr} == {"train"}
+    rep["dev"] = c["balance"]["dev"]
+    assert json.loads((out / "train.balance.json").read_text()) == json.loads(json.dumps(rep))
+    assert c["train"] == 6 and c["used"] == {"stage1": 6} and c["balance"]["rows"] == 6
+    neg = [r for r in tr if r["meta"]["label"] == "negative"]
+    assert all("sink_category=sql" in r["messages"][1]["content"] for r in neg)          # the sink negative won
+    dv = [json.loads(l) for l in (out / "dev.jsonl").read_text().splitlines()]
+    assert len(dv) == 4 and c["dev"] == 4                                                # ALL dev rows, unbalanced
+    assert {r["meta"]["language"] for r in dv} == {"java"} and {r["meta"]["repo"] for r in dv} == {"o/D"}
+    assert sum("sink_category=sql" in r["messages"][1]["content"] for r in dv) == 1      # annotated
+    assert not (out / "dev.balance.json").exists()
+
+
+def test_export_random_stays_the_default_and_gains_meta_with_pairs(tmp_path):
+    s1, pj, rows, pairs = _v2_files(tmp_path)
+    (tmp_path / "o").mkdir()
+    (tmp_path / "o" / "train.balance.json").write_text("{}")          # stale report from an earlier balanced export
+    c = examples.export(str(s1), None, None, out_dir=str(tmp_path / "o"), schema_text="S", shares={"stage1": 1.0},
+                        seed=0, pairs_path=str(pj), allow_placeholder=True)
+    assert c["train"] == 8 and "balance" not in c and not (tmp_path / "o" / "train.balance.json").exists()
+    tr = [json.loads(l) for l in (tmp_path / "o" / "train.jsonl").read_text().splitlines()]
+    assert {r["meta"]["language"] for r in tr} == {"py", "js"}
+
+
+def test_export_balanced_needs_pairs_and_stage1_only(tmp_path):
+    s1, pj, rows, pairs = _v2_files(tmp_path)
+    with pytest.raises(ValueError, match="pairs_path"):
+        examples.export(str(s1), None, None, out_dir=str(tmp_path / "a"), schema_text="S", shares={"stage1": 1.0},
+                        seed=0, sampler="balanced", allow_placeholder=True)
+    cy = [{"messages": [], "target": "{}", "meta": {"split": "train"}}]
+    with pytest.raises(ValueError, match="stage1"):
+        examples.export(str(s1), None, cy, out_dir=str(tmp_path / "b"), schema_text="S",
+                        shares={"stage1": 0.5, "cypher": 0.5}, seed=0, sampler="balanced", pairs_path=str(pj),
+                        allow_placeholder=True)
+    with pytest.raises(ValueError, match="sampler"):
+        examples.export(str(s1), None, None, out_dir=str(tmp_path / "c"), schema_text="S", shares={"stage1": 1.0},
+                        seed=0, sampler="nope", allow_placeholder=True)
+    assert not (tmp_path / "a").exists() and not (tmp_path / "b").exists()
+
+
+def _v2_dev_conflict_files(tmp_path):
+    """Dev pair E's patched row has D's vulnerable code (rule 1), and E's negative duplicates D's negative."""
+    rows, pairs = _v2_rows()
+    rows += [{"pair_id": "E", "label": "vulnerable", "tier": "single", "cwe_class": "dataflow", "case": _code_case("Ev"),
+              "lead": {**LEAD, "cwe": "CWE-79"}, "split": "dev"},
+             {"pair_id": "E", "label": "patched", "tier": "single", "cwe_class": "dataflow", "case": _code_case(" Dv "),
+              "lead": None, "split": "dev"},
+             {"pair_id": "E", "label": "negative", "tier": "negative", "cwe_class": "dataflow", "case": _code_case("Dn"),
+              "lead": None, "split": "dev"},
+             {"pair_id": "E", "label": "negative", "tier": "negative", "cwe_class": "dataflow", "case": _code_case("LONG"),
+              "lead": None, "split": "dev"}]
+    pairs["E"] = {"id": "E", "language": "js", "repo_canonical": "o/E", "cwe": ["CWE-79"]}
+    s1, pj = tmp_path / "s1.jsonl", tmp_path / "pairs.json"
+    _write(s1, rows)
+    pj.write_text(json.dumps(list(pairs.values())))
+    return s1, pj
+
+
+def test_export_balanced_applies_rule_1_and_fits_to_dev_and_reports_them(tmp_path):
+    s1, pj = _v2_dev_conflict_files(tmp_path)
+    fits = lambda r: r["case"]["snippets"][0]["code"] not in ("LONG", "SINK A")
+    c = examples.export(str(s1), None, None, out_dir=str(tmp_path / "o"), schema_text="S", shares={"stage1": 1.0},
+                        seed=0, total=100, sampler="balanced", pairs_path=str(pj),
+                        balance_kwargs={"cwe_share": 1.0, "family_share": 1.0, "fits": fits}, allow_placeholder=True)
+    dv = [json.loads(l) for l in (tmp_path / "o" / "dev.jsonl").read_text().splitlines()]
+    assert c["dev"] == len(dv) == 5                           # 8 dev rows - 1 conflict - 1 duplicate - 1 too long
+    dev = c["balance"]["dev"]
+    assert dev["rule1"]["conflict_rows_dropped"] == {"patched": 1}
+    assert dev["rule1"]["duplicate_rows_dropped"] == {"negative": 1}
+    assert dev["dropped_over_length"] == {"negative": 1}
+    assert c["balance"]["dropped_over_length"] == {"negative": 1}              # train: A's sink negative
+    saved = json.loads((tmp_path / "o" / "train.balance.json").read_text())
+    assert saved["dev"] == dev and saved["params"]["fits"] is True
+
+
+def test_export_random_leaves_dev_conflicts_alone(tmp_path):
+    s1, pj = _v2_dev_conflict_files(tmp_path)
+    c = examples.export(str(s1), None, None, out_dir=str(tmp_path / "o"), schema_text="S", shares={"stage1": 1.0},
+                        seed=0, pairs_path=str(pj), allow_placeholder=True)
+    assert c["dev"] == 8
