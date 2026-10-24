@@ -1,0 +1,993 @@
+{
+ "version": 1,
+ "generated": "2026-10-22",
+ "seed": 0,
+ "n_per_lang": 60,
+ "note": "OWASP Benchmark false-alarm set (spec 5.4): one targeted-judgement run per case. Built by `python -m eval.owasp` from each repo's own expected-results CSV at pinned_sha; file/entry read from that tree.",
+ "benchmarks": [
+  {
+   "id": "owasp-java",
+   "language": "java",
+   "benchmark_version": "1.2",
+   "repo_url": "https://github.com/OWASP-Benchmark/BenchmarkJava",
+   "pinned_sha": "a0f07b8451902de4e3ff37aa03e40f4aeb3b4dbe",
+   "expected_results": "expectedresults-1.2.csv",
+   "expected_results_sha256": "1809f6a690c6cf7dd6685df6ebe2eef8fe3ca93d19a7ca0ce45987ca4f5d78e1",
+   "csv_cases": 2740,
+   "cases": [
+    {
+     "case_id": "BenchmarkTest00004",
+     "category": "trustbound",
+     "real": true,
+     "cwe": "CWE-501",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00004.java",
+     "entry": "POST /trustbound-00/BenchmarkTest00004 -> BenchmarkTest00004.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest00033",
+     "category": "sqli",
+     "real": true,
+     "cwe": "CWE-89",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00033.java",
+     "entry": "POST /sqli-00/BenchmarkTest00033 -> BenchmarkTest00033.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest00044",
+     "category": "ldapi",
+     "real": true,
+     "cwe": "CWE-90",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00044.java",
+     "entry": "POST /ldapi-00/BenchmarkTest00044 -> BenchmarkTest00044.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest00088",
+     "category": "securecookie",
+     "real": false,
+     "cwe": "CWE-614",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00088.java",
+     "entry": "POST /securecookie-00/BenchmarkTest00088 -> BenchmarkTest00088.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest00271",
+     "category": "hash",
+     "real": false,
+     "cwe": "CWE-328",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00271.java",
+     "entry": "POST /hash-00/BenchmarkTest00271 -> BenchmarkTest00271.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest00276",
+     "category": "xss",
+     "real": true,
+     "cwe": "CWE-79",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00276.java",
+     "entry": "POST /xss-00/BenchmarkTest00276 -> BenchmarkTest00276.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest00284",
+     "category": "xss",
+     "real": true,
+     "cwe": "CWE-79",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00284.java",
+     "entry": "POST /xss-00/BenchmarkTest00284 -> BenchmarkTest00284.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest00349",
+     "category": "weakrand",
+     "real": false,
+     "cwe": "CWE-330",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00349.java",
+     "entry": "POST /weakrand-00/BenchmarkTest00349 -> BenchmarkTest00349.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest00412",
+     "category": "cmdi",
+     "real": false,
+     "cwe": "CWE-78",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00412.java",
+     "entry": "POST /cmdi-00/BenchmarkTest00412 -> BenchmarkTest00412.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest00446",
+     "category": "crypto",
+     "real": true,
+     "cwe": "CWE-327",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00446.java",
+     "entry": "POST /crypto-00/BenchmarkTest00446 -> BenchmarkTest00446.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest00493",
+     "category": "xss",
+     "real": false,
+     "cwe": "CWE-79",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00493.java",
+     "entry": "POST /xss-00/BenchmarkTest00493 -> BenchmarkTest00493.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest00510",
+     "category": "sqli",
+     "real": true,
+     "cwe": "CWE-89",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00510.java",
+     "entry": "POST /sqli-00/BenchmarkTest00510 -> BenchmarkTest00510.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest00607",
+     "category": "xpathi",
+     "real": true,
+     "cwe": "CWE-643",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00607.java",
+     "entry": "POST /xpathi-00/BenchmarkTest00607 -> BenchmarkTest00607.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest00616",
+     "category": "crypto",
+     "real": true,
+     "cwe": "CWE-327",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00616.java",
+     "entry": "POST /crypto-00/BenchmarkTest00616 -> BenchmarkTest00616.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest00638",
+     "category": "hash",
+     "real": true,
+     "cwe": "CWE-328",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00638.java",
+     "entry": "POST /hash-00/BenchmarkTest00638 -> BenchmarkTest00638.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest00658",
+     "category": "cmdi",
+     "real": false,
+     "cwe": "CWE-78",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00658.java",
+     "entry": "POST /cmdi-00/BenchmarkTest00658 -> BenchmarkTest00658.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest00805",
+     "category": "xss",
+     "real": true,
+     "cwe": "CWE-79",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00805.java",
+     "entry": "POST /xss-01/BenchmarkTest00805 -> BenchmarkTest00805.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest00861",
+     "category": "ldapi",
+     "real": false,
+     "cwe": "CWE-90",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00861.java",
+     "entry": "POST /ldapi-00/BenchmarkTest00861 -> BenchmarkTest00861.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest00976",
+     "category": "weakrand",
+     "real": true,
+     "cwe": "CWE-330",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00976.java",
+     "entry": "POST /weakrand-02/BenchmarkTest00976 -> BenchmarkTest00976.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest00987",
+     "category": "weakrand",
+     "real": false,
+     "cwe": "CWE-330",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00987.java",
+     "entry": "POST /weakrand-02/BenchmarkTest00987 -> BenchmarkTest00987.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest00992",
+     "category": "trustbound",
+     "real": false,
+     "cwe": "CWE-501",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00992.java",
+     "entry": "POST /trustbound-00/BenchmarkTest00992 -> BenchmarkTest00992.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest01115",
+     "category": "pathtraver",
+     "real": false,
+     "cwe": "CWE-22",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest01115.java",
+     "entry": "POST /pathtraver-01/BenchmarkTest01115 -> BenchmarkTest01115.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest01134",
+     "category": "securecookie",
+     "real": true,
+     "cwe": "CWE-614",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest01134.java",
+     "entry": "POST /securecookie-00/BenchmarkTest01134 -> BenchmarkTest01134.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest01136",
+     "category": "weakrand",
+     "real": false,
+     "cwe": "CWE-330",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest01136.java",
+     "entry": "POST /weakrand-02/BenchmarkTest01136 -> BenchmarkTest01136.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest01146",
+     "category": "trustbound",
+     "real": false,
+     "cwe": "CWE-501",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest01146.java",
+     "entry": "POST /trustbound-00/BenchmarkTest01146 -> BenchmarkTest01146.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest01165",
+     "category": "hash",
+     "real": true,
+     "cwe": "CWE-328",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest01165.java",
+     "entry": "POST /hash-01/BenchmarkTest01165 -> BenchmarkTest01165.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest01223",
+     "category": "xpathi",
+     "real": true,
+     "cwe": "CWE-643",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest01223.java",
+     "entry": "POST /xpathi-00/BenchmarkTest01223 -> BenchmarkTest01223.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest01322",
+     "category": "crypto",
+     "real": true,
+     "cwe": "CWE-327",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest01322.java",
+     "entry": "POST /crypto-01/BenchmarkTest01322 -> BenchmarkTest01322.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest01440",
+     "category": "cmdi",
+     "real": false,
+     "cwe": "CWE-78",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest01440.java",
+     "entry": "POST /cmdi-01/BenchmarkTest01440 -> BenchmarkTest01440.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest01500",
+     "category": "pathtraver",
+     "real": true,
+     "cwe": "CWE-22",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest01500.java",
+     "entry": "POST /pathtraver-01/BenchmarkTest01500 -> BenchmarkTest01500.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest01504",
+     "category": "hash",
+     "real": true,
+     "cwe": "CWE-328",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest01504.java",
+     "entry": "POST /hash-01/BenchmarkTest01504 -> BenchmarkTest01504.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest01633",
+     "category": "xpathi",
+     "real": false,
+     "cwe": "CWE-643",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest01633.java",
+     "entry": "POST /xpathi-00/BenchmarkTest01633 -> BenchmarkTest01633.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest01640",
+     "category": "crypto",
+     "real": false,
+     "cwe": "CWE-327",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest01640.java",
+     "entry": "POST /crypto-02/BenchmarkTest01640 -> BenchmarkTest01640.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest01689",
+     "category": "cmdi",
+     "real": true,
+     "cwe": "CWE-78",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest01689.java",
+     "entry": "POST /cmdi-01/BenchmarkTest01689 -> BenchmarkTest01689.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest01771",
+     "category": "xss",
+     "real": false,
+     "cwe": "CWE-79",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest01771.java",
+     "entry": "POST /xss-03/BenchmarkTest01771 -> BenchmarkTest01771.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest01776",
+     "category": "xss",
+     "real": false,
+     "cwe": "CWE-79",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest01776.java",
+     "entry": "POST /xss-03/BenchmarkTest01776 -> BenchmarkTest01776.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest01839",
+     "category": "pathtraver",
+     "real": true,
+     "cwe": "CWE-22",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest01839.java",
+     "entry": "POST /pathtraver-02/BenchmarkTest01839 -> BenchmarkTest01839.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest01893",
+     "category": "xpathi",
+     "real": false,
+     "cwe": "CWE-643",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest01893.java",
+     "entry": "POST /xpathi-00/BenchmarkTest01893 -> BenchmarkTest01893.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest01909",
+     "category": "ldapi",
+     "real": false,
+     "cwe": "CWE-90",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest01909.java",
+     "entry": "POST /ldapi-00/BenchmarkTest01909 -> BenchmarkTest01909.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest01959",
+     "category": "trustbound",
+     "real": false,
+     "cwe": "CWE-501",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest01959.java",
+     "entry": "POST /trustbound-01/BenchmarkTest01959 -> BenchmarkTest01959.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest01974",
+     "category": "xpathi",
+     "real": true,
+     "cwe": "CWE-643",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest01974.java",
+     "entry": "POST /xpathi-00/BenchmarkTest01974 -> BenchmarkTest01974.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest02144",
+     "category": "securecookie",
+     "real": false,
+     "cwe": "CWE-614",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest02144.java",
+     "entry": "POST /securecookie-00/BenchmarkTest02144 -> BenchmarkTest02144.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest02170",
+     "category": "sqli",
+     "real": true,
+     "cwe": "CWE-89",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest02170.java",
+     "entry": "POST /sqli-04/BenchmarkTest02170 -> BenchmarkTest02170.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest02196",
+     "category": "ldapi",
+     "real": true,
+     "cwe": "CWE-90",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest02196.java",
+     "entry": "POST /ldapi-00/BenchmarkTest02196 -> BenchmarkTest02196.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest02199",
+     "category": "pathtraver",
+     "real": true,
+     "cwe": "CWE-22",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest02199.java",
+     "entry": "POST /pathtraver-02/BenchmarkTest02199 -> BenchmarkTest02199.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest02218",
+     "category": "hash",
+     "real": false,
+     "cwe": "CWE-328",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest02218.java",
+     "entry": "POST /hash-02/BenchmarkTest02218 -> BenchmarkTest02218.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest02276",
+     "category": "sqli",
+     "real": false,
+     "cwe": "CWE-89",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest02276.java",
+     "entry": "POST /sqli-05/BenchmarkTest02276 -> BenchmarkTest02276.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest02289",
+     "category": "crypto",
+     "real": false,
+     "cwe": "CWE-327",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest02289.java",
+     "entry": "POST /crypto-02/BenchmarkTest02289 -> BenchmarkTest02289.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest02380",
+     "category": "pathtraver",
+     "real": false,
+     "cwe": "CWE-22",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest02380.java",
+     "entry": "POST /pathtraver-02/BenchmarkTest02380 -> BenchmarkTest02380.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest02420",
+     "category": "weakrand",
+     "real": true,
+     "cwe": "CWE-330",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest02420.java",
+     "entry": "POST /weakrand-05/BenchmarkTest02420 -> BenchmarkTest02420.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest02432",
+     "category": "cmdi",
+     "real": true,
+     "cwe": "CWE-78",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest02432.java",
+     "entry": "POST /cmdi-02/BenchmarkTest02432 -> BenchmarkTest02432.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest02496",
+     "category": "cmdi",
+     "real": true,
+     "cwe": "CWE-78",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest02496.java",
+     "entry": "POST /cmdi-02/BenchmarkTest02496 -> BenchmarkTest02496.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest02507",
+     "category": "securecookie",
+     "real": true,
+     "cwe": "CWE-614",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest02507.java",
+     "entry": "POST /securecookie-00/BenchmarkTest02507 -> BenchmarkTest02507.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest02526",
+     "category": "trustbound",
+     "real": true,
+     "cwe": "CWE-501",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest02526.java",
+     "entry": "POST /trustbound-01/BenchmarkTest02526 -> BenchmarkTest02526.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest02538",
+     "category": "sqli",
+     "real": false,
+     "cwe": "CWE-89",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest02538.java",
+     "entry": "POST /sqli-05/BenchmarkTest02538 -> BenchmarkTest02538.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest02554",
+     "category": "pathtraver",
+     "real": false,
+     "cwe": "CWE-22",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest02554.java",
+     "entry": "POST /pathtraver-03/BenchmarkTest02554 -> BenchmarkTest02554.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest02571",
+     "category": "ldapi",
+     "real": false,
+     "cwe": "CWE-90",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest02571.java",
+     "entry": "POST /ldapi-00/BenchmarkTest02571 -> BenchmarkTest02571.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest02607",
+     "category": "securecookie",
+     "real": false,
+     "cwe": "CWE-614",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest02607.java",
+     "entry": "POST /securecookie-00/BenchmarkTest02607 -> BenchmarkTest02607.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest02622",
+     "category": "trustbound",
+     "real": true,
+     "cwe": "CWE-501",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest02622.java",
+     "entry": "POST /trustbound-01/BenchmarkTest02622 -> BenchmarkTest02622.doPost"
+    },
+    {
+     "case_id": "BenchmarkTest02636",
+     "category": "sqli",
+     "real": false,
+     "cwe": "CWE-89",
+     "file": "src/main/java/org/owasp/benchmark/testcode/BenchmarkTest02636.java",
+     "entry": "POST /sqli-05/BenchmarkTest02636 -> BenchmarkTest02636.doPost"
+    }
+   ]
+  },
+  {
+   "id": "owasp-python",
+   "language": "python",
+   "benchmark_version": "0.1",
+   "repo_url": "https://github.com/OWASP-Benchmark/BenchmarkPython",
+   "pinned_sha": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba",
+   "expected_results": "expectedresults-0.1.csv",
+   "expected_results_sha256": "6396f37c97cfd0c018db3d8750095ce6c678a083f83620cfb3e88fe27a46bb0c",
+   "csv_cases": 1230,
+   "cases": [
+    {
+     "case_id": "BenchmarkTest00012",
+     "category": "sqli",
+     "real": false,
+     "cwe": "CWE-89",
+     "file": "testcode/BenchmarkTest00012.py",
+     "entry": "POST /benchmark/sqli-00/BenchmarkTest00012 -> BenchmarkTest00012_post"
+    },
+    {
+     "case_id": "BenchmarkTest00072",
+     "category": "trustbound",
+     "real": true,
+     "cwe": "CWE-501",
+     "file": "testcode/BenchmarkTest00072.py",
+     "entry": "POST /benchmark/trustbound-00/BenchmarkTest00072 -> BenchmarkTest00072_post"
+    },
+    {
+     "case_id": "BenchmarkTest00077",
+     "category": "ldapi",
+     "real": false,
+     "cwe": "CWE-90",
+     "file": "testcode/BenchmarkTest00077.py",
+     "entry": "POST /benchmark/ldapi-00/BenchmarkTest00077 -> BenchmarkTest00077_post"
+    },
+    {
+     "case_id": "BenchmarkTest00099",
+     "category": "sqli",
+     "real": true,
+     "cwe": "CWE-89",
+     "file": "testcode/BenchmarkTest00099.py",
+     "entry": "POST /benchmark/sqli-00/BenchmarkTest00099 -> BenchmarkTest00099_post"
+    },
+    {
+     "case_id": "BenchmarkTest00104",
+     "category": "xpathi",
+     "real": true,
+     "cwe": "CWE-643",
+     "file": "testcode/BenchmarkTest00104.py",
+     "entry": "POST /benchmark/xpathi-00/BenchmarkTest00104 -> BenchmarkTest00104_post"
+    },
+    {
+     "case_id": "BenchmarkTest00148",
+     "category": "hash",
+     "real": false,
+     "cwe": "CWE-328",
+     "file": "testcode/BenchmarkTest00148.py",
+     "entry": "POST /benchmark/hash-00/BenchmarkTest00148 -> BenchmarkTest00148_post"
+    },
+    {
+     "case_id": "BenchmarkTest00205",
+     "category": "xxe",
+     "real": true,
+     "cwe": "CWE-611",
+     "file": "testcode/BenchmarkTest00205.py",
+     "entry": "POST /benchmark/xxe-00/BenchmarkTest00205 -> BenchmarkTest00205_post"
+    },
+    {
+     "case_id": "BenchmarkTest00210",
+     "category": "xpathi",
+     "real": true,
+     "cwe": "CWE-643",
+     "file": "testcode/BenchmarkTest00210.py",
+     "entry": "POST /benchmark/xpathi-00/BenchmarkTest00210 -> BenchmarkTest00210_post"
+    },
+    {
+     "case_id": "BenchmarkTest00247",
+     "category": "hash",
+     "real": false,
+     "cwe": "CWE-328",
+     "file": "testcode/BenchmarkTest00247.py",
+     "entry": "POST /benchmark/hash-00/BenchmarkTest00247 -> BenchmarkTest00247_post"
+    },
+    {
+     "case_id": "BenchmarkTest00256",
+     "category": "xss",
+     "real": false,
+     "cwe": "CWE-79",
+     "file": "testcode/BenchmarkTest00256.py",
+     "entry": "POST /benchmark/xss-00/BenchmarkTest00256 -> BenchmarkTest00256_post"
+    },
+    {
+     "case_id": "BenchmarkTest00264",
+     "category": "codeinj",
+     "real": false,
+     "cwe": "CWE-94",
+     "file": "testcode/BenchmarkTest00264.py",
+     "entry": "POST /benchmark/codeinj-00/BenchmarkTest00264 -> BenchmarkTest00264_post"
+    },
+    {
+     "case_id": "BenchmarkTest00267",
+     "category": "cmdi",
+     "real": true,
+     "cwe": "CWE-78",
+     "file": "testcode/BenchmarkTest00267.py",
+     "entry": "POST /benchmark/cmdi-00/BenchmarkTest00267 -> BenchmarkTest00267_post"
+    },
+    {
+     "case_id": "BenchmarkTest00270",
+     "category": "deserialization",
+     "real": true,
+     "cwe": "CWE-502",
+     "file": "testcode/BenchmarkTest00270.py",
+     "entry": "POST /benchmark/deserialization-00/BenchmarkTest00270 -> BenchmarkTest00270_post"
+    },
+    {
+     "case_id": "BenchmarkTest00287",
+     "category": "sqli",
+     "real": false,
+     "cwe": "CWE-89",
+     "file": "testcode/BenchmarkTest00287.py",
+     "entry": "POST /benchmark/sqli-00/BenchmarkTest00287 -> BenchmarkTest00287_post"
+    },
+    {
+     "case_id": "BenchmarkTest00323",
+     "category": "hash",
+     "real": true,
+     "cwe": "CWE-328",
+     "file": "testcode/BenchmarkTest00323.py",
+     "entry": "POST /benchmark/hash-00/BenchmarkTest00323 -> BenchmarkTest00323_post"
+    },
+    {
+     "case_id": "BenchmarkTest00337",
+     "category": "securecookie",
+     "real": false,
+     "cwe": "CWE-614",
+     "file": "testcode/BenchmarkTest00337.py",
+     "entry": "POST /benchmark/securecookie-00/BenchmarkTest00337 -> BenchmarkTest00337_post"
+    },
+    {
+     "case_id": "BenchmarkTest00339",
+     "category": "trustbound",
+     "real": false,
+     "cwe": "CWE-501",
+     "file": "testcode/BenchmarkTest00339.py",
+     "entry": "POST /benchmark/trustbound-00/BenchmarkTest00339 -> BenchmarkTest00339_post"
+    },
+    {
+     "case_id": "BenchmarkTest00418",
+     "category": "redirect",
+     "real": true,
+     "cwe": "CWE-601",
+     "file": "testcode/BenchmarkTest00418.py",
+     "entry": "POST /benchmark/redirect-00/BenchmarkTest00418 -> BenchmarkTest00418_post"
+    },
+    {
+     "case_id": "BenchmarkTest00422",
+     "category": "codeinj",
+     "real": true,
+     "cwe": "CWE-94",
+     "file": "testcode/BenchmarkTest00422.py",
+     "entry": "POST /benchmark/codeinj-00/BenchmarkTest00422 -> BenchmarkTest00422_post"
+    },
+    {
+     "case_id": "BenchmarkTest00431",
+     "category": "cmdi",
+     "real": true,
+     "cwe": "CWE-78",
+     "file": "testcode/BenchmarkTest00431.py",
+     "entry": "POST /benchmark/cmdi-00/BenchmarkTest00431 -> BenchmarkTest00431_post"
+    },
+    {
+     "case_id": "BenchmarkTest00432",
+     "category": "cmdi",
+     "real": true,
+     "cwe": "CWE-78",
+     "file": "testcode/BenchmarkTest00432.py",
+     "entry": "POST /benchmark/cmdi-00/BenchmarkTest00432 -> BenchmarkTest00432_post"
+    },
+    {
+     "case_id": "BenchmarkTest00433",
+     "category": "deserialization",
+     "real": true,
+     "cwe": "CWE-502",
+     "file": "testcode/BenchmarkTest00433.py",
+     "entry": "POST /benchmark/deserialization-00/BenchmarkTest00433 -> BenchmarkTest00433_post"
+    },
+    {
+     "case_id": "BenchmarkTest00455",
+     "category": "sqli",
+     "real": true,
+     "cwe": "CWE-89",
+     "file": "testcode/BenchmarkTest00455.py",
+     "entry": "POST /benchmark/sqli-00/BenchmarkTest00455 -> BenchmarkTest00455_post"
+    },
+    {
+     "case_id": "BenchmarkTest00500",
+     "category": "trustbound",
+     "real": false,
+     "cwe": "CWE-501",
+     "file": "testcode/BenchmarkTest00500.py",
+     "entry": "POST /benchmark/trustbound-00/BenchmarkTest00500 -> BenchmarkTest00500_post"
+    },
+    {
+     "case_id": "BenchmarkTest00520",
+     "category": "pathtraver",
+     "real": false,
+     "cwe": "CWE-22",
+     "file": "testcode/BenchmarkTest00520.py",
+     "entry": "POST /benchmark/pathtraver-00/BenchmarkTest00520 -> BenchmarkTest00520_post"
+    },
+    {
+     "case_id": "BenchmarkTest00540",
+     "category": "xxe",
+     "real": false,
+     "cwe": "CWE-611",
+     "file": "testcode/BenchmarkTest00540.py",
+     "entry": "POST /benchmark/xxe-00/BenchmarkTest00540 -> BenchmarkTest00540_post"
+    },
+    {
+     "case_id": "BenchmarkTest00544",
+     "category": "xpathi",
+     "real": false,
+     "cwe": "CWE-643",
+     "file": "testcode/BenchmarkTest00544.py",
+     "entry": "POST /benchmark/xpathi-01/BenchmarkTest00544 -> BenchmarkTest00544_post"
+    },
+    {
+     "case_id": "BenchmarkTest00551",
+     "category": "xpathi",
+     "real": false,
+     "cwe": "CWE-643",
+     "file": "testcode/BenchmarkTest00551.py",
+     "entry": "POST /benchmark/xpathi-01/BenchmarkTest00551 -> BenchmarkTest00551_post"
+    },
+    {
+     "case_id": "BenchmarkTest00562",
+     "category": "weakrand",
+     "real": true,
+     "cwe": "CWE-330",
+     "file": "testcode/BenchmarkTest00562.py",
+     "entry": "POST /benchmark/weakrand-01/BenchmarkTest00562 -> BenchmarkTest00562_post"
+    },
+    {
+     "case_id": "BenchmarkTest00602",
+     "category": "codeinj",
+     "real": false,
+     "cwe": "CWE-94",
+     "file": "testcode/BenchmarkTest00602.py",
+     "entry": "POST /benchmark/codeinj-00/BenchmarkTest00602 -> BenchmarkTest00602_post"
+    },
+    {
+     "case_id": "BenchmarkTest00604",
+     "category": "ldapi",
+     "real": true,
+     "cwe": "CWE-90",
+     "file": "testcode/BenchmarkTest00604.py",
+     "entry": "POST /benchmark/ldapi-00/BenchmarkTest00604 -> BenchmarkTest00604_post"
+    },
+    {
+     "case_id": "BenchmarkTest00643",
+     "category": "hash",
+     "real": true,
+     "cwe": "CWE-328",
+     "file": "testcode/BenchmarkTest00643.py",
+     "entry": "POST /benchmark/hash-00/BenchmarkTest00643 -> BenchmarkTest00643_post"
+    },
+    {
+     "case_id": "BenchmarkTest00651",
+     "category": "securecookie",
+     "real": true,
+     "cwe": "CWE-614",
+     "file": "testcode/BenchmarkTest00651.py",
+     "entry": "POST /benchmark/securecookie-00/BenchmarkTest00651 -> BenchmarkTest00651_post"
+    },
+    {
+     "case_id": "BenchmarkTest00736",
+     "category": "cmdi",
+     "real": false,
+     "cwe": "CWE-78",
+     "file": "testcode/BenchmarkTest00736.py",
+     "entry": "POST /benchmark/cmdi-00/BenchmarkTest00736 -> BenchmarkTest00736_post"
+    },
+    {
+     "case_id": "BenchmarkTest00749",
+     "category": "pathtraver",
+     "real": true,
+     "cwe": "CWE-22",
+     "file": "testcode/BenchmarkTest00749.py",
+     "entry": "POST /benchmark/pathtraver-01/BenchmarkTest00749 -> BenchmarkTest00749_post"
+    },
+    {
+     "case_id": "BenchmarkTest00823",
+     "category": "ldapi",
+     "real": true,
+     "cwe": "CWE-90",
+     "file": "testcode/BenchmarkTest00823.py",
+     "entry": "POST /benchmark/ldapi-00/BenchmarkTest00823 -> BenchmarkTest00823_post"
+    },
+    {
+     "case_id": "BenchmarkTest00826",
+     "category": "deserialization",
+     "real": false,
+     "cwe": "CWE-502",
+     "file": "testcode/BenchmarkTest00826.py",
+     "entry": "POST /benchmark/deserialization-00/BenchmarkTest00826 -> BenchmarkTest00826_post"
+    },
+    {
+     "case_id": "BenchmarkTest00841",
+     "category": "xss",
+     "real": true,
+     "cwe": "CWE-79",
+     "file": "testcode/BenchmarkTest00841.py",
+     "entry": "POST /benchmark/xss-00/BenchmarkTest00841 -> BenchmarkTest00841_post"
+    },
+    {
+     "case_id": "BenchmarkTest00884",
+     "category": "xss",
+     "real": false,
+     "cwe": "CWE-79",
+     "file": "testcode/BenchmarkTest00884.py",
+     "entry": "POST /benchmark/xss-00/BenchmarkTest00884 -> BenchmarkTest00884_post"
+    },
+    {
+     "case_id": "BenchmarkTest00888",
+     "category": "trustbound",
+     "real": true,
+     "cwe": "CWE-501",
+     "file": "testcode/BenchmarkTest00888.py",
+     "entry": "POST /benchmark/trustbound-00/BenchmarkTest00888 -> BenchmarkTest00888_post"
+    },
+    {
+     "case_id": "BenchmarkTest00891",
+     "category": "codeinj",
+     "real": true,
+     "cwe": "CWE-94",
+     "file": "testcode/BenchmarkTest00891.py",
+     "entry": "POST /benchmark/codeinj-00/BenchmarkTest00891 -> BenchmarkTest00891_post"
+    },
+    {
+     "case_id": "BenchmarkTest00915",
+     "category": "pathtraver",
+     "real": true,
+     "cwe": "CWE-22",
+     "file": "testcode/BenchmarkTest00915.py",
+     "entry": "POST /benchmark/pathtraver-01/BenchmarkTest00915 -> BenchmarkTest00915_post"
+    },
+    {
+     "case_id": "BenchmarkTest00931",
+     "category": "xxe",
+     "real": true,
+     "cwe": "CWE-611",
+     "file": "testcode/BenchmarkTest00931.py",
+     "entry": "POST /benchmark/xxe-00/BenchmarkTest00931 -> BenchmarkTest00931_post"
+    },
+    {
+     "case_id": "BenchmarkTest00963",
+     "category": "weakrand",
+     "real": false,
+     "cwe": "CWE-330",
+     "file": "testcode/BenchmarkTest00963.py",
+     "entry": "POST /benchmark/weakrand-03/BenchmarkTest00963 -> BenchmarkTest00963_post"
+    },
+    {
+     "case_id": "BenchmarkTest00980",
+     "category": "securecookie",
+     "real": true,
+     "cwe": "CWE-614",
+     "file": "testcode/BenchmarkTest00980.py",
+     "entry": "POST /benchmark/securecookie-00/BenchmarkTest00980 -> BenchmarkTest00980_post"
+    },
+    {
+     "case_id": "BenchmarkTest00982",
+     "category": "redirect",
+     "real": true,
+     "cwe": "CWE-601",
+     "file": "testcode/BenchmarkTest00982.py",
+     "entry": "POST /benchmark/redirect-00/BenchmarkTest00982 -> BenchmarkTest00982_post"
+    },
+    {
+     "case_id": "BenchmarkTest01004",
+     "category": "pathtraver",
+     "real": false,
+     "cwe": "CWE-22",
+     "file": "testcode/BenchmarkTest01004.py",
+     "entry": "POST /benchmark/pathtraver-01/BenchmarkTest01004 -> BenchmarkTest01004_post"
+    },
+    {
+     "case_id": "BenchmarkTest01024",
+     "category": "xxe",
+     "real": false,
+     "cwe": "CWE-611",
+     "file": "testcode/BenchmarkTest01024.py",
+     "entry": "POST /benchmark/xxe-00/BenchmarkTest01024 -> BenchmarkTest01024_post"
+    },
+    {
+     "case_id": "BenchmarkTest01089",
+     "category": "securecookie",
+     "real": false,
+     "cwe": "CWE-614",
+     "file": "testcode/BenchmarkTest01089.py",
+     "entry": "POST /benchmark/securecookie-00/BenchmarkTest01089 -> BenchmarkTest01089_post"
+    },
+    {
+     "case_id": "BenchmarkTest01091",
+     "category": "redirect",
+     "real": false,
+     "cwe": "CWE-601",
+     "file": "testcode/BenchmarkTest01091.py",
+     "entry": "POST /benchmark/redirect-00/BenchmarkTest01091 -> BenchmarkTest01091_post"
+    },
+    {
+     "case_id": "BenchmarkTest01095",
+     "category": "ldapi",
+     "real": false,
+     "cwe": "CWE-90",
+     "file": "testcode/BenchmarkTest01095.py",
+     "entry": "POST /benchmark/ldapi-00/BenchmarkTest01095 -> BenchmarkTest01095_post"
+    },
+    {
+     "case_id": "BenchmarkTest01097",
+     "category": "cmdi",
+     "real": false,
+     "cwe": "CWE-78",
+     "file": "testcode/BenchmarkTest01097.py",
+     "entry": "POST /benchmark/cmdi-00/BenchmarkTest01097 -> BenchmarkTest01097_post"
+    },
+    {
+     "case_id": "BenchmarkTest01103",
+     "category": "xss",
+     "real": false,
+     "cwe": "CWE-79",
+     "file": "testcode/BenchmarkTest01103.py",
+     "entry": "POST /benchmark/xss-01/BenchmarkTest01103 -> BenchmarkTest01103_post"
+    },
+    {
+     "case_id": "BenchmarkTest01130",
+     "category": "weakrand",
+     "real": true,
+     "cwe": "CWE-330",
+     "file": "testcode/BenchmarkTest01130.py",
+     "entry": "POST /benchmark/weakrand-03/BenchmarkTest01130 -> BenchmarkTest01130_post"
+    },
+    {
+     "case_id": "BenchmarkTest01156",
+     "category": "redirect",
+     "real": false,
+     "cwe": "CWE-601",
+     "file": "testcode/BenchmarkTest01156.py",
+     "entry": "POST /benchmark/redirect-00/BenchmarkTest01156 -> BenchmarkTest01156_post"
+    },
+    {
+     "case_id": "BenchmarkTest01158",
+     "category": "redirect",
+     "real": false,
+     "cwe": "CWE-601",
+     "file": "testcode/BenchmarkTest01158.py",
+     "entry": "POST /benchmark/redirect-00/BenchmarkTest01158 -> BenchmarkTest01158_post"
+    },
+    {
+     "case_id": "BenchmarkTest01186",
+     "category": "weakrand",
+     "real": false,
+     "cwe": "CWE-330",
+     "file": "testcode/BenchmarkTest01186.py",
+     "entry": "POST /benchmark/weakrand-03/BenchmarkTest01186 -> BenchmarkTest01186_post"
+    },
+    {
+     "case_id": "BenchmarkTest01210",
+     "category": "xss",
+     "real": true,
+     "cwe": "CWE-79",
+     "file": "testcode/BenchmarkTest01210.py",
+     "entry": "POST /benchmark/xss-01/BenchmarkTest01210 -> BenchmarkTest01210_post"
+    },
+    {
+     "case_id": "BenchmarkTest01212",
+     "category": "xxe",
+     "real": true,
+     "cwe": "CWE-611",
+     "file": "testcode/BenchmarkTest01212.py",
+     "entry": "POST /benchmark/xxe-00/BenchmarkTest01212 -> BenchmarkTest01212_post"
+    },
+    {
+     "case_id": "BenchmarkTest01228",
+     "category": "deserialization",
+     "real": false,
+     "cwe": "CWE-502",
+     "file": "testcode/BenchmarkTest01228.py",
+     "entry": "POST /benchmark/deserialization-00/BenchmarkTest01228 -> BenchmarkTest01228_post"
+    }
+   ]
+  }
+ ]
+}

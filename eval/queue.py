@@ -2,7 +2,8 @@
 
 Terminal statuses (ok|crashed|hung|error) are scored as they stand: a hung or crashed run is a
 miss whose tokens count. The one exception is `aborted` (a subscription usage limit killed the
-run): it is not the model's miss, is never scored, and gets a fresh attempt_no."""
+run, or the machine failed under an orion-lm run: Neo4j down or dropped, Joern missing -- eval.infra):
+it is not the model's miss, is never scored, and gets a fresh attempt_no."""
 
 from . import db
 

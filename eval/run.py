@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -7,17 +8,20 @@ import subprocess
 import tempfile
 import time
 
-from . import db, queue, repo
+from . import db, infra, owasp, queue, repo
+from .arms import PHASES_ATTR
 from .resources import PhaseSampler
 
-# The five study arms (design 2026-10-18 §5.4). orion-lm* run in-process (Task F3 wires the
-# dispatch); plain-* are the frontier competitors (Claude Code / Codex CLI).
+# The five study arms (design 2026-10-18 §5.4). orion-lm* run in-process (eval/arms/lm.py);
+# plain-* are the frontier competitors (Claude Code / Codex CLI).
 ARMS = ["orion-lm", "orion-lm-base", "plain-sonnet5", "plain-opus5", "plain-gpt"]
+# In-process arm -> the main() flag naming its local model path (that path is its model_tag).
+LM_MODEL_FLAGS = {"orion-lm": "--lm-model", "orion-lm-base": "--lm-base-model"}
 
 # Exact model ids, verified against the installed CLIs on 2026-10-18 (claude 2.1.302,
 # codex-cli 0.155.1): `claude --model <id>` runs and reports the same id in its init/usage
 # events; `codex exec -m <id>` runs. Frozen at pre-registration (orion-lm-prereg-v1).
-# orion-lm* map to the local model path (set in Part F).
+# orion-lm* have no fixed tag: main() maps them to the --lm-model / --lm-base-model path.
 MODEL_TAGS = {
     "plain-sonnet5": "claude-sonnet-5",
     "plain-opus5": "claude-opus-5",
@@ -132,14 +136,23 @@ def run_one(conn, *, arm, repo_meta, run_no, model_tags, base_env,
         db.finish_run(conn, rid, "aborted")
         raise
     except Exception as e:
-        _log_resource(conn, rid, sampler["s"], t0)
+        _log_phases(conn, rid, getattr(e, PHASES_ATTR, None) or [])
+        _log_resource(conn, rid, sampler["s"], t0, phases=getattr(e, PHASES_ATTR, None) or [])
+        if infra.is_infra(e):   # the machine failed (Neo4j, Joern), not the arm: not scored, resumed
+            db.log_event(conn, rid, stage="run", level="warn",
+                         message=f"machine failure ({e.__class__.__name__}: {e}); not scored, "
+                                 "re-attempted after --resume-wait"[:2000])
+            db.finish_run(conn, rid, "aborted")
+            return "aborted"
         db.log_event(conn, rid, stage="run", level="error", message=str(e)[:2000])
         db.finish_run(conn, rid, "error")
         return "error"
     # the run must never be left 'running': a failure while recording what the arm returned
     # becomes an error event + status "error", not a dangling row
     try:
-        _log_resource(conn, rid, sampler["s"], t0)
+        _log_phases(conn, rid, res.phases or [])
+        _log_resource(conn, rid, sampler["s"], t0, phases=res.phases or [],
+                      mlx_peak_mb=getattr(res, "mlx_peak_mb", None))
         for block in res.usage:
             db.log_agent_call(conn, rid, session_id=None, stage="run",
                               input_tokens=block.get("uncached_in"), output_tokens=block.get("out"),
@@ -161,24 +174,43 @@ def run_one(conn, *, arm, repo_meta, run_no, model_tags, base_env,
         db.log_event(conn, rid, stage="run", level="warn",
                      message=f"usage limit hit ({res.status} -> {final}); not scored, will resume;"
                              f" matched: {matched[:500]}")
+    elif final == "aborted":   # the arm itself saw a machine failure (eval/arms/lm.py; reason in its lines)
+        db.log_event(conn, rid, stage="run", level="warn",
+                     message="the arm aborted the run (machine failure, not the model's miss); "
+                             "not scored, re-attempted after --resume-wait")
     db.finish_run(conn, rid, final)
     return final
 
 
-def _log_resource(conn, rid, sampler, t0):
+def _log_phases(conn, rid, phases):
+    """One resources row per phase the arm measured itself before its run phase (the in-process arm's
+    graph build: ArmResult.phases, or `arm_phases` on the exception it raised). Never invented: a
+    field the arm did not measure is stored as NULL."""
+    for ph in phases:
+        db.log_resource(conn, rid, phase=ph["phase"], wall_seconds=ph.get("wall_seconds"),
+                        peak_rss_mb=ph.get("peak_rss_mb"), graph_nodes=ph.get("graph_nodes"),
+                        graph_edges=ph.get("graph_edges"), loc=ph.get("loc"))
+
+
+def _log_resource(conn, rid, sampler, t0, *, phases=(), mlx_peak_mb=None):
     """One resources row for the run phase. Peak RSS comes only from a sampler that was
     attached to a live process; otherwise it is recorded as missing (None), never 0.
     wall_seconds has two sources: with a sampler it is the arm's process lifetime as seen by
     the sampler (spawn -> launcher return, so it includes the findings copy and the tree
     rmtree); without one (no process was ever spawned) it is run_one's own clock around the
-    launcher call."""
+    launcher call. The in-process arm attaches its sampler (on_start) only after its graph
+    build, which it measures as its own phase: when the arm measured phases but never started the
+    run phase (its build failed or aborted), there is no run phase to record and no row is written
+    (run_one's clock would only repeat the build). mlx_peak_mb is the arm's MLX peak (or None)."""
     if sampler is not None:
         sampler.__exit__(None, None, None)
         wall, rss = sampler.wall_seconds, sampler.peak_rss_mb
+    elif phases:
+        return
     else:
         wall, rss = time.monotonic() - t0, None
     db.log_resource(conn, rid, phase="run", wall_seconds=wall, peak_rss_mb=rss,
-                    graph_nodes=None, graph_edges=None, loc=None)
+                    graph_nodes=None, graph_edges=None, loc=None, mlx_peak_mb=mlx_peak_mb)
 
 
 def _default_plain(**kw):
@@ -187,7 +219,8 @@ def _default_plain(**kw):
 
 
 def _default_lm(**kw):
-    raise NotImplementedError("orion-lm arms land in Task F3")
+    from .arms.lm import orion_lm_arm  # in-process: graph build -> model load -> discover_lm
+    return orion_lm_arm(**kw)
 
 
 def run_dir_for(arm, repo_meta, root=os.path.join("eval", "runs")):
@@ -196,6 +229,19 @@ def run_dir_for(arm, repo_meta, root=os.path.join("eval", "runs")):
         run_seg += f".a{repo_meta['attempt_no']}"
     return os.path.join(root, arm, repo_meta["id"], repo_meta["commit_sha"],
                         repo_meta.get("case_id") or "_", run_seg)
+
+
+# Default parent of the per-run work dirs: a neutral name (it names no arm, CVE or evaluation).
+TREE_ROOT_NAME = "workspaces"
+
+
+def work_dir_for(arm, repo_meta, tree_root):
+    """The run's private work dir, <tree_root>/<sha256(run key)[:16]>, which holds `tree` (and, for
+    the in-process arm, its build scratch). OPAQUE: a plain agent's cwd names no arm, row id (CVE),
+    commit or "eval". The run key is the run dir's relative path (arm/row/commit/case/run[.aN]), so
+    the token is unique per attempt, and so is the scan_id Orion derives from the tree path."""
+    key = run_dir_for(arm, repo_meta, root="")
+    return os.path.join(tree_root, hashlib.sha256(key.encode("utf-8")).hexdigest()[:16])
 
 
 def _leak_guard(tree):
@@ -212,52 +258,128 @@ def _leak_guard(tree):
 
 
 def build_launcher(*, base_env, shim_dir, graph_cache, _plain=_default_plain, _lm=_default_lm,
-                   _export=repo.export_tree, tree_root=None):
-    tree_root = tree_root or os.path.join(tempfile.gettempdir(), "orion-eval-trees")
+                   _export=repo.export_tree, _strip=owasp.strip_answers, tree_root=None):
+    """The launcher run_one calls: export the commit to a fresh tree (no .git) at
+    <tree_root>/<opaque token>/tree (work_dir_for), run the arm, delete the work dir. An OWASP item
+    (repo_meta["case"] set, Task F2) has its answer files stripped right after the export, for every
+    arm, and its case passed to the arm (plain: CASE_PROMPT; orion-lm: the case's flows); a manifest
+    item has case None."""
+    tree_root = tree_root or os.path.join(tempfile.gettempdir(), TREE_ROOT_NAME)
 
     def launcher(arm, repo_meta, model_tag, on_line, *, effort, on_start):
         sha = repo_meta["commit_sha"]
         run_dir = os.path.abspath(run_dir_for(arm, repo_meta))
-        tree = os.path.abspath(os.path.join(run_dir_for(arm, repo_meta, tree_root), "tree"))
+        work = os.path.abspath(work_dir_for(arm, repo_meta, tree_root))
+        tree = os.path.join(work, "tree")
         _leak_guard(tree)
         usage_log = os.path.join(run_dir, "usage.jsonl")
         json_out = os.path.join(run_dir, "findings.json")
         try:
             os.makedirs(run_dir, exist_ok=True)
             _export(repo_meta["mirror_dir"], sha, tree)
+            case = repo_meta.get("case")
+            if case is not None:   # OWASP ships its answers next to the code
+                removed = _strip(tree)
+                on_line(f"owasp: stripped {len(removed)} answer file(s) from the tree: "
+                        + ", ".join(removed[:20]) + (" ..." if len(removed) > 20 else ""))
             common = dict(arm=arm, repo_dir=tree, model_tag=model_tag, effort=effort,
                           json_out=json_out, usage_log=usage_log, base_env=base_env,
-                          on_line=on_line, on_start=on_start)
-            if arm.startswith("orion-"):
-                # in-process orion-lm arms (Task F3); default seam refuses so nothing
-                # silently runs the deleted `orion scan` subprocess path
-                res = _lm(graph_cache=graph_cache, **common)
+                          on_line=on_line, on_start=on_start, case=case)
+            if arm in LM_MODEL_FLAGS:
+                # in-process orion-lm arms: model_tag is the local model path
+                res = _lm(graph_cache=graph_cache, run_no=repo_meta.get("run_no", 1),
+                          case_id=repo_meta.get("case_id", ""), repo_id=repo_meta["id"],
+                          commit_sha=sha, **common)
+            elif arm.startswith("orion-"):
+                # nothing may silently run the removed `orion scan` subprocess path
+                raise ValueError(f"no in-process arm for {arm!r} (known: {sorted(LM_MODEL_FLAGS)})")
             else:
                 # the arm copies its findings.json out of the tree before it is deleted
                 res = _plain(shim_dir=shim_dir, **common)
         finally:
-            shutil.rmtree(tree, ignore_errors=True)
+            shutil.rmtree(work, ignore_errors=True)   # the tree and anything an arm left next to it
         return res
     return launcher
 
 
+_UNLABELED_WARNING = """\
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!! WARNING --unlabeled-ok: manifest {manifest} is NOT checked for labelers or fix sites.
+!! For a dev or smoke manifest ONLY. Never on the test set before its labels exist and it is
+!! frozen at orion-lm-prereg-v1: the test set is run once, and these runs would count as that once.
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"""
+
+
 def main(argv=None, sleep=time.sleep):
-    import json as _json
-    from . import preflight
+    from . import manifest, preflight
     from .shim_setup import shim_dir as _shim_dir
     ap = argparse.ArgumentParser()
     ap.add_argument("--arm", action="append", choices=ARMS)
-    ap.add_argument("--manifest", default="eval/dataset/manifest.json")
+    ap.add_argument("--manifest", default="eval/dataset/manifest.json",
+                    help="manifest v2 (vulnerable + patched commit per row); '' runs no manifest rows")
+    ap.add_argument("--owasp", metavar="PATH",
+                    help="OWASP sample (eval/dataset/owasp_sample.json): add one single-commit item per "
+                         "case, under repo id owasp-java / owasp-python, tier 'owasp'")
+    ap.add_argument("--owasp-runs", type=int, default=1,
+                    help="runs per arm per OWASP case (spec 5.4: R = 1); --runs is for manifest rows")
     ap.add_argument("--db", default="eval/runs.db")
     ap.add_argument("--runs", type=int, default=3)
-    ap.add_argument("--tree-root", default=os.path.join(tempfile.gettempdir(), "orion-eval-trees"))
+    ap.add_argument("--tree-root", default=os.path.join(tempfile.gettempdir(), TREE_ROOT_NAME),
+                    help="parent of the per-run work dirs (<root>/<opaque token>/tree); outside any repo")
     ap.add_argument("--mirror-root", default="eval/mirrors/")
     ap.add_argument("--resume-wait", type=int, default=900,
-                    help="seconds to sleep after a usage-limit abort before re-planning")
+                    help="seconds to sleep after an aborted run (a usage limit, or a machine failure "
+                         "under an orion-lm run) before re-planning")
+    ap.add_argument("--lm-model", metavar="PATH",
+                    help="local model path for the orion-lm arm (recorded as runs.model_tag)")
+    ap.add_argument("--lm-base-model", metavar="PATH",
+                    help="local model path for the orion-lm-base arm (recorded as runs.model_tag)")
+    ap.add_argument("--unlabeled-ok", action="store_true",
+                    help="DEV / SMOKE manifests only: run rows that have no labelers or no fix sites "
+                         "(manifest.validate(require_labels=False)). Without it every row must be "
+                         "signed and keyed, so the test set cannot be run before its labels exist.")
     args = ap.parse_args(argv)
     arms = args.arm or ARMS
-    repos = _json.loads(open(args.manifest).read())["repos"]  # [{id, repo_url, tier, ...}]
-    good = []
+    # A selected orion-lm* arm needs an existing model path. Refuse here, before any run row or
+    # mirror exists: a misconfiguration must never become a terminal, scored 'error' run.
+    model_tags = dict(MODEL_TAGS)
+    given = {"orion-lm": args.lm_model, "orion-lm-base": args.lm_base_model}
+    for arm, flag in LM_MODEL_FLAGS.items():
+        if arm not in arms:
+            continue
+        path = given[arm]
+        if not path or not os.path.exists(path):
+            why = "not given" if not path else f"{path!r} does not exist"
+            print(f"arm {arm} needs {flag} PATH (the local model): {why}", flush=True)
+            return 2
+        model_tags[arm] = os.path.abspath(path)
+    data = manifest.load(args.manifest) if args.manifest else {"repos": []}
+    errors = (manifest.validate(data, split_repos=manifest.split_repos(),
+                                require_labels=not args.unlabeled_ok) if data["repos"] else [])
+    if errors:  # the test set must be clean to run: refuse before mirroring anything
+        print(f"manifest {args.manifest} is invalid ({len(errors)} error(s)):", flush=True)
+        for e in errors:
+            print(f"  {e}", flush=True)
+        if not args.unlabeled_ok and any("(require_labels)" in e for e in errors):
+            print("rows must be labeled (labelers, fix_sites, fix_sites_patched) before a run; "
+                  "for a dev or smoke manifest pass --unlabeled-ok", flush=True)
+        return 2
+    if args.unlabeled_ok and data["repos"]:
+        print(_UNLABELED_WARNING.format(manifest=args.manifest), flush=True)
+    benchmarks = []
+    if args.owasp:  # validated before anything is mirrored, like the manifest
+        sample = owasp.load_sample(args.owasp)
+        errors = owasp.validate_sample(sample)
+        clash = sorted({b.get("id") for b in sample["benchmarks"]} & {r.get("id") for r in data["repos"]})
+        errors += [f"benchmark id {c} is also a manifest row id" for c in clash]
+        if errors:
+            print(f"OWASP sample {args.owasp} is invalid ({len(errors)} error(s)):", flush=True)
+            for e in errors:
+                print(f"  {e}", flush=True)
+            return 2
+        benchmarks = sample["benchmarks"]
+    repos = data["repos"]  # [{id, repo_url, tier, ...}]
+    good, skipped = [], []   # skipped: (what, id, why) -- reported and exit 1 at the end
     for r in repos:  # mirror once per repo, then pin the commit to check out
         try:
             r["mirror_dir"] = os.path.join(args.mirror_root, r["id"])
@@ -274,12 +396,28 @@ def main(argv=None, sleep=time.sleep):
             good.append(r)
         except Exception as e:
             print(f"SKIPPING repo {r.get('id')}: {e}", flush=True)
+            skipped.append(("manifest row", r.get("id"), str(e)))
     items, meta_by_key = {}, {}
     for r in good:
         case = r.get("case_id", "")
         for sha, kind in r["commits"]:
             items.setdefault(r["id"], []).append((sha, kind, case))
             meta_by_key[(r["id"], sha, case)] = dict(r, commit_sha=sha, commit_kind=kind, case_id=case)
+    owasp_items = {}
+    for b in benchmarks:  # one mirror per benchmark repo; every case is a single-commit item on its pin
+        mirror_dir = os.path.join(args.mirror_root, b["id"])
+        try:
+            repo.mirror(b["repo_url"], mirror_dir)
+        except Exception as e:
+            print(f"SKIPPING OWASP benchmark {b['id']}: {e}", flush=True)
+            skipped.append((f"OWASP benchmark ({len(b['cases'])} cases)", b["id"], str(e)))
+            continue
+        sha = b["pinned_sha"]
+        for c in b["cases"]:
+            owasp_items.setdefault(b["id"], []).append((sha, "owasp", c["case_id"]))
+            meta_by_key[(b["id"], sha, c["case_id"])] = {
+                "id": b["id"], "repo_url": b["repo_url"], "tier": "owasp", "mirror_dir": mirror_dir,
+                "commit_sha": sha, "commit_kind": "owasp", "case_id": c["case_id"], "case": dict(c)}
     conn = db.connect(args.db)
     versions = "; ".join(f"{r['tool']}={r['detail']}" for r in preflight.check())
     orion_commit = git_head()
@@ -287,17 +425,25 @@ def main(argv=None, sleep=time.sleep):
     launcher = build_launcher(base_env=dict(os.environ), shim_dir=_shim_dir(),
                               graph_cache=graph_cache, tree_root=args.tree_root)
     while True:  # a usage-limit abort pauses, then re-plans: the key comes back as a new attempt
-        todo = queue.pending(conn, queue.plan(arms, items, args.runs))
+        todo = queue.pending(conn, queue.plan(arms, items, args.runs)
+                             + queue.plan(arms, owasp_items, args.owasp_runs))
         if not todo:
             break
         for arm, repo_id, sha, case, n in todo:
             status = run_one(conn, arm=arm, repo_meta=meta_by_key[(repo_id, sha, case)], run_no=n,
-                             model_tags=MODEL_TAGS, base_env=dict(os.environ),
+                             model_tags=model_tags, base_env=dict(os.environ),
                              orion_commit=orion_commit, cli_versions=versions, launcher=launcher)
-            if status == "aborted":
-                print(f"usage limit hit; resuming in {args.resume_wait}s", flush=True)
+            if status == "aborted":   # a usage limit, or a machine failure inside an orion-lm run
+                print(f"run aborted (usage limit or machine failure; see its events); resuming in "
+                      f"{args.resume_wait}s", flush=True)
                 sleep(args.resume_wait)
                 break
+    if skipped:   # what could run has run; the study is still short these items (a re-run requeues them)
+        print(f"INCOMPLETE: skipped {len(skipped)} item(s) whose mirror or commits could not be set up; "
+              "everything else ran. Re-run to queue them:", flush=True)
+        for what, ident, why in skipped:
+            print(f"  {what} {ident}: {why}"[:2000], flush=True)
+        return 1
     return 0
 
 

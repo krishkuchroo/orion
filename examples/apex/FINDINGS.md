@@ -38,7 +38,6 @@ lead even higher, but the flagship result no longer depends on it.
 Committed alongside this file (survive a clone, on `main`):
 - `findings.json` — original 6 verdicts (2 CONFIRM, 1 REJECT, 3 ERROR)
 - `reverify.json` — the 3 recovered CONFIRMs
-- `report.log` — ranked human-readable report + build timings
 
 Committed in full on the `apex-testing` branch (raw logs):
 - `bench/runs/20260729T094502Z/{report.log,findings.json,reverify.json,scan.stderr.log}`
@@ -47,4 +46,3 @@ Committed in full on the `apex-testing` branch (raw logs):
 
 Elsewhere in the repo:
 - `bench/reverify.py` — surgical re-verify helper
-- `docs/notes/GRENDEL.md` — full session learnings

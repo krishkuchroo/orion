@@ -2,6 +2,7 @@
 
 A CodeCase is the `slice.flow_slice` dict plus `snippets`: list of
 `{"role": "target"|"source"|"caller"|"callee", "file", "function", "start", "end", "code"}`, target first.
+A function case (no graph flow) also gets a one-node sink line from `orion/lm/sinks.annotate`.
 `orion/lm/format.py` is the only thing that turns a case into a message. Local only, no network.
 """
 from __future__ import annotations
@@ -9,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from orion.lm.codeindex import MODULE, RepoIndex, Span
+from orion.lm.sinks import annotate
 
 
 @dataclass(frozen=True)
@@ -101,6 +103,9 @@ def case_from_flow(flow: dict, index: RepoIndex, *, budget: CaseBudget = CaseBud
 
 def case_from_function(index: RepoIndex, file: str, span: Span, *, anchor: int, case_id: str = "F0",
                        budget: CaseBudget = CaseBudget()) -> dict:
+    """A code-only case for `span` (no graph flow): target snippet + callers/callees, then
+    `sinks.annotate` gives it the sink line Orion's sink rules find in the target, so training rows and
+    runtime code-only cases look the same."""
     case = {"flow_id": case_id, "rank": 0, "sink_category": None, "source_uid": None, "sink_uid": None,
             "nodes": [], "snippets": []}
     tsnip = _snippet(index, "target", span, budget.max_target_lines, anchor)
@@ -108,4 +113,4 @@ def case_from_function(index: RepoIndex, file: str, span: Span, *, anchor: int, 
         return case
     seen = {(span.file, span.start, span.end)}
     case["snippets"] = [tsnip] + _context(index, span, seen, budget)
-    return case
+    return annotate(case)

@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS agent_calls (
   exit_reason TEXT, error_head TEXT, FOREIGN KEY(run_id) REFERENCES runs(id));
 CREATE TABLE IF NOT EXISTS resources (
   id INTEGER PRIMARY KEY, run_id INTEGER, phase TEXT, wall_seconds REAL,
-  peak_rss_mb REAL, graph_nodes INTEGER, graph_edges INTEGER, loc INTEGER,
+  peak_rss_mb REAL, graph_nodes INTEGER, graph_edges INTEGER, loc INTEGER, mlx_peak_mb REAL,
   FOREIGN KEY(run_id) REFERENCES runs(id));
 CREATE TABLE IF NOT EXISTS steps (
   id INTEGER PRIMARY KEY, run_id INTEGER, step_no INTEGER, kind TEXT, query TEXT,
@@ -47,7 +47,14 @@ _SCHEMA = (_SCHEMA
           .replace("{failures_view}", _FAILURES_VIEW))
 
 
-_CURRENT_VERSION = 2
+# 1 -> 2: runs gains commit_kind/commit_sha/case_id/attempt_no/effort and its UNIQUE key.
+# 2 -> 3: resources gains mlx_peak_mb (MLX's own peak, mx.get_peak_memory: Metal buffers, which psutil's
+#         peak_rss_mb does not see; NULL when the backend is not MLX or did not say).
+_CURRENT_VERSION = 3
+
+_NEW_RESOURCE_COLS = (
+    ("mlx_peak_mb", "REAL"),
+)
 
 _NEW_RUN_COLS = (
     ("commit_kind", "TEXT"),
@@ -74,6 +81,10 @@ def _migrate(conn) -> None:
         for name, decl in _NEW_RUN_COLS:
             if name not in have:
                 conn.execute(f"ALTER TABLE runs ADD COLUMN {name} {decl}")
+        have = {r[1] for r in conn.execute("PRAGMA table_info(resources)")}
+        for name, decl in _NEW_RESOURCE_COLS:
+            if name not in have:
+                conn.execute(f"ALTER TABLE resources ADD COLUMN {name} {decl}")
         sql = conn.execute(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='runs'").fetchone()[0]
         if "UNIQUE" not in sql.upper():
@@ -139,11 +150,11 @@ def log_agent_call(conn, run_id, *, session_id, stage, input_tokens, output_toke
 
 
 def log_resource(conn, run_id, *, phase, wall_seconds, peak_rss_mb, graph_nodes,
-                 graph_edges, loc) -> None:
+                 graph_edges, loc, mlx_peak_mb=None) -> None:
     conn.execute(
-        "INSERT INTO resources(run_id,phase,wall_seconds,peak_rss_mb,graph_nodes,graph_edges,loc)"
-        " VALUES(?,?,?,?,?,?,?)",
-        (run_id, phase, wall_seconds, peak_rss_mb, graph_nodes, graph_edges, loc))
+        "INSERT INTO resources(run_id,phase,wall_seconds,peak_rss_mb,graph_nodes,graph_edges,loc,"
+        "mlx_peak_mb) VALUES(?,?,?,?,?,?,?,?)",
+        (run_id, phase, wall_seconds, peak_rss_mb, graph_nodes, graph_edges, loc, mlx_peak_mb))
     conn.commit()
 
 

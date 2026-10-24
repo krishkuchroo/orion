@@ -54,7 +54,7 @@ def test_v1_db_upgrades_in_place(tmp_path):
     p = str(tmp_path / "old.db")
     _make_v1(p)
     conn = db.connect(p)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db._CURRENT_VERSION == 3
     assert conn.execute("SELECT count(*) FROM runs").fetchone()[0] == 3
     assert {"commit_kind", "commit_sha"} <= {r[1] for r in conn.execute("PRAGMA table_info(runs)")}
     assert conn.execute("SELECT count(*) FROM events").fetchone()[0] == 1
@@ -68,7 +68,7 @@ def test_v1_db_upgrades_in_place(tmp_path):
     # second connect is a no-op
     conn.close()
     conn2 = db.connect(p)
-    assert conn2.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert conn2.execute("PRAGMA user_version").fetchone()[0] == 3
     assert conn2.execute("SELECT count(*) FROM runs").fetchone()[0] == 4
 
 
@@ -84,3 +84,36 @@ def test_failed_migration_rolls_back(tmp_path, monkeypatch):
     names = {r[0] for r in raw.execute("SELECT name FROM sqlite_master")}
     assert "runs_new" not in names and "failures" in names
     assert "commit_kind" not in {r[1] for r in raw.execute("PRAGMA table_info(runs)")}
+
+
+def _make_v2(p):
+    """A v2 DB as the harness wrote it before resources.mlx_peak_mb (I8), with one resources row."""
+    raw = sqlite3.connect(p)
+    raw.executescript(db._SCHEMA.replace(" mlx_peak_mb REAL,", ""))
+    raw.execute("INSERT INTO runs(arm,repo,run_no,status,commit_sha) VALUES('orion-lm','r',1,'ok','s')")
+    raw.execute("INSERT INTO resources(run_id,phase,wall_seconds,peak_rss_mb) VALUES(1,'run',12.5,800.0)")
+    raw.execute("PRAGMA user_version = 2")
+    raw.commit()
+    assert "mlx_peak_mb" not in {r[1] for r in raw.execute("PRAGMA table_info(resources)")}
+    raw.close()
+
+
+def test_v2_db_gains_resources_mlx_peak_mb(tmp_path):
+    p = str(tmp_path / "v2.db")
+    _make_v2(p)
+    conn = db.connect(p)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert "mlx_peak_mb" in {r[1] for r in conn.execute("PRAGMA table_info(resources)")}
+    assert conn.execute("SELECT phase, wall_seconds, peak_rss_mb, mlx_peak_mb FROM resources").fetchall() \
+        == [("run", 12.5, 800.0, None)]                 # old rows kept; the new column is missing, not 0
+    db.log_resource(conn, 1, phase="run", wall_seconds=1.0, peak_rss_mb=None, graph_nodes=None,
+                    graph_edges=None, loc=None, mlx_peak_mb=512.0)
+    assert conn.execute("SELECT mlx_peak_mb FROM resources ORDER BY id").fetchall() == [(None,), (512.0,)]
+
+
+def test_fresh_db_has_mlx_peak_mb_and_old_callers_still_log(tmp_path):
+    conn = db.connect(str(tmp_path / "t.db"))
+    assert "mlx_peak_mb" in {r[1] for r in conn.execute("PRAGMA table_info(resources)")}
+    db.log_resource(conn, 1, phase="build", wall_seconds=3.0, peak_rss_mb=900.0, graph_nodes=None,
+                    graph_edges=None, loc=None)
+    assert conn.execute("SELECT phase, mlx_peak_mb FROM resources").fetchall() == [("build", None)]

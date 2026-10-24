@@ -9,7 +9,6 @@ from __future__ import annotations
 import time
 
 from orion.lm import format as fmt
-from orion.lm import slice as lm_slice
 from orion.lm.model import ContextOverflow
 
 
@@ -41,7 +40,7 @@ def normalise_row(row: dict) -> dict:
             "label": _field(row, "label"), "lead": lead}
 
 
-def _judge_one(generate, example: dict, schema_text: str, acc: dict) -> tuple[bool, bool, bool]:
+def _judge_one(generate, example: dict, schema_text: str | None, acc: dict) -> tuple[bool, bool, bool]:
     """-> (flagged, parse_failed, overflowed). Adds token and time counts into `acc`."""
     messages = [fmt.system_message(schema_text), fmt.task_message([example["case"]])]
     parse_failed = False
@@ -71,9 +70,7 @@ def _judge_one(generate, example: dict, schema_text: str, acc: dict) -> tuple[bo
 def judge(generate, dev_examples, *, schema_text=None) -> dict:
     """Score `generate(messages) -> GenResult` on the dev rows (example rows or Stage 2 traces, read by
     `normalise_row`). Only `split == "dev"` is scored; a row with no split raises ValueError. `schema_text`
-    defaults to the runtime `slice.pruned_schema()`."""
-    if schema_text is None:
-        schema_text = lm_slice.pruned_schema()
+    defaults to None, the runtime's compact system message (no graph schema)."""
     rows = [r for r in map(normalise_row, dev_examples) if r["split"] == "dev"]
     acc = {"tokens": 0, "completion": 0, "seconds": 0.0}
     flagged_by: dict[str, dict[str, list[bool]]] = {}

@@ -11,6 +11,10 @@ def _meta(commit, **kw):
                  "case_id": "", "run_no": 1, "attempt_no": 1, "mirror_dir": "/m"}, **kw)
 
 
+def _tree(tmp_path, arm, meta, root="trees"):
+    return os.path.join(run.work_dir_for(arm, meta, str(tmp_path / root)), "tree")
+
+
 def _launcher(tmp_path, **kw):
     base = dict(base_env={}, shim_dir="/s", graph_cache={}, tree_root=str(tmp_path / "trees"))
     base.update(kw)
@@ -42,11 +46,11 @@ def test_build_launcher_dispatches_exports_and_cleans_up(tmp_path, monkeypatch):
     assert kw1["effort"] == "xhigh" and kw1["model_tag"] == "opus"
     assert "ollama_url" not in kw1
     run_dir = str(tmp_path / "eval/runs/plain-opus5/r1/c1/_/1")
-    tree = str(tmp_path / "trees/plain-opus5/r1/c1/_/1/tree")
+    tree = _tree(tmp_path, "plain-opus5", _meta("c1"))
     assert called["exports"][0] == ("/m", "c1", tree)
     assert kw1["repo_dir"] == tree
     assert kw1["usage_log"] == f"{run_dir}/usage.jsonl"
-    assert not os.path.exists(tree)                          # tree deleted
+    assert not os.path.exists(tree) and not os.path.exists(os.path.dirname(tree))   # work dir deleted
     assert res1.findings_path == f"{run_dir}/findings.json"  # findings kept in the run dir
     assert os.path.exists(res1.findings_path)
     assert res3.findings_path == str(tmp_path / "eval/runs/plain-gpt/r1/c1/_/1.a2/findings.json")
@@ -79,18 +83,78 @@ def test_build_launcher_deletes_tree_on_failure(tmp_path, monkeypatch):
     launcher = _launcher(tmp_path, _plain=boom, _export=fake_export)
     with pytest.raises(RuntimeError):
         launcher("plain-opus5", _meta("c1", case_id="k"), "opus", lambda l: None, effort="", on_start=None)
-    assert not os.path.exists(tmp_path / "trees/plain-opus5/r1/c1/k/1/tree")
+    assert not os.path.exists(os.path.dirname(_tree(tmp_path, "plain-opus5", _meta("c1", case_id="k"))))
 
 
-def test_orion_arms_raise_until_task_f3(tmp_path, monkeypatch):
+@pytest.mark.parametrize("arm", ["orion-lm", "orion-lm-base"])
+def test_orion_lm_arms_dispatch_to_the_in_process_arm(tmp_path, monkeypatch, arm):
+    """The default _lm seam runs eval.arms.lm.orion_lm_arm in-process (no `orion scan`, no plain)."""
+    from eval.arms import lm
     monkeypatch.chdir(tmp_path)
+    cache, seen = {}, {}
 
-    def fake_export(mirror, sha, dest, **kw):
-        os.makedirs(dest)
-    launcher = _launcher(tmp_path, _export=fake_export, _plain=lambda **kw: pytest.fail("plain ran"))
-    with pytest.raises(NotImplementedError, match="F3"):
-        launcher("orion-lm", _meta("c1"), "m", lambda l: None, effort="", on_start=None)
-    assert not os.path.exists(tmp_path / "trees/orion-lm/r1/c1/_/1/tree")   # tree still cleaned up
+    def fake_arm(**kw):
+        seen.update(kw)
+        assert os.path.isdir(kw["repo_dir"])                 # the tree exists while the arm runs
+        return ArmResult(status="ok", findings_path=None, usage=[], steps=[])
+    monkeypatch.setattr(lm, "orion_lm_arm", fake_arm)
+    launcher = _launcher(tmp_path, graph_cache=cache, _export=lambda *a, **k: os.makedirs(a[2]),
+                         _plain=lambda **kw: pytest.fail("plain ran"))
+    marker = object()
+    res = launcher(arm, _meta("c1", run_no=3, case_id="k"), "/models/m", lambda l: None,
+                   effort="", on_start=marker)
+    assert res.status == "ok"
+    assert seen["arm"] == arm and seen["model_tag"] == "/models/m" and seen["graph_cache"] is cache
+    assert (seen["run_no"], seen["case_id"], seen["repo_id"], seen["commit_sha"]) == (3, "k", "r1", "c1")
+    assert seen["on_start"] is marker
+    assert seen["json_out"] == str(tmp_path / f"eval/runs/{arm}/r1/c1/k/3/findings.json")
+    assert not os.path.exists(os.path.dirname(_tree(tmp_path, arm, _meta("c1", run_no=3, case_id="k"))))
+
+
+def test_unknown_orion_arm_is_refused(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    launcher = _launcher(tmp_path, _export=lambda *a, **k: os.makedirs(a[2]),
+                         _lm=lambda **kw: pytest.fail("lm ran"),
+                         _plain=lambda **kw: pytest.fail("plain ran"))
+    with pytest.raises(ValueError, match="orion-scan"):
+        launcher("orion-scan", _meta("c1"), "m", lambda l: None, effort="", on_start=None)
+
+
+def test_run_one_logs_an_lm_step_exactly_once(tmp_path, monkeypatch):
+    """Full chain: run_one -> build_launcher -> _default_lm -> orion_lm_arm (heavy seams stubbed).
+    The arm returns its steps; run_one is the only writer of the steps table."""
+    from eval import db
+    from eval.arms import lm
+    monkeypatch.chdir(tmp_path)
+    step = {"step_no": 1, "kind": "final", "query": None, "row_count": None, "prompt_tokens": 50,
+            "completion_tokens": 5, "cached_tokens": 20, "wall_seconds": 0.1, "error": None}
+
+    def fake_discover(scan_id, repo, on_event, **kw):
+        kw["on_step"](dict(step))
+        return []
+    monkeypatch.setattr(lm, "_build_graph", lambda repo_dir, on_event: "s1")
+    monkeypatch.setattr(lm, "_load_model", lambda path, **kw: object())
+    monkeypatch.setattr(lm, "_discover", fake_discover)
+    monkeypatch.setattr(lm, "_pathfind_error", lambda sid: None)
+    model = tmp_path / "model"
+    model.mkdir()
+    conn = db.connect(str(tmp_path / "t.db"))
+    launcher = _launcher(tmp_path, _export=lambda *a, **k: os.makedirs(a[2]))
+    status = run.run_one(conn, arm="orion-lm", repo_meta=_meta("c1"), run_no=2,
+                         model_tags={"orion-lm": str(model)}, base_env={}, orion_commit="c",
+                         cli_versions="", launcher=launcher)
+    assert status == "ok"
+    rid, model_tag = conn.execute("SELECT id, model_tag FROM runs").fetchone()
+    assert model_tag == str(model)
+    assert conn.execute("SELECT run_id, step_no, prompt_tokens, cached_tokens FROM steps").fetchall() \
+        == [(rid, 1, 50, 20)]
+    assert conn.execute("SELECT input_tokens, cache_read, cache_write, output_tokens FROM agent_calls"
+                        ).fetchall() == [(30, 20, 0, 5)]
+    rows = conn.execute("SELECT phase, peak_rss_mb FROM resources ORDER BY id").fetchall()
+    assert [p for p, _ in rows] == ["build", "run"]       # I8: the build is its own phase
+    assert all(r is None or r > 0 for _, r in rows)       # sampled on this process, never a guessed 0
+    findings = tmp_path / "eval/runs/orion-lm/r1/c1/_/2/findings.json"
+    assert findings.read_text().strip() == "[]"
 
 
 def test_lm_seam_receives_tree_and_graph_cache(tmp_path, monkeypatch):
@@ -106,7 +170,7 @@ def test_lm_seam_receives_tree_and_graph_cache(tmp_path, monkeypatch):
     res = launcher("orion-lm", _meta("c1"), "m", lambda l: None, effort="", on_start=None)
     assert res.status == "ok"
     assert seen["arm"] == "orion-lm" and seen["graph_cache"] is cache
-    assert seen["repo_dir"] == str(tmp_path / "trees/orion-lm/r1/c1/_/1/tree")
+    assert seen["repo_dir"] == _tree(tmp_path, "orion-lm", _meta("c1"))
     assert seen["json_out"] == str(tmp_path / "eval/runs/orion-lm/r1/c1/_/1/findings.json")
 
 
@@ -119,3 +183,163 @@ def test_leak_guard_rejects_tree_under_repo_marker(tmp_path):
     launcher = _launcher(tmp_path, tree_root=str(tmp_path / "t"), _export=lambda *a, **k: None)
     with pytest.raises(RuntimeError, match="CLAUDE.md"):
         launcher("plain-opus5", _meta("c1"), "opus", lambda l: None, effort="", on_start=None)
+
+
+# ---- OWASP items (Task F2): answers stripped right after the export, for every arm -------------
+
+OWASP_CASE = {"case_id": "BenchmarkTest00001", "category": "sqli", "real": True, "cwe": "CWE-89",
+              "file": "testcode/BenchmarkTest00001.py",
+              "entry": "POST /benchmark/sqli-00/BenchmarkTest00001 -> BenchmarkTest00001_post"}
+
+
+def _owasp_meta(**kw):
+    return _meta("pin1", id="owasp-python", commit_kind="owasp", tier="owasp",
+                 case_id="BenchmarkTest00001", case=OWASP_CASE, **kw)
+
+
+def _export_with_answers(mirror, sha, dest, **kw):
+    os.makedirs(os.path.join(dest, "testcode"))
+    open(os.path.join(dest, "expectedresults-0.1.csv"), "w").write("BenchmarkTest00001,sqli,true,89\n")
+    open(os.path.join(dest, "testcode", "BenchmarkTest00001.py"), "w").write("x")
+
+
+@pytest.mark.parametrize("arm", ["plain-opus5", "plain-sonnet5", "plain-gpt", "orion-lm", "orion-lm-base"])
+def test_launcher_strips_answers_for_owasp_items_for_every_arm(tmp_path, monkeypatch, arm):
+    monkeypatch.chdir(tmp_path)
+    seen, lines = {}, []
+
+    def arm_fn(**kw):
+        tree = kw["repo_dir"]
+        seen.update(kw, files=sorted(os.listdir(tree)))
+        return ArmResult(status="ok", findings_path=None, usage=[])
+    launcher = _launcher(tmp_path, _plain=arm_fn, _lm=arm_fn, _export=_export_with_answers)
+    launcher(arm, _owasp_meta(), "m", lines.append, effort="", on_start=None)
+    assert seen["files"] == ["testcode"]                     # the answer file is gone before the arm runs
+    assert seen["case"] == OWASP_CASE                        # the case's fields reach the arm
+    assert any("expectedresults-0.1.csv" in l for l in lines)
+
+
+def test_launcher_never_strips_a_manifest_item(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    seen = {}
+
+    def arm_fn(**kw):
+        seen.update(kw, files=sorted(os.listdir(kw["repo_dir"])))
+        return ArmResult(status="ok", findings_path=None, usage=[])
+    launcher = _launcher(tmp_path, _plain=arm_fn, _export=_export_with_answers,
+                         _strip=lambda tree: pytest.fail("stripped a manifest item"))
+    launcher("plain-opus5", _meta("c1"), "m", lambda l: None, effort="", on_start=None)
+    assert "expectedresults-0.1.csv" in seen["files"] and seen["case"] is None
+
+
+def test_launcher_calls_strip_right_after_the_export(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    order = []
+
+    def export(*a, **k):
+        order.append("export")
+        os.makedirs(a[2])
+
+    def strip(tree):
+        order.append("strip")
+        return []
+
+    def arm_fn(**kw):
+        order.append("arm")
+        return ArmResult(status="ok", findings_path=None, usage=[])
+    launcher = _launcher(tmp_path, _plain=arm_fn, _export=export, _strip=strip)
+    launcher("plain-gpt", _owasp_meta(), "m", lambda l: None, effort="", on_start=None)
+    assert order == ["export", "strip", "arm"]
+
+
+# ---- I6: the tree path is an opaque token ---------------------------------------------------------
+
+def test_tree_path_names_no_arm_row_commit_or_eval(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    seen = []
+
+    def fake_plain(**kw):
+        seen.append(kw["repo_dir"])
+        return ArmResult(status="ok", findings_path=None, usage=[])
+    launcher = run.build_launcher(base_env={}, shim_dir="/s", graph_cache={}, _plain=fake_plain,
+                                  _export=lambda *a, **k: os.makedirs(a[2]), tree_root=str(tmp_path / "ws"))
+    meta = _meta("deadbeefcafe", id="CVE-2026-12345", case_id="BenchmarkTest00007")
+    launcher("plain-opus5", meta, "m", lambda l: None, effort="", on_start=None)
+    launcher("plain-opus5", dict(meta, run_no=2), "m", lambda l: None, effort="", on_start=None)
+    launcher("plain-gpt", meta, "m", lambda l: None, effort="", on_start=None)
+    launcher("plain-opus5", dict(meta, attempt_no=2), "m", lambda l: None, effort="", on_start=None)
+    for tree in seen:
+        rel = os.path.relpath(tree, tmp_path / "ws")
+        token, leaf = rel.split(os.sep)
+        assert leaf == "tree" and len(token) == 16 and int(token, 16) >= 0
+        for leak in ("plain", "opus", "gpt", "CVE", "12345", "deadbeef", "Benchmark", "eval", "orion"):
+            assert leak not in rel
+    assert len(set(seen)) == 4            # unique per arm, run and attempt (scan_id derives from it)
+
+
+def test_default_tree_root_is_neutral():
+    import tempfile
+    assert run.TREE_ROOT_NAME == "workspaces"
+    root = os.path.join(tempfile.gettempdir(), run.TREE_ROOT_NAME)
+    tok = run.work_dir_for("orion-lm", _meta("c1"), root)
+    assert os.path.dirname(tok) == root and "orion" not in os.path.relpath(tok, tempfile.gettempdir())
+
+
+# ---- I8: run_one logs the arm's own build phase and its MLX peak ----------------------------------
+
+def _lm_chain(tmp_path, monkeypatch, *, mlx_peak=None, cache=None):
+    from eval import db
+    from eval.arms import lm
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(lm, "_build_graph", lambda repo_dir, on_event: "s1")
+    monkeypatch.setattr(lm, "_load_model",
+                        lambda path, **kw: type("M", (), {"backend": "mlx" if mlx_peak else "stub"})())
+    monkeypatch.setattr(lm, "_discover", lambda *a, **k: [])
+    monkeypatch.setattr(lm, "_pathfind_error", lambda sid: None)
+    monkeypatch.setattr(lm, "_scan_problem", lambda sid, repo_dir: None)
+    monkeypatch.setattr(lm, "_mlx_peak_mb", lambda: mlx_peak)
+    (tmp_path / "model").mkdir(exist_ok=True)
+    conn = db.connect(str(tmp_path / "t.db"))
+    launcher = _launcher(tmp_path, graph_cache=cache if cache is not None else {},
+                         _export=lambda *a, **k: os.makedirs(a[2]))
+    return conn, launcher
+
+
+def _resources(conn):
+    return conn.execute("SELECT phase, wall_seconds, peak_rss_mb, mlx_peak_mb FROM resources ORDER BY id").fetchall()
+
+
+def test_run_one_logs_a_build_row_and_the_mlx_peak_on_the_run_row(tmp_path, monkeypatch):
+    from eval import report
+    conn, launcher = _lm_chain(tmp_path, monkeypatch, mlx_peak=640.0)
+    run.run_one(conn, arm="orion-lm", repo_meta=_meta("c1"), run_no=1,
+                model_tags={"orion-lm": str(tmp_path / "model")}, base_env={}, orion_commit="c",
+                cli_versions="", launcher=launcher)
+    (b, r) = _resources(conn)
+    assert b[0] == "build" and b[1] >= 0 and b[3] is None
+    assert r[0] == "run" and r[3] == 640.0
+    gb = report.secondary(conn)["arms"]["orion-lm"]["graph_build"]
+    assert gb["n"] == 1 and gb["wall_seconds_total"] is not None    # report.graph_build has data now
+    assert report.secondary(conn)["arms"]["orion-lm"]["mlx_peak_mb"]["max"] == 640.0
+
+
+def test_a_cache_hit_logs_no_build_row(tmp_path, monkeypatch):
+    conn, launcher = _lm_chain(tmp_path, monkeypatch, cache={("r1", "c1"): "s1"})
+    run.run_one(conn, arm="orion-lm", repo_meta=_meta("c1"), run_no=2,
+                model_tags={"orion-lm": str(tmp_path / "model")}, base_env={}, orion_commit="c",
+                cli_versions="", launcher=launcher)
+    assert [p for p, *_ in _resources(conn)] == ["run"]
+
+
+def test_a_failed_build_logs_its_build_row_and_no_run_row(tmp_path, monkeypatch):
+    from eval.arms import lm
+    conn, launcher = _lm_chain(tmp_path, monkeypatch)
+
+    def build(repo_dir, on_event):
+        raise RuntimeError("joern-parse failed (rc=1)")
+    monkeypatch.setattr(lm, "_build_graph", build)
+    status = run.run_one(conn, arm="orion-lm", repo_meta=_meta("c1"), run_no=1,
+                         model_tags={"orion-lm": str(tmp_path / "model")}, base_env={},
+                         orion_commit="c", cli_versions="", launcher=launcher)
+    assert status == "error"
+    assert [p for p, *_ in _resources(conn)] == ["build"]       # the run phase never began

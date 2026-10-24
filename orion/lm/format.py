@@ -61,6 +61,7 @@ ACTION_SCHEMA: dict = {
 }
 
 _SYSTEM_PROMPT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "system_prompt.txt")
+_SCHEMA_CARD_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "schema_card.txt")
 
 # Markers around every piece of text that came out of the scanned repository (read_code lines, flow
 # code snippets). The repo is untrusted: it can contain lines that look like RESULT:/ERROR: turns or a
@@ -122,8 +123,23 @@ def system_prompt_text() -> str:
         return f.read().strip()
 
 
-def system_message(schema_text: str) -> dict:
-    content = system_prompt_text() + "\n\nGRAPH SCHEMA\n" + schema_text.strip() + "\n\n" + ACTION_RULES
+@functools.lru_cache(maxsize=1)
+def schema_card_text() -> str:
+    """The compact graph schema card (`orion/lm/schema_card.txt`), read once per process. Built from code
+    facts only (labels and keys from graph/schema.py NODE_KEY, edge directions as joern_adapter emits them,
+    properties the builder and precompute persist); tests/test_lm_format.py checks it against that code."""
+    with open(_SCHEMA_CARD_PATH, encoding="utf-8") as f:
+        return f.read().strip()
+
+
+def system_message(schema_text: str | None = None) -> dict:
+    """The system turn: prompt file + "GRAPH SCHEMA" block + ACTION_RULES. Default (Option C revised for data v2,
+    2026-10-23): the GRAPH SCHEMA block is the compact card from `orion/lm/schema_card.txt` (about 130 Qwen3.5
+    tokens, in place of the ~600-token full schema Option C dropped). The runtime prompter, SFT export and dev
+    scoring all take the default, so training rows match runtime calls. Pass `schema_text` to use another
+    schema text in the block instead of the card."""
+    schema = schema_card_text() if schema_text is None else schema_text.strip()
+    content = system_prompt_text() + "\n\nGRAPH SCHEMA\n" + schema + "\n\n" + ACTION_RULES
     return {"role": "system", "content": content}
 
 
@@ -139,9 +155,11 @@ def _render_flow(flow: dict) -> str:
     if not nodes and not snippets:
         lines.append("  (no path nodes found in the graph)")
     for i, n in enumerate(nodes):
-        role = "source" if i == 0 else ("sink" if i == len(nodes) - 1 else "step")
+        # An explicit role (e.g. the single sink line orion.lm.sinks.annotate adds to a code-only case) wins;
+        # otherwise the role is positional: first = source, last = sink, middle = step.
+        role = n.get("role") or ("source" if i == 0 else ("sink" if i == len(nodes) - 1 else "step"))
         code = str(n.get("code") if n.get("code") is not None else "").replace("\n", " ")
-        lines.append(f"  [{role}] {_s(n.get('file'))}:{_s(n.get('line'))} in {_s(n.get('function'))}: "
+        lines.append(f"  [{_s(role)}] {_s(n.get('file'))}:{_s(n.get('line'))} in {_s(n.get('function'))}: "
                      f"{code_inline(code)}")
     for sn in snippets:
         lines.append(f"  [{_s(sn.get('role'))}] {_s(sn.get('file'))}:{_s(sn.get('start'))}-{_s(sn.get('end'))} "

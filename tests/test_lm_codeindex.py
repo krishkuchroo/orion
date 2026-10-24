@@ -42,6 +42,21 @@ def test_bad_minified_huge_test_and_vendored_files_never_crash(tmp_path):
     assert {"x.min.js", "tests/test_ok.py", "big.js"} <= set(idx.skipped)
 
 
+def test_minified_file_without_min_js_name_is_skipped(tmp_path):
+    """A bundle that is one huge line (e.g. ace/src-min-noconflict/ace.js) never becomes case context."""
+    idx = _idx(tmp_path, {"lib/ace.js": "function a(){" + "x();" * 1000 + "}\n",
+                          "ok.js": "function b(){\n  return 1\n}\n"})
+    assert "lib/ace.js" not in idx.files and "minified" in idx.skipped["lib/ace.js"]
+    assert "ok.js" in idx.files
+
+
+def test_update_with_minified_text_skips_the_file(tmp_path):
+    """The patched-side re-parse (`update`) applies the same rule as the walk."""
+    idx = _idx(tmp_path, {"ok.js": "function b(){\n  return 1\n}\n"})
+    idx.update("ok.js", "function b(){" + "x();" * 1000 + "}\n")
+    assert "ok.js" not in idx.files and "minified" in idx.skipped["ok.js"]
+
+
 def test_module_level_line_gets_module_window(tmp_path):
     """Review Focus 5: a top-level sink still has a target span."""
     idx = _idx(tmp_path, {"s.py": "import os\nos.system(input())\n"})

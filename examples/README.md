@@ -9,16 +9,14 @@ A live run against a real third-party TypeScript codebase Orion had never seen (
 `.tsx`, resolved to the Joern `jssrc` frontend). Scan id
 `69dd1f145c434646e9d435aecf42ddb74e5e28c5`, run `20260729T094502Z`.
 
-- **Graph:** 160,814 nodes / 339,405 edges, built in ~520s (see the timing lines at the top of
-  `report.log`).
+- **Graph:** 160,814 nodes / 339,405 edges, built in ~520s.
 - **Result:** 5 confirmed vulnerabilities, 1 correctly rejected as a false positive, 0 unresolved.
 
 | File | What it is |
 |------|------------|
-| `report.log` | The full human-readable run log: per-phase build timings, the live discovery/verify event stream, and the final ranked, evidence-cited report. Start here. |
 | `findings.json` | The verifier's structured verdicts from the first pass — 2 `CONFIRM`, 1 `REJECT`, 3 `ERROR`. |
 | `reverify.json` | The 3 `ERROR` leads re-run with a larger turn budget, all 3 → `CONFIRM`. |
-| `FINDINGS.md` | The detailed writeup: every vuln with file+line locations, the rejected-FP analysis, and the verifier-budget note. |
+| `FINDINGS.md` | The detailed writeup: every vuln with file+line locations, the rejected-FP analysis, and the verifier-budget note. Start here. |
 
 > Those first-pass `ERROR`s were a too-low default verify budget (10 turns), not real failures — the
 > complex 4-file RCE needed more turns to re-derive. That default has since been raised to 25 turns /
@@ -43,19 +41,5 @@ proved it was two *sequential* quantifiers (O(n²), not exponential) and that th
 path was contradicted by the code's own comments. The same verifier confirmed the structurally
 similar ReDoS in #5 — it discriminates, it doesn't rubber-stamp.
 
-> The raw per-event timeline (`progress.jsonl`) and the `scan.stderr.log` for this run are committed
-> in full on the `apex-testing` branch under `bench/runs/` and `.orion/runs/`.
-
-## NodeGoat (OWASP benchmark) — reproducible, not yet captured here
-
-The README's headline result is **14 of 15 vulnerabilities at zero false positives** on OWASP
-NodeGoat. That figure is produced by `scripts/run_nodegoat_eval.py`, scored against the ground truth
-in `tests/ground_truth_nodegoat.py` — but a saved copy of that eval's output is **not** committed
-yet (running it needs the NodeGoat fixture with a prebuilt `cpg.bin`, a running Neo4j, and Claude
-tokens). To regenerate and capture it:
-
-```bash
-./.venv/bin/python scripts/run_nodegoat_eval.py | tee examples/nodegoat/eval.log
-```
-
-Until that run is captured, the **apex** evidence above is the end-to-end proof that survives a clone.
+> The raw run log (`report.log`), the per-event timeline (`progress.jsonl`) and the `scan.stderr.log`
+> for this run are committed in full on the `apex-testing` branch under `bench/runs/` and `.orion/runs/`.
