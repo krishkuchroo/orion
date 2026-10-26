@@ -97,8 +97,19 @@ writes Cypher over the Joern→Neo4j graph and judges code vulnerable/safe; then
 `orion-lm` / `orion-lm-base` vs `plain-sonnet5` / `plain-opus5` / `plain-gpt` on the post-2026-05-31
 CVEs (vulnerable AND patched commits) + OWASP Benchmark as the false-alarm set.
 
-- **Current (2026-10-24): run C1 training on the Mac.** Base Qwen3.5-4B (`models/orion-lm-base`, 4-bit
-  MLX, text only); Unsloth's MLX trainer driven by `train/mlx_train.py` under `train/guard.py` (7 GB cap),
+- **Current (2026-10-26): C1 trained and merged; next is the dev bake-off.** Branch `train/merge-c1`
+  (pushed to `krish`, not merged to `main` yet). C1 finished 2026-10-24 17:15: 437 steps, 16 h, no stops;
+  dev eval loss 0.143 (step 100) -> 0.135 -> 0.135 -> 0.131 -> **0.1314** (final), train loss 0.23 -> 0.13;
+  process peak 8.1 GB. Adapter + 44 checkpoints (93 MB each) in `train/runs/qwen35-c1/` (local only;
+  back it up). Merged with `train.convert.merge_lora` -> `models/orion-lm` (3.4 GB): the 8 adapted
+  layers are bf16 dequant(W) + delta, unquantized, the rest copied from the base. **Never merge by
+  re-quantizing to 4-bit**: C1's change is ~3% of one 4-bit step, so it keeps only ~18% of the delta.
+  Checked: the merged model via `mlx_lm.load` scores 0.1315 on the trainer's 100 dev rows (eval_pick
+  seed 3407). `start_c1.sh` now uses a 9 GB cap (7 GB killed attempt 1 at step 19), saves every 10
+  steps, and resumes from the newest complete checkpoint by itself. Next: freeze sampling (temperature
+  0 or low, same for both arms), then rerun step 3's bakeoff on `models/orion-lm` vs `orion-lm-base`.
+- **C1 setup (2026-10-24).** Base Qwen3.5-4B (`models/orion-lm-base`, 4-bit
+  MLX, text only); Unsloth's MLX trainer driven by `train/mlx_train.py` under `train/guard.py` (9 GB cap),
   started with `bash train/start_c1.sh` (LoRA r16/alpha16, top 8 layers, 1 epoch, dev eval loss every 100
   steps, TensorBoard on :6006). Data: Stage 1 built (4,579 fixes, 17,086 examples; liferay's last 19
   pairs skipped by Krish), balanced export (`train/balance.py`: fix = vulnerable + patched twin + one
